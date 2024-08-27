@@ -124,8 +124,8 @@ int main(void)
 	flash_test();
 	if(sram_read_write_test() == 1)
 	{
-		my_mem_init(SRAMIN);		//初始化内部内存池
-		my_mem_init(SRAMEX);		//初始化外部内存池
+		// my_mem_init(SRAMIN);		//初始化内部内存池
+		// my_mem_init(SRAMEX);		//初始化外部内存池
 	}
 	fatfs_flash_test();
 	fatfs_flash_test2();
@@ -168,45 +168,45 @@ int main(void)
 	printf("clockTime:%d\r\n",param.clockTime);
 
 	//malloc
-	printf("\n\r=================malloc================\n\r");
-	printf ( "SRAMIN USED:%d%%\r\n", my_mem_perused(SRAMIN) );//显示内部内存使用率
-	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-	p1 = mymalloc ( sramx, 1024 * 16 );//申请2K字节
-	if(p1 == NULL)
-	{
-		printf("mymalloc error!,p1返回失败！\r\n");
-	}
-	else{
-		*(p1+0) = 548;
-		*(p1+1) = 1048;
-		*(p1+2) = 2048;
-		*(p1+3) = 3048;
-		*(p1+4) = 4048;
-		printf(" *(p1+0) = %d\n\r *(p1+1) = %d\n\r *(p1+2) = %d\n\r *(p1+3) = %d\n\r *(p1+4) = %d\n\r",*(p1+0),*(p1+1),*(p1+2),*(p1+3),*(p1+4));
-		printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-		myfree(sramx,p1);											//释放内存
-		printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-	}
-	p1=0;														//指向空地址
+	// printf("\n\r=================malloc================\n\r");
+	// printf ( "SRAMIN USED:%d%%\r\n", my_mem_perused(SRAMIN) );//显示内部内存使用率
+	// printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
+	// p1 = mymalloc ( sramx, 1024 * 16 );//申请2K字节
+	// if(p1 == NULL)
+	// {
+	// 	printf("mymalloc error!,p1返回失败！\r\n");
+	// }
+	// else{
+	// 	*(p1+0) = 548;
+	// 	*(p1+1) = 1048;
+	// 	*(p1+2) = 2048;
+	// 	*(p1+3) = 3048;
+	// 	*(p1+4) = 4048;
+	// 	printf(" *(p1+0) = %d\n\r *(p1+1) = %d\n\r *(p1+2) = %d\n\r *(p1+3) = %d\n\r *(p1+4) = %d\n\r",*(p1+0),*(p1+1),*(p1+2),*(p1+3),*(p1+4));
+	// 	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
+	// 	myfree(sramx,p1);											//释放内存
+	// 	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
+	// }
+	// p1=0;														//指向空地址
 
 	//截图相关函数，截图时间较慢 ,尽量减小jpg大小
 	//用来设置截图名字，防止重复，实际应用中可以使用系统时间来命名。
-//	snipaste_name_count++; 
-//	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
+	snipaste_name_count++; 
+	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
 
-//	printf("\r\n正在截图...");	
-//	/*截图必需设置好液晶显示方向和截图窗口*/
-//	ILI9806G_GramScan(LCD_SCAN_MODE);			
-//	
-//	if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
-//	{
-//		printf("\r\n截图成功！");
-//	}
-//	else
-//	{
-//		printf("\r\n截图失败！");
-//	}
-//	f_mount(NULL,"0:",1);
+	printf("\r\n正在截图...");	
+	/*截图必需设置好液晶显示方向和截图窗口*/
+	ILI9806G_GramScan(LCD_SCAN_MODE);			
+	
+	if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
+	{
+		printf("\r\n截图成功！");
+	}
+	else
+	{
+		printf("\r\n截图失败！");
+	}
+	f_mount(NULL,"0:",1);
 	
 	BASIC_TIM6_Configuration(8400-1, 999); 			//周期：1ms
 	BASIC_TIM7_InitConfiguration(8400-1, 1); 		//周期：1s
