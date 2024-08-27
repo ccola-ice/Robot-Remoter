@@ -74,8 +74,8 @@ extern FIL fnew_sdcard;				/* 文件对象 */
 extern FRESULT res;                	/* 文件操作结果 */
 extern unsigned int fnum;			/* 文件成功读写数量 */
 
-u32 *p1=0;
-u8 sramx=1;			//0:内部SRAM 1:外部SRAM
+uint32_t *p1=0;
+uint8_t sramx=1;			//0:内部SRAM 1:外部SRAM
 
 int main(void)
 {
@@ -139,10 +139,9 @@ int main(void)
 		printf("\r\n请给开发板插入已格式化成fat格式的SD卡。\r\n");
 	}
 	LCD_Show_BMP(0,0,"0:Pictures/football.bmp"); //srcdata/Picture/football.bmp
-	Delay_ms(1500);
+	Delay_ms(1000);
 	jpgDisplay("0:Pictures/musicplayer.jpg");
-	Delay_ms(1500);
-	
+	Delay_ms(1000);
 	
 	//NMEA解码数据显示初始化准备
 	nmea_decode_init();
@@ -173,19 +172,24 @@ int main(void)
 	printf ( "SRAMIN USED:%d%%\r\n", my_mem_perused(SRAMIN) );//显示内部内存使用率
 	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
 	p1 = mymalloc ( sramx, 1024 * 16 );//申请2K字节
-	*(p1+0) = 548;
-	*(p1+1) = 1048;
-	*(p1+2) = 2048;
-	*(p1+3) = 3048;
-	*(p1+4) = 4048;
-	printf(" *(p1+0) = %d\n\r *(p1+1) = %d\n\r *(p1+2) = %d\n\r *(p1+3) = %d\n\r *(p1+4) = %d\n\r",*(p1+0),*(p1+1),*(p1+2),*(p1+3),*(p1+4));
-	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-	myfree(sramx,p1);											//释放内存
-	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
+	if(p1 == NULL)
+	{
+		printf("mymalloc error!,p1返回失败！\r\n");
+	}
+	else{
+		*(p1+0) = 548;
+		*(p1+1) = 1048;
+		*(p1+2) = 2048;
+		*(p1+3) = 3048;
+		*(p1+4) = 4048;
+		printf(" *(p1+0) = %d\n\r *(p1+1) = %d\n\r *(p1+2) = %d\n\r *(p1+3) = %d\n\r *(p1+4) = %d\n\r",*(p1+0),*(p1+1),*(p1+2),*(p1+3),*(p1+4));
+		printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
+		myfree(sramx,p1);											//释放内存
+		printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
+	}
 	p1=0;														//指向空地址
 
 	//截图相关函数，截图时间较慢 ,尽量减小jpg大小
-
 	//用来设置截图名字，防止重复，实际应用中可以使用系统时间来命名。
 //	snipaste_name_count++; 
 //	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
