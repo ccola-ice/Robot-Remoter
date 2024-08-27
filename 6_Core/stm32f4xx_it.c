@@ -346,10 +346,10 @@ void BASIC_TIM_IRQHandler(void)
 //定时器7中断服务函数：
 void GENERAL_TIM7_IRQHandler(void)
 {
-	if(TIM_GetITStatus(GENERAL_TIM7, TIM_IT_Update) != RESET ) 
+	if(TIM_GetITStatus(BASIC_TIM7, TIM_IT_Update) != RESET ) 
 	{
-		menu_button_set();
-        TIM_ClearITPendingBit(GENERAL_TIM7,TIM_IT_Update);  		 
+		  menu_button_set();
+      TIM_ClearITPendingBit(BASIC_TIM7,TIM_IT_Update);  		 
 	}		 	
 }
 

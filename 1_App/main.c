@@ -208,12 +208,12 @@ int main(void)
 //	}
 //	f_mount(NULL,"0:",1);
 	
-	BASIC_TIM6_Configuration(10000-1,8400-1);
-	GENERAL_TIM2_InitConfiguration(10000-1,600-1);
-	GENERAL_TIM4_InitConfiguration(10000-1,16800-1);
-	GENERAL_TIM5_InitConfiguration(840-1,10-1);		//周期：1ms
-	GENERAL_TIM7_InitConfiguration(840-1,10-1); 	//周期：1s
-	GENERAL_TIM3_InitConfiguration(10000-1,168-1);
+	BASIC_TIM6_Configuration(8400-1, 999); 			//周期：1ms
+	BASIC_TIM7_InitConfiguration(8400-1, 1); 		//周期：1s
+	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：100ms
+	GENERAL_TIM3_InitConfiguration(10000-1,168-1);	//周期：50ms
+	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：10ms
+	GENERAL_TIM5_InitConfiguration(8400-1, 999);	//周期：1ms
 	printf("\r\n***************************定时器初始化完成***********************************\r\n");
 	
     while(1)

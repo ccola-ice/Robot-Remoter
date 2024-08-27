@@ -5,11 +5,11 @@
   * @param  无
   * @retval 无
   */
-static void GENERAL_TIM7_NVIC_Configuration(void)
+static void BASIC_TIM7_NVIC_Configuration(void)
 {
     NVIC_InitTypeDef NVIC_InitStructure; 
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_0);	// 设置中断组为0		
-    NVIC_InitStructure.NVIC_IRQChannel = GENERAL_TIM7_IRQn;// 设置中断来源 		
+    NVIC_InitStructure.NVIC_IRQChannel = BASIC_TIM7_IRQn;// 设置中断来源 		
     NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;// 设置抢占优先级	   
     NVIC_InitStructure.NVIC_IRQChannelSubPriority = 2;// 设置子优先级	
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
@@ -28,12 +28,12 @@ static void GENERAL_TIM7_NVIC_Configuration(void)
  * TIM_RepetitionCounter TIMx,x[1,8]才有(高级定时器)
  *-----------------------------------------------------------------------------
  */
-static void GENERAL_TIM7_Mode_Config(uint16_t arr,uint16_t psc)
+static void BASIC_TIM7_Mode_Config(uint16_t arr,uint16_t psc)
 {
 	TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
 
 	// 开启TIMx_CLK,x[6,7] 
-    RCC_APB1PeriphClockCmd(GENERAL_TIM7_CLK, ENABLE); 
+    RCC_APB1PeriphClockCmd(BASIC_TIM7_CLK, ENABLE); 
 
     /* 累计 TIM_Period个后产生一个更新或者中断*/		
     //当定时器从0计数到4999，即为5000次，为一个定时周期
@@ -44,16 +44,16 @@ static void GENERAL_TIM7_Mode_Config(uint16_t arr,uint16_t psc)
     TIM_TimeBaseStructure.TIM_Prescaler = psc;  //8400-1;	
 
     // 初始化定时器TIMx, x[1,8]
-    TIM_TimeBaseInit(GENERAL_TIM7, &TIM_TimeBaseStructure);
+    TIM_TimeBaseInit(BASIC_TIM7, &TIM_TimeBaseStructure);
     
     // 清除定时器更新中断标志位
-    TIM_ClearFlag(GENERAL_TIM7, TIM_FLAG_Update);
+    TIM_ClearFlag(BASIC_TIM7, TIM_FLAG_Update);
 
     // 开启定时器更新中断
-    TIM_ITConfig(GENERAL_TIM7,TIM_IT_Update,ENABLE);
+    TIM_ITConfig(BASIC_TIM7,TIM_IT_Update,ENABLE);
 
     // 使能定时器
-    TIM_Cmd(GENERAL_TIM7, ENABLE);	
+    TIM_Cmd(BASIC_TIM7, ENABLE);	
 }
 
 /**
@@ -61,10 +61,10 @@ static void GENERAL_TIM7_Mode_Config(uint16_t arr,uint16_t psc)
   * @param  无
   * @retval 无
   */
-void GENERAL_TIM7_InitConfiguration(uint16_t arr,uint16_t psc)
+void BASIC_TIM7_InitConfiguration(uint16_t arr,uint16_t psc)
 {
-    GENERAL_TIM7_Mode_Config(arr,psc);
-	GENERAL_TIM7_NVIC_Configuration();	
+    BASIC_TIM7_Mode_Config(arr,psc);
+	  BASIC_TIM7_NVIC_Configuration();	
 }
 
 
