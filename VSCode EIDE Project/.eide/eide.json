@@ -1,0 +1,658 @@
+{
+  "name": "Remoter",
+  "type": "ARM",
+  "dependenceList": [],
+  "srcDirs": [],
+  "virtualFolder": {
+    "name": "<virtual_root>",
+    "files": [],
+    "folders": [
+      {
+        "name": "App",
+        "files": [
+          {
+            "path": "../1_App/main.c"
+          },
+          {
+            "path": "../1_App/gui.c"
+          },
+          {
+            "path": "../1_App/menu.c"
+          },
+          {
+            "path": "../1_App/param.c"
+          }
+        ],
+        "folders": []
+      },
+      {
+        "name": "Test",
+        "files": [
+          {
+            "path": "../7_Test/EEPROM_test.c"
+          },
+          {
+            "path": "../7_Test/FLASH_test.c"
+          },
+          {
+            "path": "../7_Test/SDCARD_test.c"
+          },
+          {
+            "path": "../7_Test/SRAM_test.c"
+          },
+          {
+            "path": "../7_Test/LCD_test.c"
+          },
+          {
+            "path": "../7_Test/nmea_decode_test.c"
+          }
+        ],
+        "folders": []
+      },
+      {
+        "name": "Platforn",
+        "files": [
+          {
+            "path": "../2_Platform/platform_nrf.c"
+          },
+          {
+            "path": "../2_Platform/platform_io.c"
+          },
+          {
+            "path": "../2_Platform/platform_mpu.c"
+          },
+          {
+            "path": "../2_Platform/platform_sdcard.c"
+          }
+        ],
+        "folders": []
+      },
+      {
+        "name": "Middleware",
+        "files": [],
+        "folders": [
+          {
+            "name": "MPU6050",
+            "files": [],
+            "folders": [
+              {
+                "name": "eMPL",
+                "files": [
+                  {
+                    "path": "../5_Middleware/MPU6050/eMPL/inv_mpu.c"
+                  },
+                  {
+                    "path": "../5_Middleware/MPU6050/eMPL/inv_mpu_dmp_motion_driver.c"
+                  }
+                ],
+                "folders": []
+              }
+            ]
+          },
+          {
+            "name": "MultiButton",
+            "files": [
+              {
+                "path": "../5_Middleware/MultiButton/multi_button.c"
+              },
+              {
+                "path": "../5_Middleware/MultiButton/multi_button_user.c"
+              }
+            ],
+            "folders": []
+          },
+          {
+            "name": "uGUI",
+            "files": [
+              {
+                "path": "../5_Middleware/uGUI/ugui.c"
+              }
+            ],
+            "folders": []
+          },
+          {
+            "name": "Malloc",
+            "files": [
+              {
+                "path": "../5_Middleware/Malloc/malloc.c"
+              }
+            ],
+            "folders": []
+          },
+          {
+            "name": "jpgLib",
+            "files": [
+              {
+                "path": "../5_Middleware/tjpgd/src/jpgPort.c"
+              },
+              {
+                "path": "../5_Middleware/tjpgd/src/tjpgd.c"
+              }
+            ],
+            "folders": []
+          }
+        ]
+      },
+      {
+        "name": "Protocal",
+        "files": [],
+        "folders": [
+          {
+            "name": "FatFs",
+            "files": [
+              {
+                "path": "../3_Protocol/FatFs/cc936.c"
+              },
+              {
+                "path": "../3_Protocol/FatFs/diskio.c"
+              },
+              {
+                "path": "../3_Protocol/FatFs/ff.c"
+              },
+              {
+                "path": "../3_Protocol/FatFs/FATFS_SDCARD_test.c"
+              },
+              {
+                "path": "../3_Protocol/FatFs/FATFS_FLASH_test.c"
+              }
+            ],
+            "folders": []
+          },
+          {
+            "name": "nmealib",
+            "files": [
+              {
+                "path": "../3_Protocol/nmea_decode/src/context.c"
+              },
+              {
+                "path": "../3_Protocol/nmea_decode/src/generate.c"
+              },
+              {
+                "path": "../3_Protocol/nmea_decode/src/generator.c"
+              },
+              {
+                "path": "../3_Protocol/nmea_decode/src/gmath.c"
+              },
+              {
+                "path": "../3_Protocol/nmea_decode/src/info.c"
+              },
+              {
+                "path": "../3_Protocol/nmea_decode/src/parse.c"
+              },
+              {
+                "path": "../3_Protocol/nmea_decode/src/parser.c"
+              },
+              {
+                "path": "../3_Protocol/nmea_decode/src/sentence.c"
+              },
+              {
+                "path": "../3_Protocol/nmea_decode/src/time.c"
+              },
+              {
+                "path": "../3_Protocol/nmea_decode/src/tok.c"
+              }
+            ],
+            "folders": []
+          }
+        ]
+      },
+      {
+        "name": "ModuleDrivers",
+        "files": [
+          {
+            "path": "../5_ModuleDrivers/bsp_gpio_led.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_gpio_button.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_gpio_stick.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_usart_debug.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_usart_gps.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_usart_extra.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_spi_flash.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_spi_nrf.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_i2c_eeprom.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_i2c_touch.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_i2c_mpu6050.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_mpu6050.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_mpu6050_exti.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_adc1_independent_dual.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_adc3_independent_dual.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_general_tim2.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_general_tim3.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_general_tim4.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_general_tim5.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_basic_tim6.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_basic_tim7.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_sdio_sd.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_fsmc_sram.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_fsmc_lcd.c"
+          },
+          {
+            "path": "../5_ModuleDrivers/bsp_bmp.c"
+          }
+        ],
+        "folders": [
+          {
+            "name": "Fonts",
+            "files": [
+              {
+                "path": "../5_ModuleDrivers/fonts/fonts.c"
+              }
+            ],
+            "folders": []
+          },
+          {
+            "name": "touch",
+            "files": [
+              {
+                "path": "../5_ModuleDrivers/touch/gt9xx.c"
+              },
+              {
+                "path": "../5_ModuleDrivers/touch/palette.c"
+              }
+            ],
+            "folders": []
+          }
+        ]
+      },
+      {
+        "name": "SystemDrivers",
+        "files": [
+          {
+            "path": "../5_SystemDrivers/bsp_SysTick.c"
+          },
+          {
+            "path": "../5_SystemDrivers/bsp_exti.c"
+          },
+          {
+            "path": "../5_SystemDrivers/bsp_rcc.c"
+          },
+          {
+            "path": "../5_SystemDrivers/bsp_rtc.c"
+          }
+        ],
+        "folders": []
+      },
+      {
+        "name": "Libraries",
+        "files": [
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/misc.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_adc.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_can.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_crc.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_dac.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_dbgmcu.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_dma.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_dma2d.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_exti.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_flash.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_flash_ramfunc.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_fmpi2c.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_fsmc.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_gpio.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_i2c.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_iwdg.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_lptim.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_pwr.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_rcc.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_rtc.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_sdio.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_spdifrx.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_spi.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_syscfg.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_tim.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_usart.c"
+          },
+          {
+            "path": "../4_Libraries/STM32F4xx_StdPeriph_Driver/src/stm32f4xx_wwdg.c"
+          }
+        ],
+        "folders": []
+      },
+      {
+        "name": "Core",
+        "files": [
+          {
+            "path": "../6_Core/startup_stm32f40xx.s"
+          },
+          {
+            "path": "../6_Core/stm32f4xx_conf.h"
+          },
+          {
+            "path": "../6_Core/stm32f4xx_it.c"
+          },
+          {
+            "path": "../6_Core/system_stm32f4xx.c"
+          },
+          {
+            "path": "../6_Core/common.c"
+          }
+        ],
+        "folders": []
+      }
+    ]
+  },
+  "outDir": "build",
+  "deviceName": "STM32F407ZGTx",
+  "packDir": ".pack/Keil/STM32F4xx_DFP.2.16.0",
+  "miscInfo": {
+    "uid": "ccb31777908913dd04e9d5daefa61fcf"
+  },
+  "targets": {
+    "Remoter": {
+      "excludeList": [],
+      "toolchain": "AC5",
+      "compileConfig": {
+        "cpuType": "Cortex-M4",
+        "floatingPointHardware": "single",
+        "scatterFilePath": "",
+        "useCustomScatterFile": false,
+        "storageLayout": {
+          "RAM": [
+            {
+              "tag": "RAM",
+              "id": 1,
+              "mem": {
+                "startAddr": "0x0",
+                "size": "0x0"
+              },
+              "isChecked": false,
+              "noInit": false
+            },
+            {
+              "tag": "RAM",
+              "id": 2,
+              "mem": {
+                "startAddr": "0x0",
+                "size": "0x0"
+              },
+              "isChecked": false,
+              "noInit": false
+            },
+            {
+              "tag": "RAM",
+              "id": 3,
+              "mem": {
+                "startAddr": "0x0",
+                "size": "0x0"
+              },
+              "isChecked": false,
+              "noInit": false
+            },
+            {
+              "tag": "IRAM",
+              "id": 1,
+              "mem": {
+                "startAddr": "0x20000000",
+                "size": "0x20000"
+              },
+              "isChecked": true,
+              "noInit": false
+            },
+            {
+              "tag": "IRAM",
+              "id": 2,
+              "mem": {
+                "startAddr": "0x10000000",
+                "size": "0x10000"
+              },
+              "isChecked": false,
+              "noInit": false
+            }
+          ],
+          "ROM": [
+            {
+              "tag": "ROM",
+              "id": 1,
+              "mem": {
+                "startAddr": "0x0",
+                "size": "0x0"
+              },
+              "isChecked": false,
+              "isStartup": false
+            },
+            {
+              "tag": "ROM",
+              "id": 2,
+              "mem": {
+                "startAddr": "0x0",
+                "size": "0x0"
+              },
+              "isChecked": false,
+              "isStartup": false
+            },
+            {
+              "tag": "ROM",
+              "id": 3,
+              "mem": {
+                "startAddr": "0x0",
+                "size": "0x0"
+              },
+              "isChecked": false,
+              "isStartup": false
+            },
+            {
+              "tag": "IROM",
+              "id": 1,
+              "mem": {
+                "startAddr": "0x8000000",
+                "size": "0x100000"
+              },
+              "isChecked": true,
+              "isStartup": true
+            },
+            {
+              "tag": "IROM",
+              "id": 2,
+              "mem": {
+                "startAddr": "0x0",
+                "size": "0x0"
+              },
+              "isChecked": false,
+              "isStartup": false
+            }
+          ]
+        },
+        "options": "null"
+      },
+      "uploader": "STLink",
+      "uploadConfig": {
+        "bin": "",
+        "proType": "SWD",
+        "resetMode": "default",
+        "runAfterProgram": true,
+        "speed": 4000,
+        "address": "0x8000000",
+        "elFile": "None",
+        "optionBytes": ".eide/remoter.st.option.bytes.ini",
+        "otherCmds": ""
+      },
+      "uploadConfigMap": {
+        "JLink": {
+          "bin": "",
+          "baseAddr": "",
+          "cpuInfo": {
+            "vendor": "null",
+            "cpuName": "null"
+          },
+          "proType": 1,
+          "speed": 8000,
+          "otherCmds": ""
+        }
+      },
+      "custom_dep": {
+        "name": "default",
+        "incList": [
+          ".",
+          "../4_Libraries/CMSIS/Device/ST/STM32F4xx/Include",
+          "../4_Libraries/CMSIS/Include",
+          "../4_Libraries/STM32F4xx_StdPeriph_Driver/inc",
+          "../1_App",
+          "../7_Test",
+          "../2_Platform",
+          "../3_Protocol/FatFs",
+          "../3_Protocol/nmea_decode/include",
+          "../5_Middleware/MPU6050/eMPL",
+          "../5_Middleware/MultiButton",
+          "../5_Middleware/uGUI",
+          "../5_Middleware/Malloc",
+          "../5_ModuleDrivers",
+          "../5_ModuleDrivers/fonts",
+          "../5_ModuleDrivers/touch",
+          "../5_SystemDrivers",
+          "../6_Core",
+          "../5_Middleware/tjpgd/src",
+          ".cmsis/include",
+          "../MDK Project/RTE/_Remoter"
+        ],
+        "libList": [],
+        "defineList": [
+          "USE_STDPERIPH_DRIVER",
+          "STM32F40_41xxx",
+          "USE_DMP",
+          "MPL_LOG_NDEBUG=1",
+          "EMPL",
+          "MPU6050",
+          "EMPL_TARGET_STM32F4",
+          "STM32F407xx"
+        ]
+      },
+      "builderOptions": {
+        "AC5": {
+          "version": 4,
+          "beforeBuildTasks": [
+            {
+              "name": "prebuild task 1",
+              "disable": false,
+              "abortAfterFailed": false,
+              "stopBuildAfterFailed": true,
+              "command": "echo \"project name: ${ProjectName}\""
+            }
+          ],
+          "afterBuildTasks": [
+            {
+              "name": "postbuild task 1",
+              "disable": false,
+              "abortAfterFailed": false,
+              "command": "echo \"firmware: ${OutDir}/${ProjectName}.hex\""
+            }
+          ],
+          "global": {
+            "use-microLIB": true,
+            "output-debug-info": "enable"
+          },
+          "c/cpp-compiler": {
+            "optimization": "level-1",
+            "one-elf-section-per-function": true,
+            "c99-mode": true,
+            "C_FLAGS": "--diag_suppress=1 --diag_suppress=1295",
+            "CXX_FLAGS": "--diag_suppress=1 --diag_suppress=1295",
+            "warnings": "unspecified"
+          },
+          "asm-compiler": {},
+          "linker": {
+            "output-format": "elf",
+            "ro-base": "0x08000000",
+            "rw-base": "0x20000000"
+          }
+        }
+      }
+    }
+  },
+  "version": "3.5"
+}
