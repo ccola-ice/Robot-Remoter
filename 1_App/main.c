@@ -184,7 +184,7 @@ int main(void)
 	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
 	p1=0;														//指向空地址
 
-	//截图相关函数，截图时间较慢
+	//截图相关函数，截图时间较慢 ,尽量减小jpg大小
 
 	//用来设置截图名字，防止重复，实际应用中可以使用系统时间来命名。
 //	snipaste_name_count++; 
