@@ -1,5 +1,4 @@
-// #include "malloc.h"	    
-
+#include "malloc.h"	    
 
 
 // //ÄÚ´æ³Ø(32×Ö½Ú¶ÔÆë)
