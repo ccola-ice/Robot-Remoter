@@ -218,32 +218,8 @@ int main(void)
 	
     while(1)
     {
-		if(Task_Delay[0] == 0)
-		{
-			LED1_TOGGLE;
-			LED2_TOGGLE;
-			Task_Delay[0]=100;
-			//nmea_decode_test();
-		}
-		
-		if(Task_Delay[1] == 0)
-		{	
-			
-			Task_Delay[1]=200;
-		}
-		
-		if(Task_Delay[2] == 0)
-		{
-			
-			
-			Task_Delay[2]=300;
-		}
-		
-		if(Task_Delay[3] == 0)
-		{
-			UG_Update();
-			Task_Delay[3]=400;
-		}
+		//nmea_decode_test();
+		//UG_Update();
 	}
 }
 

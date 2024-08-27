@@ -30,7 +30,7 @@ Menu_table table[100] =
 void menu_button_set(void)
 {
     Get_button_left 	=   BUTTON_Scan(BUTTON_LEFT_GPIO_PORT,BUTTON_LEFT_PIN);
-    Get_button_right    =   BUTTON_Scan(BUTTON_RIGHT_GPIO_PORT,BUTTON_RIGHT_PIN);
+    Get_button_right  =   BUTTON_Scan(BUTTON_RIGHT_GPIO_PORT,BUTTON_RIGHT_PIN);
     Get_button_ok 		=   BUTTON_Scan(BUTTON_OK_GPIO_PORT,BUTTON_OK_PIN);
     Get_button_back 	=   BUTTON_Scan(BUTTON_BACK_GPIO_PORT,BUTTON_BACK_PIN);
 		

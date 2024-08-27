@@ -59,7 +59,7 @@ extern void TimingDelay_Decrement(void);
 extern void TimeStamp_Increment(void);
 
 unsigned int button_hearttick;
-unsigned int Task_Delay[NumOfTask];
+
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
 extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 
@@ -177,17 +177,8 @@ void PendSV_Handler(void)
   */
 void SysTick_Handler(void)
 {
-	unsigned char i;
     TimingDelay_Decrement();
-	//TimeStamp_Increment();
-	
-	for(i=0;i<NumOfTask;i++)
-	{
-		if(Task_Delay[i])
-		{
-			Task_Delay[i]--;
-		}
-	}
+	  //TimeStamp_Increment();
 }
 
 /******************************************************************************/
@@ -201,8 +192,8 @@ void DEBUG_USART_IRQHandler(void)
     uint8_t ucTemp;
 	if(USART_GetITStatus(DEBUG_USART,USART_IT_RXNE)!=RESET)
 	{		
-		ucTemp = USART_ReceiveData( DEBUG_USART );
-        USART_SendData(DEBUG_USART,ucTemp);    
+		  ucTemp = USART_ReceiveData( DEBUG_USART );
+      USART_SendData(DEBUG_USART,ucTemp);    
 	}	 
 }
 
@@ -211,17 +202,15 @@ void EXPAND_USART_IRQHandler(void)
     uint8_t ucTemp;
 	if(USART_GetITStatus(EXPAND_USART,USART_IT_RXNE)!=RESET)
 	{		
-		ucTemp = USART_ReceiveData( EXPAND_USART );
-        USART_SendData(EXPAND_USART,ucTemp);    
+		  ucTemp = USART_ReceiveData( EXPAND_USART );
+      USART_SendData(EXPAND_USART,ucTemp);    
 	}	 
 }
 
 void MPU_IRQHandler(void)
 {
-	
 	if(EXTI_GetITStatus(MPU_INT_EXTI_LINE) != RESET) //
 	{
-		
 		EXTI_ClearITPendingBit(MPU_INT_EXTI_LINE);   //
 	}  
 }
@@ -231,23 +220,23 @@ void GENERAL_TIM2_IRQHandler(void)
 {
 	if(TIM_GetITStatus(GENERAL_TIM2,TIM_IT_Update) != RESET ) 
 	{
-		ADC_Value1_High  = (ADC1_Value[0]>>8)&0xFF;
+		    ADC_Value1_High  = (ADC1_Value[0]>>8)&0xFF;
         ADC_Value1_Low   =  ADC1_Value[0]&0xFF;
         ADC_Value2_High  = (ADC1_Value[1]>>8)&0xFF;
         ADC_Value2_Low   =  ADC1_Value[1]&0xFF;
-		ADC_Value3_High  = (ADC1_Value[2]>>8)&0xFF;
+		    ADC_Value3_High  = (ADC1_Value[2]>>8)&0xFF;
         ADC_Value3_Low   =  ADC1_Value[2]&0xFF;
         ADC_Value4_High  = (ADC1_Value[3]>>8)&0xFF;
         ADC_Value4_Low   =  ADC1_Value[3]&0xFF;
-		ADC_Value5_High  = (ADC1_Value[4]>>8)&0xFF;
+		    ADC_Value5_High  = (ADC1_Value[4]>>8)&0xFF;
         ADC_Value5_Low   =  ADC1_Value[4]&0xFF;
         ADC_Value6_High  = (ADC1_Value[5]>>8)&0xFF;
         ADC_Value6_Low   =  ADC1_Value[5]&0xFF;
-		ADC_Value7_High  = (ADC1_Value[6]>>8)&0xFF;
+		    ADC_Value7_High  = (ADC1_Value[6]>>8)&0xFF;
         ADC_Value7_Low   =  ADC1_Value[6]&0xFF;
         ADC_Value8_High  = (ADC3_Value[0]>>8)&0xFF;
         ADC_Value8_Low   =  ADC3_Value[0]&0xFF;
-		ADC_Value9_High  = (ADC3_Value[1]>>8)&0xFF;
+		    ADC_Value9_High  = (ADC3_Value[1]>>8)&0xFF;
         ADC_Value9_Low   =  ADC3_Value[1]&0xFF;
         ADC_Value10_High = (ADC3_Value[2]>>8)&0xFF;
         ADC_Value10_Low  =  ADC3_Value[2]&0xFF;
@@ -258,22 +247,22 @@ void GENERAL_TIM2_IRQHandler(void)
         txbuf[3]  = ADC_Value2_Low;
         txbuf[4]  = ADC_Value3_High;
         txbuf[5]  = ADC_Value3_Low;			
-		txbuf[6]  = ADC_Value4_High;
+		    txbuf[6]  = ADC_Value4_High;
         txbuf[7]  = ADC_Value4_Low;
         txbuf[8]  = ADC_Value5_High;
         txbuf[9]  = ADC_Value5_Low;
         txbuf[10] = ADC_Value6_High;
         txbuf[11] = ADC_Value6_Low;
-		txbuf[12] = ADC_Value7_High;
+		    txbuf[12] = ADC_Value7_High;
         txbuf[13] = ADC_Value7_Low;
-		txbuf[14] = ADC_Value8_High;
+		    txbuf[14] = ADC_Value8_High;
         txbuf[15] = ADC_Value8_Low;
         txbuf[16] = ADC_Value9_High;
         txbuf[17] = ADC_Value9_Low;
-		txbuf[18] = ADC_Value10_High;
+		    txbuf[18] = ADC_Value10_High;
         txbuf[19] = ADC_Value10_Low;
 		
-		//nrf24l01_send();
+		    //nrf24l01_send();
         
         TIM_ClearITPendingBit(GENERAL_TIM2,TIM_IT_Update);  		 
 	}		 	
@@ -284,7 +273,6 @@ void GENERAL_TIM3_IRQHandler(void)
 {
 	if(TIM_GetITStatus(GENERAL_TIM3,TIM_IT_Update) != RESET ) 
 	{	
-
 		printf("stick1 %d\n\r",STICK_Scan(STICK1_GPIO_PORT,STICK1_PIN));
 		printf("stick2 %d\n\r",STICK_Scan(STICK2_GPIO_PORT,STICK2_PIN));
 		printf("stick3 %d\n\r",STICK_Scan(STICK3_GPIO_PORT,STICK3_PIN));
@@ -300,7 +288,6 @@ void GENERAL_TIM3_IRQHandler(void)
 //		printf("ADC9_Value:%d\r\n ", ADC3_Value[1]);
 //		printf("ADC10_Value:%d\r\n", ADC3_Value[2]);
 //		printf("\r\n");
-    
 	}
 	TIM_ClearITPendingBit(GENERAL_TIM3,TIM_IT_Update);  		  	
 }
