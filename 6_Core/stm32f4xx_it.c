@@ -201,150 +201,130 @@ void SysTick_Handler(void)
 /******************************************************************************/
 void DEBUG_USART_IRQHandler(void)
 {
-    uint8_t ucTemp;
-	if(USART_GetITStatus(DEBUG_USART,USART_IT_RXNE)!=RESET)
-	{		
-		  ucTemp = USART_ReceiveData( DEBUG_USART );
-      USART_SendData(DEBUG_USART,ucTemp);    
-	}	 
+  uint8_t ucTemp;
+  if (USART_GetITStatus(DEBUG_USART, USART_IT_RXNE) != RESET)
+  {
+    ucTemp = USART_ReceiveData(DEBUG_USART);
+    USART_SendData(DEBUG_USART, ucTemp);
+  }
 }
 
 void EXPAND_USART_IRQHandler(void)
 {
-    uint8_t ucTemp;
-	if(USART_GetITStatus(EXPAND_USART,USART_IT_RXNE)!=RESET)
-	{		
-		  ucTemp = USART_ReceiveData( EXPAND_USART );
-      USART_SendData(EXPAND_USART,ucTemp);    
-	}	 
+  uint8_t ucTemp;
+  if (USART_GetITStatus(EXPAND_USART, USART_IT_RXNE) != RESET)
+  {
+    ucTemp = USART_ReceiveData(EXPAND_USART);
+    USART_SendData(EXPAND_USART, ucTemp);
+  }
 }
 
 void MPU_IRQHandler(void)
 {
-	if(EXTI_GetITStatus(MPU_INT_EXTI_LINE) != RESET) //
-	{
+  if (EXTI_GetITStatus(MPU_INT_EXTI_LINE) != RESET) //
+  {
     LED1_TOGGLE;
     EXTI_ClearITPendingBit(MPU_INT_EXTI_LINE); //
-  }  
+  }
 }
 
-//定时器2中断服务函数：
+// 定时器2中断服务函数：
 void GENERAL_TIM2_IRQHandler(void)
 {
-	if(TIM_GetITStatus(GENERAL_TIM2,TIM_IT_Update) != RESET ) 
-	{
-		    ADC_Value1_High  = (ADC1_Value[0]>>8)&0xFF;
-        ADC_Value1_Low   =  ADC1_Value[0]&0xFF;
-        ADC_Value2_High  = (ADC1_Value[1]>>8)&0xFF;
-        ADC_Value2_Low   =  ADC1_Value[1]&0xFF;
-		    ADC_Value3_High  = (ADC1_Value[2]>>8)&0xFF;
-        ADC_Value3_Low   =  ADC1_Value[2]&0xFF;
-        ADC_Value4_High  = (ADC1_Value[3]>>8)&0xFF;
-        ADC_Value4_Low   =  ADC1_Value[3]&0xFF;
-		    ADC_Value5_High  = (ADC1_Value[4]>>8)&0xFF;
-        ADC_Value5_Low   =  ADC1_Value[4]&0xFF;
-        ADC_Value6_High  = (ADC1_Value[5]>>8)&0xFF;
-        ADC_Value6_Low   =  ADC1_Value[5]&0xFF;
-		    ADC_Value7_High  = (ADC1_Value[6]>>8)&0xFF;
-        ADC_Value7_Low   =  ADC1_Value[6]&0xFF;
-        ADC_Value8_High  = (ADC3_Value[0]>>8)&0xFF;
-        ADC_Value8_Low   =  ADC3_Value[0]&0xFF;
-		    ADC_Value9_High  = (ADC3_Value[1]>>8)&0xFF;
-        ADC_Value9_Low   =  ADC3_Value[1]&0xFF;
-        ADC_Value10_High = (ADC3_Value[2]>>8)&0xFF;
-        ADC_Value10_Low  =  ADC3_Value[2]&0xFF;
+  if (TIM_GetITStatus(GENERAL_TIM2, TIM_IT_Update) != RESET)
+  {
+    ADC_Value1_High = (ADC1_Value[0] >> 8) & 0xFF;
+    ADC_Value1_Low = ADC1_Value[0] & 0xFF;
+    ADC_Value2_High = (ADC1_Value[1] >> 8) & 0xFF;
+    ADC_Value2_Low = ADC1_Value[1] & 0xFF;
+    ADC_Value3_High = (ADC1_Value[2] >> 8) & 0xFF;
+    ADC_Value3_Low = ADC1_Value[2] & 0xFF;
+    ADC_Value4_High = (ADC1_Value[3] >> 8) & 0xFF;
+    ADC_Value4_Low = ADC1_Value[3] & 0xFF;
+    ADC_Value5_High = (ADC1_Value[4] >> 8) & 0xFF;
+    ADC_Value5_Low = ADC1_Value[4] & 0xFF;
+    ADC_Value6_High = (ADC1_Value[5] >> 8) & 0xFF;
+    ADC_Value6_Low = ADC1_Value[5] & 0xFF;
+    ADC_Value7_High = (ADC1_Value[6] >> 8) & 0xFF;
+    ADC_Value7_Low = ADC1_Value[6] & 0xFF;
+    ADC_Value8_High = (ADC3_Value[0] >> 8) & 0xFF;
+    ADC_Value8_Low = ADC3_Value[0] & 0xFF;
+    ADC_Value9_High = (ADC3_Value[1] >> 8) & 0xFF;
+    ADC_Value9_Low = ADC3_Value[1] & 0xFF;
+    ADC_Value10_High = (ADC3_Value[2] >> 8) & 0xFF;
+    ADC_Value10_Low = ADC3_Value[2] & 0xFF;
 
-        txbuf[0]  = ADC_Value1_High;
-        txbuf[1]  = ADC_Value1_Low;
-        txbuf[2]  = ADC_Value2_High;
-        txbuf[3]  = ADC_Value2_Low;
-        txbuf[4]  = ADC_Value3_High;
-        txbuf[5]  = ADC_Value3_Low;			
-		    txbuf[6]  = ADC_Value4_High;
-        txbuf[7]  = ADC_Value4_Low;
-        txbuf[8]  = ADC_Value5_High;
-        txbuf[9]  = ADC_Value5_Low;
-        txbuf[10] = ADC_Value6_High;
-        txbuf[11] = ADC_Value6_Low;
-		    txbuf[12] = ADC_Value7_High;
-        txbuf[13] = ADC_Value7_Low;
-		    txbuf[14] = ADC_Value8_High;
-        txbuf[15] = ADC_Value8_Low;
-        txbuf[16] = ADC_Value9_High;
-        txbuf[17] = ADC_Value9_Low;
-		    txbuf[18] = ADC_Value10_High;
-        txbuf[19] = ADC_Value10_Low;
-		
-		    //nrf24l01_send();
-        
-        TIM_ClearITPendingBit(GENERAL_TIM2,TIM_IT_Update);  		 
-	}		 	
+    txbuf[0] = ADC_Value1_High;
+    txbuf[1] = ADC_Value1_Low;
+    txbuf[2] = ADC_Value2_High;
+    txbuf[3] = ADC_Value2_Low;
+    txbuf[4] = ADC_Value3_High;
+    txbuf[5] = ADC_Value3_Low;
+    txbuf[6] = ADC_Value4_High;
+    txbuf[7] = ADC_Value4_Low;
+    txbuf[8] = ADC_Value5_High;
+    txbuf[9] = ADC_Value5_Low;
+    txbuf[10] = ADC_Value6_High;
+    txbuf[11] = ADC_Value6_Low;
+    txbuf[12] = ADC_Value7_High;
+    txbuf[13] = ADC_Value7_Low;
+    txbuf[14] = ADC_Value8_High;
+    txbuf[15] = ADC_Value8_Low;
+    txbuf[16] = ADC_Value9_High;
+    txbuf[17] = ADC_Value9_Low;
+    txbuf[18] = ADC_Value10_High;
+    txbuf[19] = ADC_Value10_Low;
+
+    // nrf24l01_send();
+
+    TIM_ClearITPendingBit(GENERAL_TIM2, TIM_IT_Update);
+  }
 }
 
-//定时器3中断服务函数：
+// 定时器3中断服务函数：
 void GENERAL_TIM3_IRQHandler(void)
 {
-	if(TIM_GetITStatus(GENERAL_TIM3,TIM_IT_Update) != RESET ) 
-	{	
-		// printf("stick1 %d\n\r",STICK_Scan(STICK1_GPIO_PORT,STICK1_PIN));
-		// printf("stick2 %d\n\r",STICK_Scan(STICK2_GPIO_PORT,STICK2_PIN));
-		// printf("stick3 %d\n\r",STICK_Scan(STICK3_GPIO_PORT,STICK3_PIN));
-			
-//		printf("ADC1_Value:%d\r\n ", ADC1_Value[0]);
-//		printf("ADC2_Value:%d\r\n ", ADC1_Value[1]);
-//		printf("ADC3_Value:%d\r\n ", ADC1_Value[2]);
-//		printf("ADC4_Value:%d\r\n ", ADC1_Value[3]);
-//		printf("ADC5_Value:%d\r\n ", ADC1_Value[4]);
-//		printf("ADC6_Value:%d\r\n ", ADC1_Value[5]);
-//		printf("ADC7_Value:%d\r\n ", ADC1_Value[6]);
-//		printf("ADC8_Value:%d\r\n ", ADC3_Value[0]);
-//		printf("ADC9_Value:%d\r\n ", ADC3_Value[1]);
-//		printf("ADC10_Value:%d\r\n", ADC3_Value[2]);
-//		printf("\r\n");
-
-      nmea_decode_test();
+  if (TIM_GetITStatus(GENERAL_TIM3, TIM_IT_Update) != RESET)
+  {
+    nmea_decode_test();
   }
-  TIM_ClearITPendingBit(GENERAL_TIM3,TIM_IT_Update);  		  	
+  TIM_ClearITPendingBit(GENERAL_TIM3, TIM_IT_Update);
 }
 
-//定时器4中断服务函数：
+// 定时器4中断服务函数：
 void TIM4_IRQHandler(void)
 {
-    if(TIM_GetITStatus(TIM4,TIM_IT_Update)==SET)
-    {       
-		
-		
-    }
-    TIM_ClearITPendingBit(TIM4,TIM_IT_Update); 
+  if (TIM_GetITStatus(TIM4, TIM_IT_Update) == SET)
+  {
+  }
+  TIM_ClearITPendingBit(TIM4, TIM_IT_Update);
 }
 
-//定时器5中断服务函数：
+// 定时器5中断服务函数：
 void GENERAL_TIM5_IRQHandler(void)
 {
-	if (TIM_GetITStatus(GENERAL_TIM5, TIM_IT_Update) != RESET) //检查指定的TIM中断发生与否:TIM 中断源 
-    {		
-		if(++button_hearttick >= 8) 
-		{
-			button_ticks();
-			button_hearttick = 0;
-		}
-		
-		TIM_ClearITPendingBit(GENERAL_TIM5, TIM_IT_Update);//清除TIMx的中断待处理位:TIM 中断源 
-	}
+  if (TIM_GetITStatus(GENERAL_TIM5, TIM_IT_Update) != RESET) // 检查指定的TIM中断发生与否:TIM 中断源
+  {
+
+    TIM_ClearITPendingBit(GENERAL_TIM5, TIM_IT_Update); // 清除TIMx的中断待处理位:TIM 中断源
+  }
 }
 
-//定时器6中断服务函数：
+// 定时器6中断服务函数：
 void BASIC_TIM_IRQHandler(void)
 {
-	if(TIM_GetITStatus( BASIC_TIM, TIM_IT_Update) != RESET ) 
-	{	
-		
-		//RTC_TimeAndDate_Show(); //显示时间和日期
+  if (TIM_GetITStatus(BASIC_TIM, TIM_IT_Update) != RESET)
+  {
+    if (++button_hearttick >= 8)
+    {
+      button_ticks();
+      button_hearttick = 0;
+    }
+    RTC_TimeAndDate_Show(); // 显示时间和日期
     menu_button_set();
-		TIM_ClearITPendingBit(BASIC_TIM , TIM_IT_Update);  		 
-	}		 	
+    TIM_ClearITPendingBit(BASIC_TIM, TIM_IT_Update);
+  }
 }
-
 
 //定时器7中断服务函数：
 void GENERAL_TIM7_IRQHandler(void)

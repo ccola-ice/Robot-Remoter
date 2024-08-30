@@ -2,7 +2,7 @@
 #include "bsp_usart_debug.h"
 #include "bsp_fsmc_lcd.h"
 
-#define RTC_PRINT
+//#define RTC_PRINT
 
 /**
   * @brief  设置时间和日期
@@ -50,15 +50,23 @@ void RTC_TimeAndDate_Show(void)
     // 每秒打印一次
     if(Rtctmp != RTC_TimeStructure.RTC_Seconds)
     {
-		#ifdef RTC_PRINT		
+		    #ifdef RTC_PRINT		
         // 打印日期
         printf("The Date :  Y:20%0.2d - M:%0.2d - D:%0.2d - W:%0.2d\r\n", 
         RTC_DateStructure.RTC_Year,
         RTC_DateStructure.RTC_Month, 
         RTC_DateStructure.RTC_Date,
         RTC_DateStructure.RTC_WeekDay);
-		#endif
-		
+		    #endif
+
+        #ifdef RTC_PRINT
+        // 打印时间
+        printf("The Time :  %0.2d:%0.2d:%0.2d \r\n\r\n", 
+        RTC_TimeStructure.RTC_Hours, 
+        RTC_TimeStructure.RTC_Minutes, 
+        RTC_TimeStructure.RTC_Seconds);
+        #endif
+
         //液晶显示日期
         //先把要显示的数据用sprintf函数转换为字符串，然后才能用液晶显示函数显示
         sprintf(LCDTemp,"The Date:Y:20%0.2d-M:%0.2d-D:%0.2d-W:%0.2d", 
@@ -66,22 +74,14 @@ void RTC_TimeAndDate_Show(void)
         RTC_DateStructure.RTC_Month, 
         RTC_DateStructure.RTC_Date,
         RTC_DateStructure.RTC_WeekDay);
-		//ILI9806G_DispStringLine_EN(4,LCDTemp);
+		    ILI9806G_DispStringLine_EN(4,LCDTemp);
         
-		#ifdef RTC_PRINT
-        // 打印时间
-        printf("The Time :  %0.2d:%0.2d:%0.2d \r\n\r\n", 
-        RTC_TimeStructure.RTC_Hours, 
-        RTC_TimeStructure.RTC_Minutes, 
-        RTC_TimeStructure.RTC_Seconds);
-        #endif
-		
         //液晶显示时间
         sprintf(LCDTemp,"The Time :  %0.2d:%0.2d:%0.2d", 
         RTC_TimeStructure.RTC_Hours, 
         RTC_TimeStructure.RTC_Minutes, 
         RTC_TimeStructure.RTC_Seconds);
-		//ILI9806G_DispStringLine_EN(5,LCDTemp);
+		    ILI9806G_DispStringLine_EN(5,LCDTemp);
         
         (void)RTC->DR;
     }
@@ -95,9 +95,9 @@ void RTC_TimeAndDate_Show(void)
   */
 void RTC_CLK_Config(void)
 {  
-	RTC_InitTypeDef RTC_InitStructure;
+	  RTC_InitTypeDef RTC_InitStructure;
 	
-	/*使能 PWR 时钟*/
+	  /*使能 PWR 时钟*/
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
     /* PWR_CR:DBF置1，使能RTC、RTC备份寄存器和备份SRAM的访问 */
     PWR_BackupAccessCmd(ENABLE);
