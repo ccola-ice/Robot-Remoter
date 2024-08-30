@@ -361,14 +361,14 @@ void GPS_DMA_IRQHANDLER(void)
 {
     if(DMA_GetITStatus(GPS_USART_DMA_STREAM,GPS_DMA_IT_HT) )         /* DMA 半传输完成 */
     {
-		GPS_HalfTransferEnd = 1;                //设置半传输完成标志位
-		DMA_ClearITPendingBit (GPS_USART_DMA_STREAM,GPS_DMA_IT_HT); 
+      GPS_HalfTransferEnd = 1;                //设置半传输完成标志位
+      DMA_ClearITPendingBit (GPS_USART_DMA_STREAM,GPS_DMA_IT_HT); 
     }
 
     else if(DMA_GetITStatus(GPS_USART_DMA_STREAM,GPS_DMA_IT_TC))     /* DMA 传输完成 */
     {
-		GPS_TransferEnd = 1;                    //设置传输完成标志位
-		DMA_ClearITPendingBit(GPS_USART_DMA_STREAM,GPS_DMA_IT_TC);
+      GPS_TransferEnd = 1;                    //设置传输完成标志位
+      DMA_ClearITPendingBit(GPS_USART_DMA_STREAM,GPS_DMA_IT_TC);
     }
 }
 
