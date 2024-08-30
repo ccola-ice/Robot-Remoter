@@ -60,7 +60,9 @@
 
 #include <stddef.h>
 
-extern unsigned int Task_Delay[NumOfTask];
+#include "inv_mpu.h"
+
+extern unsigned int Task_Delay[5];
 
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
 extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
@@ -76,6 +78,12 @@ extern unsigned int fnum;			/* 文件成功读写数量 */
 
 uint32_t *p1=0;
 uint8_t sramx=1;			//0:内部SRAM 1:外部SRAM
+
+float pitch,roll,yaw; 		//dmp解算欧拉角
+short aacx,aacy,aacz;		//加速度传感器原始数据
+short gyrox,gyroy,gyroz;	//陀螺仪原始数据
+short temp;					//温度
+float yaw_new;
 
 int main(void)
 {
@@ -124,6 +132,7 @@ int main(void)
 	flash_test();
 	if(sram_read_write_test() == 1)
 	{
+		printf("sram 测试成功\r\n");
 		// my_mem_init(SRAMIN);		//初始化内部内存池
 		// my_mem_init(SRAMEX);		//初始化外部内存池
 	}
@@ -138,10 +147,10 @@ int main(void)
 	{
 		printf("\r\n请给开发板插入已格式化成fat格式的SD卡。\r\n");
 	}
-	LCD_Show_BMP(0,0,"0:Pictures/football.bmp"); //srcdata/Picture/football.bmp
-	Delay_ms(1000);
+	LCD_Show_BMP(100,100,"0:Pictures/football.bmp"); //srcdata/Picture/football.bmp
+	Delay_ms(1500);
 	jpgDisplay("0:Pictures/musicplayer.jpg");
-	Delay_ms(1000);
+	Delay_ms(1500);
 	
 	//NMEA解码数据显示初始化准备
 	nmea_decode_init();
@@ -208,18 +217,43 @@ int main(void)
 	}
 	f_mount(NULL,"0:",1);
 	
-	BASIC_TIM6_Configuration(8400-1, 999); 			//周期：1ms
-	BASIC_TIM7_InitConfiguration(8400-1, 1); 		//周期：1s
+	BASIC_TIM6_Configuration(8400-1, 99); 			//周期：1ms
 	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：100ms
-	GENERAL_TIM3_InitConfiguration(10000-1,168-1);	//周期：50ms
+	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：50ms
 	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：10ms
 	GENERAL_TIM5_InitConfiguration(8400-1, 999);	//周期：1ms
+	//BASIC_TIM7_InitConfiguration(10000-1,168-1); 		//周期：1ms
 	printf("\r\n***************************定时器初始化完成***********************************\r\n");
 	
     while(1)
     {
-		//nmea_decode_test();
-		//UG_Update();
+		if(Task_Delay[0] == 0)
+		{
+			if(mpu_dmp_get_data(&pitch,&roll,&yaw)==0)
+			{ 
+				temp = MPU_Get_Temperature();				//得到温度值
+				// MPU_Get_Accelerometer(&aacx,&aacy,&aacz);	//得到加速度传感器数据
+				// MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);	//得到陀螺仪数据
+			}
+			
+			Task_Delay[0]=100;
+		}
+		
+		if(Task_Delay[1] == 0)
+		{
+			Task_Delay[1]=200;
+		}
+		
+		if(Task_Delay[2] == 0)
+		{
+			
+			Task_Delay[2]=300;
+		}
+		
+		if(Task_Delay[3] == 0)
+		{
+			Task_Delay[3]=400;	
+		}
 	}
 }
 

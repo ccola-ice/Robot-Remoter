@@ -54,9 +54,12 @@
 #include "malloc.h"
 #include "menu.h"
 #include "bsp_gpio_stick.h"
+#include "nmea_decode_test.h"
 
 extern void TimingDelay_Decrement(void);
 extern void TimeStamp_Increment(void);
+
+unsigned int Task_Delay[5];
 
 unsigned int button_hearttick;
 
@@ -177,8 +180,17 @@ void PendSV_Handler(void)
   */
 void SysTick_Handler(void)
 {
-    TimingDelay_Decrement();
-	  //TimeStamp_Increment();
+	unsigned char i;
+  TimingDelay_Decrement();
+	//TimeStamp_Increment();
+	
+	for(i=0;i<5;i++)
+	{
+		if(Task_Delay[i])
+		{
+      Task_Delay[i]--;
+		}
+	}
 }
 
 /******************************************************************************/
@@ -211,8 +223,9 @@ void MPU_IRQHandler(void)
 {
 	if(EXTI_GetITStatus(MPU_INT_EXTI_LINE) != RESET) //
 	{
-		EXTI_ClearITPendingBit(MPU_INT_EXTI_LINE);   //
-	}  
+    LED1_TOGGLE;
+    EXTI_ClearITPendingBit(MPU_INT_EXTI_LINE); //
+  }  
 }
 
 //定时器2中断服务函数：
@@ -273,9 +286,9 @@ void GENERAL_TIM3_IRQHandler(void)
 {
 	if(TIM_GetITStatus(GENERAL_TIM3,TIM_IT_Update) != RESET ) 
 	{	
-		printf("stick1 %d\n\r",STICK_Scan(STICK1_GPIO_PORT,STICK1_PIN));
-		printf("stick2 %d\n\r",STICK_Scan(STICK2_GPIO_PORT,STICK2_PIN));
-		printf("stick3 %d\n\r",STICK_Scan(STICK3_GPIO_PORT,STICK3_PIN));
+		// printf("stick1 %d\n\r",STICK_Scan(STICK1_GPIO_PORT,STICK1_PIN));
+		// printf("stick2 %d\n\r",STICK_Scan(STICK2_GPIO_PORT,STICK2_PIN));
+		// printf("stick3 %d\n\r",STICK_Scan(STICK3_GPIO_PORT,STICK3_PIN));
 			
 //		printf("ADC1_Value:%d\r\n ", ADC1_Value[0]);
 //		printf("ADC2_Value:%d\r\n ", ADC1_Value[1]);
@@ -288,8 +301,10 @@ void GENERAL_TIM3_IRQHandler(void)
 //		printf("ADC9_Value:%d\r\n ", ADC3_Value[1]);
 //		printf("ADC10_Value:%d\r\n", ADC3_Value[2]);
 //		printf("\r\n");
-	}
-	TIM_ClearITPendingBit(GENERAL_TIM3,TIM_IT_Update);  		  	
+
+      nmea_decode_test();
+  }
+  TIM_ClearITPendingBit(GENERAL_TIM3,TIM_IT_Update);  		  	
 }
 
 //定时器4中断服务函数：
@@ -325,6 +340,7 @@ void BASIC_TIM_IRQHandler(void)
 	{	
 		
 		//RTC_TimeAndDate_Show(); //显示时间和日期
+    menu_button_set();
 		TIM_ClearITPendingBit(BASIC_TIM , TIM_IT_Update);  		 
 	}		 	
 }
@@ -335,7 +351,7 @@ void GENERAL_TIM7_IRQHandler(void)
 {
 	if(TIM_GetITStatus(BASIC_TIM7, TIM_IT_Update) != RESET ) 
 	{
-		  menu_button_set();
+		  
       TIM_ClearITPendingBit(BASIC_TIM7,TIM_IT_Update);  		 
 	}		 	
 }

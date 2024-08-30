@@ -31,10 +31,10 @@ extern double deg_lat;//转换成[degree].[degree]格式的纬度
 extern double deg_lon;//转换成[degree].[degree]格式的经度
 
 
-float pitch,roll,yaw; 		//欧拉角
-short aacx,aacy,aacz;		//加速度传感器原始数据
-short gyrox,gyroy,gyroz;	//陀螺仪原始数据
-short temp;					//温度
+extern float pitch,roll,yaw; 		//欧拉角
+extern short aacx,aacy,aacz;		//加速度传感器原始数据
+extern short gyrox,gyroy,gyroz;	//陀螺仪原始数据
+extern short temp;					//温度
 
 char displayBuffer[100];
 
@@ -97,10 +97,8 @@ void system_data_read_and_set()
 	LCD_SetTextColor(BLUE);
 	
 	//ILI9806G_DispStringLine_EN(LINE(0)," GPS Info:");
-	ILI9806G_DispStringLine_EN_CH(LINE(0),"野火4.3寸LCD参数：");
-	/* 设置前景颜色（字体颜色）*/
-	//LCD_SetTextColor(WHITE);
-	
+	ILI9806G_DispStringLine_EN_CH(LINE(0),"GPS信息：");
+
 	/* 显示时间日期 */
 	sprintf(displayBuffer," Date:%4d/%02d/%02d ", beiJingTime.year+1900, beiJingTime.mon,beiJingTime.day);
 	ILI9806G_DispStringLine_EN(LINE(1),displayBuffer);

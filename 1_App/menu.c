@@ -17,10 +17,10 @@ extern uint8_t display_flag;
 //{current left right ok back}
 Menu_table table[100] =
 {
-        {0, 0,0,1,4,  (*system_basic_information)},  //主界面
+    {0, 0,0,1,4,  (*system_basic_information)},  //主界面
         
-        {1, 1,1,2,0,  (*mpu6050_euler_information)},  //
-        {2, 2,2,3,1,  (*main_menu)},  //
+    {1, 1,1,2,0,  (*mpu6050_euler_information)},  //
+    {2, 2,2,3,1,  (*main_menu)},  //
 				
 		{3, 3,3,4,2,  (*system_data_read_and_set)},
 		

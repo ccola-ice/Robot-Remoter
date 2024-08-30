@@ -51,8 +51,8 @@ void Delay_us(__IO uint32_t nTime)
   */
 int get_tick_count(unsigned long *count)
 {
-   count[0] = g_ul_ms_ticks;
-	return 0;
+    count[0] = g_ul_ms_ticks;
+	  return 0;
 }
 
 /**
