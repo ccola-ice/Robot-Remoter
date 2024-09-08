@@ -113,7 +113,7 @@ int main(void)
 	while(mpu_dmp_init())
 	{
 		printf("MPU6050 DMP 初始化失败！\n\r");
- 		Delay_ms(200);
+		Delay_ms(200);
 	}
 	printf("MPU6050 DMP 初始化成功！\n\r");
 	
