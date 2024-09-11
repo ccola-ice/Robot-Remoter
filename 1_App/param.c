@@ -35,7 +35,8 @@ unsigned char set_default_param(void)
 	param.NRF_Power = 0x09;//0x0f=0dBm;0x0d=-6dBm;0xb=-12dBm;0x09=-18dBm;功率越大，dBm越大
 	param.version   = FM_VERSION;
 	param.version_time = FM_TIME;
-    return 0;
+    
+	return 0;
 }
 
 //pt_param->clockTime = 44;

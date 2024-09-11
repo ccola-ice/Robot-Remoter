@@ -41,7 +41,7 @@ void user_BUTTON_init(void)
 	button_attach(&button_ok,     PRESS_UP, 			button_ok_press_up_Handler);
 	button_attach(&button_ok,     LONG_PRESS_START, 	button_ok_long_press_start_Handler);
 	button_attach(&button_ok,     SINGLE_CLICK, 		button_ok_single_click_Handler);
-								  
+
 	button_attach(&button_back,   PRESS_DOWN, 			button_back_press_down_Handler);
 	button_attach(&button_back,   PRESS_UP, 			button_back_press_up_Handler);
 	button_attach(&button_back,   LONG_PRESS_START, 	button_back_long_press_start_Handler);

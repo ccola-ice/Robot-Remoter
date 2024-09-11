@@ -85,16 +85,14 @@ short gyrox,gyroy,gyroz;	//陀螺仪原始数据
 short temp;					//温度
 float yaw_new;
 
-int main(void)
+void setup(void)
 {
-	static uint8_t snipaste_name_count = 0;
-	char snipaste_name[40];
-	
+	// put your setup code here, to run once:
 	SysTick_Init();
 	Exti_Init();
+	RTC_Config();
 	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
 	Debug_USART_Config();
-	RTC_Config();
 	EXPAND_USART_Config();
 	LED_GPIO_Config();
 	STICK_GPIO_Config();
@@ -103,57 +101,71 @@ int main(void)
 	NRF_SPI_Init();
 	SRAM_FSMC_Config();
 	ILI9806G_Init();
-	MPU_Init();
+	MPU_Init();	//使用的是软件I2C
 	EXTI_MPU_Config();
 	GPS_USART_Config();
 	GPS_DMA_Config();
 	user_BUTTON_init();
 	Independent_Dual_ADC1_Init();
 	Independent_Dual_ADC3_Init();
-	while(mpu_dmp_init())
+	while(mpu_dmp_init() != 0)
 	{
-		printf("MPU6050 DMP 初始化失败！\n\r");
- 		Delay_ms(200);
+		printf("MPU6050 DMP库 初始化失败！\n\r");
 	}
-	printf("MPU6050 DMP 初始化成功！\n\r");
-	
-	if((Status = SD_Init()) != SD_OK)
+	printf("MPU6050 DMP库 初始化成功！\n\r");
+	while(SD_Init() != SD_OK)
 	{    
 		printf("SD卡初始化失败！\r\n");
 	}
-	else
-	{
-		printf("SD卡初始化成功！\r\n");		 
-	}
+	printf("SD卡初始化成功！\r\n");	
 	GTP_Init_Panel();
-	printf("\r\n******************************初始化完成***********************************\r\n");
-
-	eeprom_test();
-	flash_test();
-	if(sram_read_write_test() == 1)
-	{
-		printf("sram 测试成功\r\n");
-		// my_mem_init(SRAMIN);		//初始化内部内存池
-		// my_mem_init(SRAMEX);		//初始化外部内存池
-	}
-	fatfs_flash_test();
-	fatfs_flash_test2();
-	fatfs_sdcard_test();
-	nrf24l01_check();
-	
-	/*挂载sd文件系统*/
-	res = f_mount(&fs,"0:",1);
+	res = f_mount(&fs,"0:",1);//挂载sd文件系统
 	if(res != FR_OK)
 	{
-		printf("\r\n请给开发板插入已格式化成fat格式的SD卡。\r\n");
+		printf("\r\nSD卡文件系统挂载失败，检查SD卡格式！\r\n");
 	}
+	nmea_decode_init();//NMEA解码初始化准备
+	write_default_param();
+	ILI9806G_GramScan(LCD_SCAN_MODE);//设置LCD显示方向，截图必需设置好液晶显示方向和截图窗口	
+	printf("\r\n***************************定时器初始化开始***********************************\r\n");
+	BASIC_TIM6_Configuration(8400-1, 99); 			//周期：1ms
+	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：100ms
+	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：50ms
+	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：1ms
+	GENERAL_TIM5_InitConfiguration(8400-1, 999);	//周期：10ms
+	//BASIC_TIM7_InitConfiguration(10000-1,168-1); 	//周期：1ms
+	printf("\r\n***************************定时器初始化完成***********************************\r\n");
+
+	printf("\r\n*****************************初始化设置完成**********************************\r\n");
+}
+
+int main(void)
+{
+	static uint8_t snipaste_name_count = 0;
+	char snipaste_name[40];
+	
+	setup();
+
+	// eeprom_test();
+	// flash_test();
+	// if(sram_read_write_test() == 1)
+	// {
+	// 	printf("sram 测试成功\r\n");
+	// 	// my_mem_init(SRAMIN);		//初始化内部内存池
+	// 	// my_mem_init(SRAMEX);		//初始化外部内存池
+	// }
+	// fatfs_flash_test();
+	// fatfs_flash_test2();
+	// fatfs_sdcard_test();
+	nrf24l01_check();
+	
+
 	LCD_Show_BMP(100,100,"0:Pictures/football.bmp"); //srcdata/Picture/football.bmp
 	Delay_ms(1500);
 	jpgDisplay("0:Pictures/musicplayer.jpg");
 	Delay_ms(1500);
 	
-	//NMEA解码数据显示初始化准备
-	nmea_decode_init();
+	
 	LCD_SetFont(&Font16x32);
 	LCD_SetColors(GREEN,BLACK);	
 	ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
@@ -167,7 +179,7 @@ int main(void)
 	USART_printf(EXPAND_USART,"THIS IS UART4\r\n");
 	USART_printf(EXPAND_USART,"UART4测试正常\r\n");
 	
-	write_default_param();
+	
 
 	read_param(param.RecWarnBatVolt,  PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, RecWarnBatVolt));
 	read_param(param.chMiddle[1],     PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, chMiddle[1]));
@@ -204,8 +216,7 @@ int main(void)
 	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
 
 	printf("\r\n正在截图...");	
-	/*截图必需设置好液晶显示方向和截图窗口*/
-	ILI9806G_GramScan(LCD_SCAN_MODE);			
+			
 	
 	if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
 	{
@@ -217,13 +228,7 @@ int main(void)
 	}
 	f_mount(NULL,"0:",1);
 	
-	BASIC_TIM6_Configuration(8400-1, 99); 			//周期：1ms
-	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：100ms
-	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：50ms
-	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：1ms
-	GENERAL_TIM5_InitConfiguration(8400-1, 999);	//周期：10ms
-	//BASIC_TIM7_InitConfiguration(10000-1,168-1); 		//周期：1ms
-	printf("\r\n***************************定时器初始化完成***********************************\r\n");
+
 	
     while(1)
     {

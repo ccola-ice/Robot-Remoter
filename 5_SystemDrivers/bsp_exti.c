@@ -5,16 +5,21 @@ void ExtiGpioInit(void);
 void ExtiNvicInit(void);
 void ExtiModeInit(void);
 
-volatile uint8_t key_flag  = 0;
-volatile uint8_t menu_flag = 0;
-
 void Exti_Init(void)
 {
-//	ExtiGpioInit();
-//	ExtiNvicInit();
-//	ExtiModeInit();
+	ExtiGpioInit();
+	ExtiNvicInit();
+	ExtiModeInit();
 }
 void ExtiGpioInit(void)
+{
+}
+
+void ExtiNvicInit(void)
+{
+}
+
+void ExtiModeInit(void)
 {
 }
 
