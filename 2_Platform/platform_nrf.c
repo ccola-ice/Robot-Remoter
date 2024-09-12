@@ -18,9 +18,11 @@ void nrf24l01_check(void)
 
     /*判断连接状态*/  
     if(nrf_stat == SUCCESS)	   
-        printf("\r\nNRF与MCU连接成功！Remoter持续接收数据\r\n");  
+        printf("\r\nNRF与MCU连接成功！Remoter持续接收数据\r\n");
+        return 0;  
     else	  
         printf("\r\nNRF与MCU连接失败! 请重新检查接线\r\n");
+        return 1;
 }
 
 //无线模块接收数据

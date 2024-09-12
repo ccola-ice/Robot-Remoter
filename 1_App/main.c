@@ -124,16 +124,21 @@ void setup(void)
 	{
 		printf("\r\nSD卡文件系统挂载失败，检查SD卡格式！\r\n");
 	}
+	while(nrf24l01_check() != 0)
+	{
+		Delay_ms(100);
+		//Beeper = !Beeper;//蜂鸣器5Hz报警，表示无线模块故障
+	}
 	nmea_decode_init();//NMEA解码初始化准备
 	write_default_param();
 	ILI9806G_GramScan(LCD_SCAN_MODE);//设置LCD显示方向，截图必需设置好液晶显示方向和截图窗口	
 	printf("\r\n***************************定时器初始化开始***********************************\r\n");
-	BASIC_TIM6_Configuration(8400-1, 99); 			//周期：1ms
-	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：100ms
-	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：50ms
-	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：1ms
-	GENERAL_TIM5_InitConfiguration(8400-1, 999);	//周期：10ms
-	//BASIC_TIM7_InitConfiguration(10000-1,168-1); 	//周期：1ms
+	BASIC_TIM6_Configuration(8400-1, 99); 			//周期：10ms
+	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：99ms
+	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：99ms
+	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：10ms
+	GENERAL_TIM5_InitConfiguration(8400-1, 999);	//周期：100ms
+	//BASIC_TIM7_InitConfiguration(10000-1,168-1); 	//周期：
 	printf("\r\n***************************定时器初始化完成***********************************\r\n");
 
 	printf("\r\n*****************************初始化设置完成**********************************\r\n");
