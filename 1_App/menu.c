@@ -60,3 +60,8 @@ void menu_button_set(void)
 	
 }
 
+void touch()
+{
+
+}
+
