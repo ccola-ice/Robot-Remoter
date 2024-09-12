@@ -85,6 +85,9 @@ short gyrox,gyroy,gyroz;	//陀螺仪原始数据
 short temp;					//温度
 float yaw_new;
 
+u8 finish_1hz=0,finish_2hz=0,finish_5hz=0,finish_10hz=0,finish_20hz=0,finish_33hz=0,finish_50hz=0,finish_100hz=0;
+
+
 void setup(void)
 {
 	// put your setup code here, to run once:
@@ -122,7 +125,14 @@ void setup(void)
 	res = f_mount(&fs,"0:",1);//挂载sd文件系统
 	if(res != FR_OK)
 	{
-		printf("\r\nSD卡文件系统挂载失败，检查SD卡格式！\r\n");
+		printf("\r\nSD卡文件系统挂载失败，检查SD卡格式！(%d)\r\n",res);
+		while(1);
+	}
+	res = f_mount(&fs,"1:",1);//挂载flash文件系统
+	if(res!=FR_OK)
+	{
+		printf("\r\n外部Flash文件系统挂载失败！(%d)\r\n",res);
+		while(1);
 	}
 	while(nrf24l01_check() != 0)
 	{
@@ -137,7 +147,7 @@ void setup(void)
 	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：99ms
 	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：99ms
 	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：10ms
-	GENERAL_TIM5_InitConfiguration(8400-1, 999);	//周期：100ms
+	GENERAL_TIM5_InitConfiguration(999,839);		//周期：10ms //基本任务时基分配
 	//BASIC_TIM7_InitConfiguration(10000-1,168-1); 	//周期：
 	printf("\r\n***************************定时器初始化完成***********************************\r\n");
 
@@ -162,8 +172,6 @@ int main(void)
 	// fatfs_flash_test();
 	// fatfs_flash_test2();
 	// fatfs_sdcard_test();
-	nrf24l01_check();
-	
 
 	LCD_Show_BMP(100,100,"0:Pictures/football.bmp"); //srcdata/Picture/football.bmp
 	Delay_ms(1500);
@@ -185,7 +193,6 @@ int main(void)
 	USART_printf(EXPAND_USART,"UART4测试正常\r\n");
 	
 	
-
 	read_param(param.RecWarnBatVolt,  PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, RecWarnBatVolt));
 	read_param(param.chMiddle[1],     PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, chMiddle[1]));
 	read_param(param.clockTime,       PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, clockTime));
@@ -219,9 +226,7 @@ int main(void)
 	//用来设置截图名字，防止重复，实际应用中可以使用系统时间来命名。
 	snipaste_name_count++; 
 	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
-
 	printf("\r\n正在截图...");	
-			
 	
 	if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
 	{
@@ -232,11 +237,18 @@ int main(void)
 		printf("\r\n截图失败！");
 	}
 	f_mount(NULL,"0:",1);
-	
 
 	
     while(1)
     {
+		if(finish_100hz == 1)
+		{
+			
+		}
+
+
+
+
 		if(Task_Delay[0] == 0)
 		{
 			if(mpu_dmp_get_data(&pitch,&roll,&yaw)==0)
