@@ -69,6 +69,8 @@ extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 extern uint8_t txbuf[32];
 extern uint8_t rxbuf[32];
 
+extern u8 finish_1hz,finish_2hz,finish_5hz,finish_10hz,finish_20hz,finish_33hz,finish_50hz,finish_100hz;
+
 uint8_t ADC_Value1_High, ADC_Value1_Low;
 uint8_t ADC_Value2_High, ADC_Value2_Low;  
 uint8_t ADC_Value3_High, ADC_Value3_Low;
@@ -303,8 +305,44 @@ void TIM4_IRQHandler(void)
 // 定时器5中断服务函数：
 void GENERAL_TIM5_IRQHandler(void)
 {
+  static uint8_t tim5_count=0;
+
   if (TIM_GetITStatus(GENERAL_TIM5, TIM_IT_Update) != RESET) // 检查指定的TIM中断发生与否:TIM 中断源
   {
+    finish_100hz = 1;
+    tim5_count++;
+
+    if(tim5_count % 2 == 0)
+    {
+      finish_50hz = 1;
+    }
+
+    if(tim5_count % 5 == 0)
+    {
+      finish_20hz = 1;
+    }
+
+    if(tim5_count % 10 == 0)
+    {
+      finish_10hz = 1;
+    }
+
+    if(tim5_count % 20 == 0)
+    {
+      finish_5hz = 1;
+    }
+
+    if(tim5_count % 50 == 0)
+    {
+      finish_2hz = 1;
+    }
+
+    if(tim5_count  == 100)
+    {
+      tim5_count = 0;
+      finish_1hz = 1;
+    }
+
 
     TIM_ClearITPendingBit(GENERAL_TIM5, TIM_IT_Update); // 清除TIMx的中断待处理位:TIM 中断源
   }

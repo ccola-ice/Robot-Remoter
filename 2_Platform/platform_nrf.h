@@ -4,7 +4,7 @@
 
 
 
-void nrf24l01_check(void);
+uint8_t nrf24l01_check(void);
 void nrf24l01_receive(void);
 void nrf24l01_show(void);
 void nrf24l01_send(void);

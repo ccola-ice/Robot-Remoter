@@ -442,7 +442,7 @@ static void Goodix_TS_Work_Func(void)
     int32_t i  = 0;
     int32_t ret = -1;
 
-    GTP_DEBUG_FUNC();
+    //GTP_DEBUG_FUNC();
 
     ret = GTP_I2C_Read(client_addr, point_data, 12);//10字节寄存器加2字节地址
     if (ret < 0)
@@ -1027,7 +1027,7 @@ static int8_t GTP_I2C_Test( void)
 //检测到触摸中断时调用，
 void GTP_TouchProcess(void)
 {
-  GTP_DEBUG_FUNC();
+  //GTP_DEBUG_FUNC();
   Goodix_TS_Work_Func();
 
 }
