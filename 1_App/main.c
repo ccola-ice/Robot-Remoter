@@ -93,7 +93,7 @@ void setup(void)
 	// put your setup code here, to run once:
 	SysTick_Init();
 	Exti_Init();
-	RTC_Config();
+	//RTC_Config();
 	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
 	Debug_USART_Config();
 	EXPAND_USART_Config();
@@ -114,7 +114,6 @@ void setup(void)
 	while(mpu_dmp_init() != 0)
 	{
 		printf("MPU6050 DMP 初始化失败！\n\r");
- 		Delay_ms(200);
 	}
 	printf("MPU6050 DMP库 初始化成功！\n\r");
 	while(SD_Init() != SD_OK)
@@ -124,7 +123,7 @@ void setup(void)
 	printf("SD卡初始化成功！\r\n");	
 	GTP_Init_Panel();
 	res = f_mount(&fs,"0:",1);//挂载sd文件系统
-	if(res != FR_OK)
+	if(res != FR_OK )
 	{
 		printf("\r\nSD卡文件系统挂载失败，检查SD卡格式！(%d)\r\n",res);
 		while(1);
@@ -143,14 +142,7 @@ void setup(void)
 	nmea_decode_init();//NMEA解码初始化准备
 	write_default_param();
 	ILI9806G_GramScan(LCD_SCAN_MODE);//设置LCD显示方向，截图必需设置好液晶显示方向和截图窗口	
-	printf("\r\n***************************定时器初始化开始***********************************\r\n");
-	BASIC_TIM6_Configuration(8400-1, 99); 			//周期：10ms
-	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：99ms
-	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：99ms
-	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：10ms
-	GENERAL_TIM5_InitConfiguration(999,839);		//周期：10ms //基本任务时基分配
-	//BASIC_TIM7_InitConfiguration(10000-1,168-1); 	//周期：
-	printf("\r\n***************************定时器初始化完成***********************************\r\n");
+	
 
 	printf("\r\n*****************************初始化设置完成**********************************\r\n");
 }
@@ -162,17 +154,19 @@ int main(void)
 	
 	setup();
 
-	// eeprom_test();
-	// flash_test();
-	// if(sram_read_write_test() == 1)
-	// {
-	// 	printf("sram 测试成功\r\n");
-	// 	// my_mem_init(SRAMIN);		//初始化内部内存池
-	// 	// my_mem_init(SRAMEX);		//初始化外部内存池
-	// }
-	// fatfs_flash_test();
-	// fatfs_flash_test2();
+	eeprom_test();
+	flash_test();
+	if(sram_read_write_test() == 1)
+	{
+		printf("sram 测试成功\r\n");
+		// my_mem_init(SRAMIN);		//初始化内部内存池
+		// my_mem_init(SRAMEX);		//初始化外部内存池
+	}
+	fatfs_flash_test();
+	fatfs_flash_test2();
 	// fatfs_sdcard_test();
+
+	
 
 	LCD_Show_BMP(100,100,"0:Pictures/football.bmp"); //srcdata/Picture/football.bmp
 	Delay_ms(1500);
@@ -239,26 +233,24 @@ int main(void)
 	}
 	f_mount(NULL,"0:",1);
 
+	BASIC_TIM6_Configuration(8400-1, 99); 			//周期：1ms
+	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：100ms
+	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：50ms
+	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：10ms
+	GENERAL_TIM5_InitConfiguration(999,839);	//周期：1ms
+	//BASIC_TIM7_InitConfiguration(10000-1,168-1); 		//周期：1ms
+
 	
     while(1)
     {
-		if(finish_100hz == 1)
-		{
-			
-		}
-
-
-
-
 		if(Task_Delay[0] == 0)
 		{
 			if(mpu_dmp_get_data(&pitch,&roll,&yaw)==0)
 			{ 
-				temp = MPU_Get_Temperature();				//得到温度值
+				//temp = MPU_Get_Temperature();				//得到温度值
 				// MPU_Get_Accelerometer(&aacx,&aacy,&aacz);	//得到加速度传感器数据
 				// MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);	//得到陀螺仪数据
 			}
-			
 			Task_Delay[0]=100;
 		}
 		
