@@ -162,18 +162,15 @@ int main(void)
 		// my_mem_init(SRAMIN);		//初始化内部内存池
 		// my_mem_init(SRAMEX);		//初始化外部内存池
 	}
-	fatfs_flash_test();
-	fatfs_flash_test2();
+	// fatfs_flash_test();
+	// fatfs_flash_test2();
 	// fatfs_sdcard_test();
 
-	
-
 	LCD_Show_BMP(100,100,"0:Pictures/football.bmp"); //srcdata/Picture/football.bmp
-	Delay_ms(1500);
+	Delay_ms(1000);
 	jpgDisplay("0:Pictures/musicplayer.jpg");
-	Delay_ms(1500);
-	
-	
+	Delay_ms(1000);
+
 	LCD_SetFont(&Font16x32);
 	LCD_SetColors(GREEN,BLACK);	
 	ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
@@ -186,7 +183,6 @@ int main(void)
 	
 	USART_printf(EXPAND_USART,"THIS IS UART4\r\n");
 	USART_printf(EXPAND_USART,"UART4测试正常\r\n");
-	
 	
 	read_param(param.RecWarnBatVolt,  PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, RecWarnBatVolt));
 	read_param(param.chMiddle[1],     PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, chMiddle[1]));
@@ -222,7 +218,6 @@ int main(void)
 	snipaste_name_count++; 
 	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
 	printf("\r\n正在截图...");	
-	
 	if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
 	{
 		printf("\r\n截图成功！");
@@ -237,17 +232,16 @@ int main(void)
 	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：100ms
 	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：50ms
 	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：10ms
-	GENERAL_TIM5_InitConfiguration(999,839);	//周期：1ms
-	//BASIC_TIM7_InitConfiguration(10000-1,168-1); 		//周期：1ms
+	GENERAL_TIM5_InitConfiguration(999,839);		//周期：1ms
+	//BASIC_TIM7_InitConfiguration(10000-1,168-1);	//周期：1ms
 
-	
     while(1)
     {
 		if(Task_Delay[0] == 0)
 		{
 			if(mpu_dmp_get_data(&pitch,&roll,&yaw)==0)
 			{ 
-				//temp = MPU_Get_Temperature();				//得到温度值
+				temp = MPU_Get_Temperature();				//得到温度值
 				// MPU_Get_Accelerometer(&aacx,&aacy,&aacz);	//得到加速度传感器数据
 				// MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);	//得到陀螺仪数据
 			}

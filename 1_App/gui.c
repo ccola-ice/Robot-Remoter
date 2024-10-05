@@ -139,7 +139,6 @@ void system_data_read_and_set()
 	/* º½Ïò */
 	sprintf(displayBuffer," Angle:%3.2f deg", info.direction);
 	ILI9806G_DispStringLine_EN(LINE(11),displayBuffer);
-
 }
 
 void mpu6050_euler_information(void)
