@@ -62,6 +62,8 @@
 
 #include "inv_mpu.h"
 
+#define MALLOC_TEST 0
+
 extern unsigned int Task_Delay[5];
 
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
@@ -86,7 +88,6 @@ short temp;					//温度
 float yaw_new;
 
 u8 finish_1hz=0,finish_2hz=0,finish_5hz=0,finish_10hz=0,finish_20hz=0,finish_33hz=0,finish_50hz=0,finish_100hz=0;
-
 
 void setup(void)
 {
@@ -141,8 +142,7 @@ void setup(void)
 	}
 	nmea_decode_init();//NMEA解码初始化准备
 	write_default_param();
-	ILI9806G_GramScan(LCD_SCAN_MODE);//设置LCD显示方向，截图必需设置好液晶显示方向和截图窗口	
-	
+	ILI9806G_GramScan(LCD_SCAN_MODE); //设置LCD显示方向，截图必需设置好液晶显示方向和截图窗口	
 
 	printf("\r\n*****************************初始化设置完成**********************************\r\n");
 }
@@ -174,7 +174,7 @@ int main(void)
 	LCD_SetFont(&Font16x32);
 	LCD_SetColors(GREEN,BLACK);	
 	ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-	
+
 	//显示指定大小字符对比
 	ILI9806G_DispStringLine_EN_CH(LINE(0),"Remoter");
 	ILI9806G_DisplayStringEx(0,1*48,48,48,(uint8_t *)"Remoter",0);
@@ -184,34 +184,34 @@ int main(void)
 	USART_printf(EXPAND_USART,"THIS IS UART4\r\n");
 	USART_printf(EXPAND_USART,"UART4测试正常\r\n");
 	
-	read_param(param.RecWarnBatVolt,  PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, RecWarnBatVolt));
-	read_param(param.chMiddle[1],     PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, chMiddle[1]));
-	read_param(param.clockTime,       PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, clockTime));
+	read_param(param.RecWarnBatVolt, PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, RecWarnBatVolt));
+	read_param(param.chMiddle[1],    PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, chMiddle[1]));
+	read_param(param.clockTime,      PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, clockTime));
 	printf("RecWarnBatVolt: %f\r\n", param.RecWarnBatVolt);
-	printf("chMiddle[1]:%d\r\n",param.chMiddle[1]);
-	printf("clockTime:%d\r\n",param.clockTime);
+	printf("chMiddle[1]:%d\r\n", param.chMiddle[1]);
+	printf("clockTime:%d\r\n", param.clockTime);
 
-	//malloc
-	// printf("\n\r=================malloc================\n\r");
-	// printf ( "SRAMIN USED:%d%%\r\n", my_mem_perused(SRAMIN) );//显示内部内存使用率
-	// printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-	// p1 = mymalloc ( sramx, 1024 * 16 );//申请2K字节
-	// if(p1 == NULL)
-	// {
-	// 	printf("mymalloc error!,p1返回失败！\r\n");
-	// }
-	// else{
-	// 	*(p1+0) = 548;
-	// 	*(p1+1) = 1048;
-	// 	*(p1+2) = 2048;
-	// 	*(p1+3) = 3048;
-	// 	*(p1+4) = 4048;
-	// 	printf(" *(p1+0) = %d\n\r *(p1+1) = %d\n\r *(p1+2) = %d\n\r *(p1+3) = %d\n\r *(p1+4) = %d\n\r",*(p1+0),*(p1+1),*(p1+2),*(p1+3),*(p1+4));
-	// 	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-	// 	myfree(sramx,p1);											//释放内存
-	// 	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-	// }
-	// p1=0;														//指向空地址
+#if MALLOC_TEST
+	printf("\n\r=================malloc================\n\r");
+	printf ( "SRAMIN USED:%d%%\r\n", my_mem_perused(SRAMIN) );//显示内部内存使用率
+	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
+	p1 = mymalloc ( sramx, 1024 * 16 );//申请2K字节
+	if(p1 == NULL){
+	printf("mymalloc error!,p1返回失败！\r\n");
+	}
+	else{
+		*(p1+0) = 548;
+		*(p1+1) = 1048;
+		*(p1+2) = 2048;
+		*(p1+3) = 3048;
+		*(p1+4) = 4048;
+		printf(" *(p1+0) = %d\n\r *(p1+1) = %d\n\r *(p1+2) = %d\n\r *(p1+3) = %d\n\r *(p1+4) = %d\n\r",*(p1+0),*(p1+1),*(p1+2),*(p1+3),*(p1+4));
+		printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
+		myfree(sramx,p1);											//释放内存
+		printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
+	}
+	p1=0;														//指向空地
+#endif
 
 	//截图相关函数，截图时间较慢 ,尽量减小jpg大小
 	//用来设置截图名字，防止重复，实际应用中可以使用系统时间来命名。
@@ -228,28 +228,34 @@ int main(void)
 	}
 	f_mount(NULL,"0:",1);
 
-	BASIC_TIM6_Configuration(8400-1, 99); 			//周期：1ms
-	GENERAL_TIM2_InitConfiguration(65536-1,128-1);	//周期：100ms
-	GENERAL_TIM3_InitConfiguration(65536-1,128-1);	//周期：50ms
-	GENERAL_TIM4_InitConfiguration(8400-1, 99);		//周期：10ms
-	GENERAL_TIM5_InitConfiguration(999,839);		//周期：1ms
-	//BASIC_TIM7_InitConfiguration(10000-1,168-1);	//周期：1ms
+	BASIC_TIM6_Configuration(8400-1, 99); 				//周期：1ms
+	GENERAL_TIM2_InitConfiguration(65536-1,128-1);		//周期：100ms
+	GENERAL_TIM3_InitConfiguration(65536-1,128-1);		//周期：50ms
+	GENERAL_TIM4_InitConfiguration(8400-1, 99);			//周期：10ms
+	GENERAL_TIM5_InitConfiguration(999,839);			//周期：1ms
+	//BASIC_TIM7_InitConfiguration(10000-1,168-1);		//周期：1ms
 
     while(1)
     {
 		if(Task_Delay[0] == 0)
 		{
 			if(mpu_dmp_get_data(&pitch,&roll,&yaw)==0)
-			{ 
-				temp = MPU_Get_Temperature();				//得到温度值
+			{
+				temp = MPU_Get_Temperature();					//得到温度值
 				// MPU_Get_Accelerometer(&aacx,&aacy,&aacz);	//得到加速度传感器数据
-				// MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);	//得到陀螺仪数据
+				// MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);		//得到陀螺仪数据
 			}
 			Task_Delay[0]=100;
 		}
 		
 		if(Task_Delay[1] == 0)
 		{
+			printf("finish_1hz = %d\n\r",finish_1hz);
+			printf("finish_2hz = %d\n\r",finish_2hz);
+			printf("finish_5hz = %d\n\r",finish_5hz);
+			printf("finish_10hz = %d\n\r",finish_10hz);
+			printf("finish_20hz = %d\n\r",finish_20hz);
+			printf("finish_50hz = %d\n\r",finish_50hz);
 			Task_Delay[1]=200;
 		}
 		

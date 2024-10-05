@@ -68,7 +68,7 @@ static void GENERAL_TIM3_Mode_Config(uint16_t arr,uint16_t psc)
 void GENERAL_TIM3_InitConfiguration(uint16_t arr,uint16_t psc)
 {
     GENERAL_TIM3_Mode_Config(arr,psc);
-	GENERAL_TIM3_NVIC_Config();	
+	  GENERAL_TIM3_NVIC_Config();	
 }
 
 
