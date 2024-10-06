@@ -2,7 +2,7 @@
 #include "bsp_usart_debug.h"
 #include "bsp_fsmc_lcd.h"
 
-//#define RTC_PRINT
+#define RTC_PRINT
 
 /**
   * @brief  设置时间和日期
@@ -67,21 +67,21 @@ void RTC_TimeAndDate_Show(void)
         RTC_TimeStructure.RTC_Seconds);
         #endif
 
-        //液晶显示日期
-        //先把要显示的数据用sprintf函数转换为字符串，然后才能用液晶显示函数显示
-        sprintf(LCDTemp,"The Date:Y:20%0.2d-M:%0.2d-D:%0.2d-W:%0.2d", 
-        RTC_DateStructure.RTC_Year,
-        RTC_DateStructure.RTC_Month, 
-        RTC_DateStructure.RTC_Date,
-        RTC_DateStructure.RTC_WeekDay);
-		    ILI9806G_DispStringLine_EN(4,LCDTemp);
+        // //液晶显示日期
+        // //先把要显示的数据用sprintf函数转换为字符串，然后才能用液晶显示函数显示
+        // sprintf(LCDTemp,"The Date:Y:20%0.2d-M:%0.2d-D:%0.2d-W:%0.2d", 
+        // RTC_DateStructure.RTC_Year,
+        // RTC_DateStructure.RTC_Month, 
+        // RTC_DateStructure.RTC_Date,
+        // RTC_DateStructure.RTC_WeekDay);
+		    // ILI9806G_DispStringLine_EN(4,LCDTemp);
         
-        //液晶显示时间
-        sprintf(LCDTemp,"The Time :  %0.2d:%0.2d:%0.2d", 
-        RTC_TimeStructure.RTC_Hours, 
-        RTC_TimeStructure.RTC_Minutes, 
-        RTC_TimeStructure.RTC_Seconds);
-		    ILI9806G_DispStringLine_EN(5,LCDTemp);
+        // //液晶显示时间
+        // sprintf(LCDTemp,"The Time :  %0.2d:%0.2d:%0.2d", 
+        // RTC_TimeStructure.RTC_Hours, 
+        // RTC_TimeStructure.RTC_Minutes, 
+        // RTC_TimeStructure.RTC_Seconds);
+		    // ILI9806G_DispStringLine_EN(5,LCDTemp);
         
         (void)RTC->DR;
     }
@@ -237,7 +237,7 @@ void RTC_Config(void)
     if (RTC_ReadBackupRegister(RTC_BKP_DRX) != RTC_BKP_DATA)
     {
         /* 设置时间和日期 */
-		RTC_TimeAndDate_Set();
+		  RTC_TimeAndDate_Set();
     }
     else
     {

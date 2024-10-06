@@ -25,15 +25,14 @@ UG_OBJECT obj_buff_wnd_1[10] ;
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
 extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 
-extern nmeaINFO info;          	//GPS解码后得到的信息
-extern nmeaTIME beiJingTime;    		//北京时间
-extern double deg_lat;//转换成[degree].[degree]格式的纬度
-extern double deg_lon;//转换成[degree].[degree]格式的经度
-
+extern nmeaINFO info;          		//GPS解码后得到的信息
+extern nmeaTIME beiJingTime; 		//北京时间
+extern double deg_lat;				//转换成[degree].[degree]格式的纬度
+extern double deg_lon;				//转换成[degree].[degree]格式的经度
 
 extern float pitch,roll,yaw; 		//欧拉角
 extern short aacx,aacy,aacz;		//加速度传感器原始数据
-extern short gyrox,gyroy,gyroz;	//陀螺仪原始数据
+extern short gyrox,gyroy,gyroz;		//陀螺仪原始数据
 extern short temp;					//温度
 
 char displayBuffer[100];
@@ -158,13 +157,7 @@ void mpu6050_euler_information(void)
 	ILI9806G_DispStringLine_EN(LINE(1),"resolution:480x800px");
 	ILI9806G_DispStringLine_EN(LINE(2),"LCD driver:ILI9806G");
 	ILI9806G_DispStringLine_EN(LINE(3),"Touch driver:GT911");
-//	if(mpu_dmp_get_data(&pitch,&roll,&yaw)!=0)
-//	{
-////		printf("%d\r\n",mpu_dmp_get_data(&pitch,&roll,&yaw));
-////		temp = MPU_Get_Temperature();				//得到温度值
-////		MPU_Get_Accelerometer(&aacx,&aacy,&aacz);	//得到加速度传感器数据
-////		MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);	//得到陀螺仪数据
-//	}
+
 	sprintf(displayBuffer,"mpu_dmp_get_data error!");
 	ILI9806G_DispStringLine_EN(LINE(4),displayBuffer);
 	

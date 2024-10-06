@@ -57,11 +57,6 @@
 #include "nmea_decode_test.h"
 
 extern void TimingDelay_Decrement(void);
-extern void TimeStamp_Increment(void);
-
-unsigned int Task_Delay[5];
-
-unsigned int button_hearttick;
 
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
 extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
@@ -69,18 +64,18 @@ extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 extern uint8_t txbuf[32];
 extern uint8_t rxbuf[32];
 
-extern u8 finish_1hz,finish_2hz,finish_5hz,finish_10hz,finish_20hz,finish_33hz,finish_50hz,finish_100hz;
+extern uint8_t finish_1hz,finish_2hz,finish_5hz,finish_10hz,finish_20hz,finish_33hz,finish_50hz,finish_100hz;
 
-uint8_t ADC_Value1_High, ADC_Value1_Low;
-uint8_t ADC_Value2_High, ADC_Value2_Low;  
-uint8_t ADC_Value3_High, ADC_Value3_Low;
-uint8_t ADC_Value4_High, ADC_Value4_Low; 
-uint8_t ADC_Value5_High, ADC_Value5_Low;
-uint8_t ADC_Value6_High, ADC_Value6_Low; 
-uint8_t ADC_Value7_High, ADC_Value7_Low;
-uint8_t ADC_Value8_High, ADC_Value8_Low; 
-uint8_t ADC_Value9_High, ADC_Value9_Low;
-uint8_t ADC_Value10_High,ADC_Value10_Low;
+volatile uint8_t ADC_Value1_High, ADC_Value1_Low;
+volatile uint8_t ADC_Value2_High, ADC_Value2_Low;  
+volatile uint8_t ADC_Value3_High, ADC_Value3_Low;
+volatile uint8_t ADC_Value4_High, ADC_Value4_Low; 
+volatile uint8_t ADC_Value5_High, ADC_Value5_Low;
+volatile uint8_t ADC_Value6_High, ADC_Value6_Low; 
+volatile uint8_t ADC_Value7_High, ADC_Value7_Low;
+volatile uint8_t ADC_Value8_High, ADC_Value8_Low; 
+volatile uint8_t ADC_Value9_High, ADC_Value9_Low;
+volatile uint8_t ADC_Value10_High,ADC_Value10_Low;
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
@@ -182,17 +177,7 @@ void PendSV_Handler(void)
   */
 void SysTick_Handler(void)
 {
-	unsigned char i;
   TimingDelay_Decrement();
-	//TimeStamp_Increment();
-	
-	for(i=0;i<5;i++)
-	{
-		if(Task_Delay[i])
-		{
-      Task_Delay[i]--;
-		}
-	}
 }
 
 /******************************************************************************/
@@ -225,7 +210,6 @@ void MPU_IRQHandler(void)
 {
   if (EXTI_GetITStatus(MPU_INT_EXTI_LINE) != RESET) //
   {
-    LED1_TOGGLE;
     EXTI_ClearITPendingBit(MPU_INT_EXTI_LINE); //
   }
 }
@@ -288,7 +272,7 @@ void GENERAL_TIM3_IRQHandler(void)
 {
   if (TIM_GetITStatus(GENERAL_TIM3, TIM_IT_Update) != RESET)
   {
-    nmea_decode_test();
+    
   }
   TIM_ClearITPendingBit(GENERAL_TIM3, TIM_IT_Update);
 }
@@ -340,9 +324,8 @@ void GENERAL_TIM5_IRQHandler(void)
     if(tim5_count  == 100)
     {
       tim5_count = 0;
-      finish_1hz = 1;
+      finish_1hz = 1; 
     }
-
 
     TIM_ClearITPendingBit(GENERAL_TIM5, TIM_IT_Update); // 清除TIMx的中断待处理位:TIM 中断源
   }
@@ -353,13 +336,6 @@ void BASIC_TIM_IRQHandler(void)
 {
   if (TIM_GetITStatus(BASIC_TIM, TIM_IT_Update) != RESET)
   {
-    if (++button_hearttick >= 8)
-    {
-      button_ticks();
-      button_hearttick = 0;
-    }
-    RTC_TimeAndDate_Show(); // 显示时间和日期
-    menu_button_set();
     TIM_ClearITPendingBit(BASIC_TIM, TIM_IT_Update);
   }
 }
@@ -369,7 +345,6 @@ void GENERAL_TIM7_IRQHandler(void)
 {
 	if(TIM_GetITStatus(BASIC_TIM7, TIM_IT_Update) != RESET ) 
 	{
-		  
       TIM_ClearITPendingBit(BASIC_TIM7,TIM_IT_Update);  		 
 	}		 	
 }

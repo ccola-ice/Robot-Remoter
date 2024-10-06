@@ -1,5 +1,5 @@
-#ifndef __BSP_GPIO_H
-#define	__BSP_GPIO_H
+#ifndef __BSP_GPIO_BUTTON_H
+#define	__BSP_GPIO_BUTTON_H
 #include "stm32f4xx.h"
 
 //BUTTON_OK
@@ -28,7 +28,7 @@
 #define BUTTON_LEFT_EXTI_PortSource       EXTI_PortSourceGPIOG
 #define BUTTON_LEFT_EXTI_PinSource        EXTI_PinSource13
 #define BUTTON_LEFT_EXTI_LINE             EXTI_Line13
-										 
+
 //BUTTON_SUB                             
 #define BUTTON_RIGHT_PIN                   GPIO_Pin_11                 
 #define BUTTON_RIGHT_GPIO_PORT             GPIOG                      
@@ -46,10 +46,9 @@
 	*/
 #define BUTTON_ON	0
 #define BUTTON_OFF	1
-                              
+
 void BUTTON_GPIO_Config(void);
 
 uint8_t BUTTON_Scan(GPIO_TypeDef* GPIOx,uint16_t GPIO_Pin);
-
 
 #endif

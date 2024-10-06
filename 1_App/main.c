@@ -48,6 +48,7 @@
 #include "inv_mpu.h"
 #include "inv_mpu_dmp_motion_driver.h" 
 #include "gui.h"
+#include "multi_button.h"
 #include "multi_button_user.h"
 #include "common.h"
 #include "nmea/nmea.h"
@@ -89,15 +90,17 @@ float yaw_new;
 
 u8 finish_1hz=0,finish_2hz=0,finish_5hz=0,finish_10hz=0,finish_20hz=0,finish_33hz=0,finish_50hz=0,finish_100hz=0;
 
+unsigned int button_hearttick;
+
 void setup(void)
 {
 	// put your setup code here, to run once:
 	SysTick_Init();
 	Exti_Init();
-	//RTC_Config();
 	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
 	Debug_USART_Config();
 	EXPAND_USART_Config();
+	RTC_Config();
 	LED_GPIO_Config();
 	STICK_GPIO_Config();
 	EEPROM_I2C_Init();
@@ -147,12 +150,10 @@ void setup(void)
 	printf("\r\n*****************************初始化设置完成**********************************\r\n");
 }
 
-int main(void)
+int hardware_test(void)
 {
 	static uint8_t snipaste_name_count = 0;
 	char snipaste_name[40];
-	
-	setup();
 
 	eeprom_test();
 	flash_test();
@@ -162,18 +163,30 @@ int main(void)
 		// my_mem_init(SRAMIN);		//初始化内部内存池
 		// my_mem_init(SRAMEX);		//初始化外部内存池
 	}
-	// fatfs_flash_test();
-	// fatfs_flash_test2();
-	// fatfs_sdcard_test();
+	fatfs_flash_test();
+	fatfs_flash_test2();
+	fatfs_sdcard_test();
 
+	f_mount(&fs,"0:",1);
 	LCD_Show_BMP(100,100,"0:Pictures/football.bmp"); //srcdata/Picture/football.bmp
 	Delay_ms(1000);
 	jpgDisplay("0:Pictures/musicplayer.jpg");
 	Delay_ms(1000);
 
-	LCD_SetFont(&Font16x32);
-	LCD_SetColors(GREEN,BLACK);	
-	ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
+	// 截图相关函数，截图时间较慢 ,尽量减小jpg大小
+	// 用来设置截图名字，防止重复，实际应用中可以使用系统时间来命名。
+	snipaste_name_count++; 
+	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
+	printf("\r\n正在截图...");	
+	if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
+	{
+		printf("\r\n截图成功！");
+	}
+	else
+	{
+		printf("\r\n截图失败！");
+	}
+	f_mount(NULL,"0:",1);
 
 	//显示指定大小字符对比
 	ILI9806G_DispStringLine_EN_CH(LINE(0),"Remoter");
@@ -181,15 +194,9 @@ int main(void)
 	ILI9806G_DisplayStringEx(0,2*56,56,56,(uint8_t *)"Remoter",0);
 	Delay_ms(1000);
 	
+	//扩展串口4测试
 	USART_printf(EXPAND_USART,"THIS IS UART4\r\n");
 	USART_printf(EXPAND_USART,"UART4测试正常\r\n");
-	
-	read_param(param.RecWarnBatVolt, PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, RecWarnBatVolt));
-	read_param(param.chMiddle[1],    PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, chMiddle[1]));
-	read_param(param.clockTime,      PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, clockTime));
-	printf("RecWarnBatVolt: %f\r\n", param.RecWarnBatVolt);
-	printf("chMiddle[1]:%d\r\n", param.chMiddle[1]);
-	printf("clockTime:%d\r\n", param.clockTime);
 
 #if MALLOC_TEST
 	printf("\n\r=================malloc================\n\r");
@@ -213,61 +220,80 @@ int main(void)
 	p1=0;														//指向空地
 #endif
 
-	//截图相关函数，截图时间较慢 ,尽量减小jpg大小
-	//用来设置截图名字，防止重复，实际应用中可以使用系统时间来命名。
-	snipaste_name_count++; 
-	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
-	printf("\r\n正在截图...");	
-	if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
-	{
-		printf("\r\n截图成功！");
-	}
-	else
-	{
-		printf("\r\n截图失败！");
-	}
-	f_mount(NULL,"0:",1);
+	return 0;
+}
 
-	BASIC_TIM6_Configuration(8400-1, 99); 				//周期：1ms
+int main(void)
+{
+	setup();
+
+	hardware_test();
+
+	LCD_SetFont(&Font16x32);
+	LCD_SetColors(GREEN,BLACK);	
+	ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
+	
+	read_param(param.RecWarnBatVolt, PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, RecWarnBatVolt));
+	read_param(param.chMiddle[1],    PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, chMiddle[1]));
+	read_param(param.clockTime,      PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, clockTime));
+	printf("RecWarnBatVolt: %f\r\n", param.RecWarnBatVolt);
+	printf("chMiddle[1]:%d\r\n", param.chMiddle[1]);
+	printf("clockTime:%d\r\n", param.clockTime);
+
+	BASIC_TIM6_Configuration(8400-1, 99); 				//周期：10ms
 	GENERAL_TIM2_InitConfiguration(65536-1,128-1);		//周期：100ms
 	GENERAL_TIM3_InitConfiguration(65536-1,128-1);		//周期：50ms
 	GENERAL_TIM4_InitConfiguration(8400-1, 99);			//周期：10ms
-	GENERAL_TIM5_InitConfiguration(999,839);			//周期：1ms
+	GENERAL_TIM5_InitConfiguration(8400-1, 9);			//周期：1ms
 	//BASIC_TIM7_InitConfiguration(10000-1,168-1);		//周期：1ms
 
     while(1)
     {
-		if(Task_Delay[0] == 0)
+		if(finish_1hz == 1)
 		{
-			if(mpu_dmp_get_data(&pitch,&roll,&yaw)==0)
+			if(mpu_dmp_get_data(&pitch,&roll,&yaw) == 0)
 			{
 				temp = MPU_Get_Temperature();					//得到温度值
 				// MPU_Get_Accelerometer(&aacx,&aacy,&aacz);	//得到加速度传感器数据
 				// MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);		//得到陀螺仪数据
 			}
-			Task_Delay[0]=100;
+			//printf("finish_1hz = %d\n\r",finish_1hz);
+			finish_1hz = 0;
 		}
 		
-		if(Task_Delay[1] == 0)
+		if(finish_2hz == 1)
 		{
-			printf("finish_1hz = %d\n\r",finish_1hz);
-			printf("finish_2hz = %d\n\r",finish_2hz);
-			printf("finish_5hz = %d\n\r",finish_5hz);
-			printf("finish_10hz = %d\n\r",finish_10hz);
-			printf("finish_20hz = %d\n\r",finish_20hz);
-			printf("finish_50hz = %d\n\r",finish_50hz);
-			Task_Delay[1]=200;
+			nmea_decode_test();
+			finish_2hz = 0;
 		}
-		
-		if(Task_Delay[2] == 0)
+
+		if(finish_5hz == 1)
 		{
-			
-			Task_Delay[2]=300;
+			//printf("finish_5hz = %d\n\r",finish_5hz);
+			finish_5hz = 0;
 		}
-		
-		if(Task_Delay[3] == 0)
+
+		if(finish_10hz == 1)
 		{
-			Task_Delay[3]=400;	
+			RTC_TimeAndDate_Show(); // 显示时间和日期
+			finish_10hz = 0;
+		}
+
+		if(finish_50hz == 1)
+		{
+			if (++button_hearttick >= 8)
+			{
+				button_ticks();
+				button_hearttick = 0;
+			}
+			menu_button_set();
+			finish_50hz = 0;
+		}
+
+		if(finish_100hz == 1)
+		{
+
+			finish_100hz = 0;
 		}
 	}
 }

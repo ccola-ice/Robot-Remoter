@@ -34,34 +34,29 @@ void menu_button_set(void)
     Get_button_ok 		=   BUTTON_Scan(BUTTON_OK_GPIO_PORT,BUTTON_OK_PIN);
     Get_button_back 	=   BUTTON_Scan(BUTTON_BACK_GPIO_PORT,BUTTON_BACK_PIN);
 		
-	if (Get_button_left == 0)
+	  if (Get_button_left == 0)
     {
-		display_flag = 1;
-		func_index = table[func_index].left;
+      display_flag = 1;
+      func_index = table[func_index].left;
     }
-	if (Get_button_right == 0)
+	  if (Get_button_right == 0)
     {
-		display_flag = 1;
-		func_index = table[func_index].right;
+      display_flag = 1;
+      func_index = table[func_index].right;
     }
-	if (Get_button_ok == 0)
+	  if (Get_button_ok == 0)
     {
-		display_flag = 1;
-		func_index = table[func_index].ok;
+		  display_flag = 1;
+		  func_index = table[func_index].ok;
     }
-	if (Get_button_back == 0)
+	  if (Get_button_back == 0)
     {
-		display_flag = 1;
+		    display_flag = 1;
         func_index = table[func_index].back;
     }
 
     current_operation_index = table[func_index].current_operation;
     (*current_operation_index)(); //执行当前操作函数
 	
-}
-
-void touch()
-{
-
 }
 
