@@ -240,13 +240,15 @@ void Touch_Button_Down(uint16_t x,uint16_t y)
   for(i=0;i<BUTTON_NUM;i++)
   {
     /* 触摸到了按钮 */
-    if(x<=button[i].end_x && y<=button[i].end_y && y>=button[i].start_y && x>=button[i].start_x )
+    if(x>=button[i].start_x && x<button[i].end_x &&
+       y>=button[i].start_y && y<button[i].end_y)
     {
       if(button[i].touch_flag == 0)     /*原本的状态为没有按下，则更新状态*/
       {
       button[i].touch_flag = 1;         /* 记录按下标志 */
-      
       button[i].draw_btn(&button[i]);  /*重绘按钮*/
+      /* 命令在首次按下时执行，不再依赖触摸控制器的释放帧。 */
+      button[i].btn_command(&button[i]);
       }        
       
     }
@@ -269,21 +271,19 @@ void Touch_Button_Down(uint16_t x,uint16_t y)
 */
 void Touch_Button_Up(uint16_t x,uint16_t y)
 {
-   uint8_t i; 
+   uint8_t i;
+
+   (void)x;
+   (void)y;
+
    for(i=0;i<BUTTON_NUM;i++)
    {
-     /* 触笔在按钮区域释放 */
-      if((x<button[i].end_x && x>button[i].start_x && y<button[i].end_y && y>button[i].start_y))
-      {        
-        button[i].touch_flag = 0;       /*释放触摸标志*/
-        
-        button[i].draw_btn(&button[i]); /*重绘按钮*/        
-      
-        button[i].btn_command(&button[i]);  /*执行按键的功能命令*/
-        
-        break;
-      }
-    }  
+     if(button[i].touch_flag)
+     {
+       button[i].touch_flag = 0;
+       button[i].draw_btn(&button[i]);
+     }
+   }
 
 }
 

@@ -37,7 +37,12 @@ extern short temp;					//温度
 
 char displayBuffer[100];
 
-uint8_t display_flag = 0;	//界面切换标志，每次只有第一次切换界面时才清屏（ILI9806G_Clear），其他情况不清屏
+static uint8_t display_flag = 0;	//界面切换标志，每次只有第一次切换界面时才清屏（ILI9806G_Clear），其他情况不清屏
+
+void gui_prepare_page(void)
+{
+	display_flag = 1;
+}
 
 void system_basic_information(void)
 {	
@@ -62,8 +67,17 @@ void system_basic_information(void)
 	ILI9806G_DispStringLine_EN(LINE(7),"About:zb18747639545@163.com");
 }
 
-void main_menu(void)
+void main_menu(uint8_t selected_item)
 {
+	static const char *menu_text[4] =
+	{
+		"System Information",
+		"Channel Monitor",
+		"GPS / BDS Information",
+		"Touch Draw Board"
+	};
+	uint8_t i;
+
 	if(display_flag == 1)
 	{
 		display_flag = 0;
@@ -72,14 +86,20 @@ void main_menu(void)
 	}
 	
 	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(RED);
-	LCD_SetFont(&Font24x48);
-	ILI9806G_DispStringLine_EN(LINE(0),"Remoter-1.0");
-	LCD_SetFont(&Font24x48);
-	ILI9806G_DispStringLine_EN(LINE(1),"Welcome to use!");
+	LCD_SetTextColor(BLUE);
+	LCD_SetFont(&Font16x32);
+	ILI9806G_DispStringLine_EN(LINE(0),"Remoter Main Menu");
+	ILI9806G_DispStringLine_EN(LINE(1),"LEFT/RIGHT: Select   OK: Enter");
+
+	for(i = 0; i < 4; i++)
+	{
+		LCD_SetTextColor((i == selected_item) ? RED : BLACK);
+		sprintf(displayBuffer, "%c %s", (i == selected_item) ? '>' : ' ', menu_text[i]);
+		ILI9806G_DispStringLine_EN(LINE(i + 3), displayBuffer);
+	}
 }
 
-void system_data_read_and_set()
+void system_data_read_and_set(void)
 {
 	if(display_flag == 1)
 	{
@@ -178,9 +198,10 @@ void Draw_Board(void)
 	if(display_flag == 1)
 	{
 		display_flag = 0;
+		I2C_GTP_IRQDisable();
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-		I2C_GTP_IRQEnable();
 		Palette_Init(LCD_SCAN_MODE);
+		I2C_GTP_IRQEnable();
 	}	
 }
 

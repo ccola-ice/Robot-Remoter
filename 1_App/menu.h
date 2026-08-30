@@ -1,35 +1,26 @@
 #ifndef __MENU_H_
 #define __MENU_H_
+
 #include "stm32f4xx.h"
 
-typedef struct
+typedef enum
 {
-    uint8_t current;
-	uint8_t left;	
-    uint8_t right;                                         
-    uint8_t ok;                   
-    uint8_t back;                     
-	void (*current_operation)(void);  
-}Menu_table;
+    MENU_KEY_LEFT = 0,
+    MENU_KEY_RIGHT,
+    MENU_KEY_OK,
+    MENU_KEY_BACK
+} MenuKey;
 
+/* Initialize the menu after the LCD is ready. */
+void menu_init(void);
 
-void menu_button_set(void);
+/* Called by the button callbacks. The event is queued and handled later. */
+void menu_post_key(MenuKey key);
 
+/* Called every 10 ms together with button_ticks(). */
+void menu_tick_10ms(void);
 
-
-
-
-
-
-
-
-
-
-
-
-
+/* Non-blocking menu state machine. Call it repeatedly from the main loop. */
+void menu_process(void);
 
 #endif
-
-
-

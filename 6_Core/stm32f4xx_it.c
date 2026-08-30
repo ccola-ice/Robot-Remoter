@@ -65,6 +65,7 @@ extern uint8_t txbuf[32];
 extern uint8_t rxbuf[32];
 
 extern uint8_t finish_1hz,finish_2hz,finish_5hz,finish_10hz,finish_20hz,finish_33hz,finish_50hz,finish_100hz;
+extern volatile uint8_t finish_button_10ms;
 
 volatile uint8_t ADC_Value1_High, ADC_Value1_Low;
 volatile uint8_t ADC_Value2_High, ADC_Value2_Low;  
@@ -336,6 +337,7 @@ void BASIC_TIM_IRQHandler(void)
 {
   if (TIM_GetITStatus(BASIC_TIM, TIM_IT_Update) != RESET)
   {
+    finish_button_10ms = 1;
     TIM_ClearITPendingBit(BASIC_TIM, TIM_IT_Update);
   }
 }

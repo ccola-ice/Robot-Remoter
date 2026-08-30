@@ -48,6 +48,7 @@
 #include "inv_mpu.h"
 #include "inv_mpu_dmp_motion_driver.h" 
 #include "gui.h"
+#include "menu.h"
 #include "multi_button.h"
 #include "multi_button_user.h"
 #include "common.h"
@@ -89,8 +90,7 @@ short temp;					//ÎÂ¶È
 float yaw_new;
 
 u8 finish_1hz=0,finish_2hz=0,finish_5hz=0,finish_10hz=0,finish_20hz=0,finish_33hz=0,finish_50hz=0,finish_100hz=0;
-
-unsigned int button_hearttick;
+volatile u8 finish_button_10ms=0;
 
 void setup(void)
 {
@@ -232,6 +232,8 @@ int main(void)
 	LCD_SetFont(&Font16x32);
 	LCD_SetColors(GREEN,BLACK);	
 	ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
+	menu_init();
+	menu_process();
 	
 	read_param(param.RecWarnBatVolt, PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, RecWarnBatVolt));
 	read_param(param.chMiddle[1],    PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, chMiddle[1]));
@@ -281,13 +283,14 @@ int main(void)
 
 		if(finish_50hz == 1)
 		{
-			if (++button_hearttick >= 8)
-			{
-				button_ticks();
-				button_hearttick = 0;
-			}
-			menu_button_set();
 			finish_50hz = 0;
+		}
+
+		if(finish_button_10ms == 1)
+		{
+			finish_button_10ms = 0;
+			button_ticks();
+			menu_tick_10ms();
 		}
 
 		if(finish_100hz == 1)
@@ -295,6 +298,8 @@ int main(void)
 
 			finish_100hz = 0;
 		}
+
+		menu_process();
 	}
 }
 

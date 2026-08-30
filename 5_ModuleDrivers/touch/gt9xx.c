@@ -361,6 +361,65 @@ void GTP_IRQ_Enable(void)
 /*用于记录连续触摸时(长按)的上一次触摸位置，负数值表示上一次无触摸按下*/
 static int16_t pre_x[GTP_MAX_TOUCH] ={-1,-1,-1,-1,-1};
 static int16_t pre_y[GTP_MAX_TOUCH] ={-1,-1,-1,-1,-1};
+/**
+  * @brief  Convert a GT9xx sensor coordinate to the current LCD scan direction.
+  * @note   Touch axes are independent from the resolution values in config.
+  *         Always apply the LCD scan direction before checking the bounds.
+  */
+static uint8_t GTP_Map_To_LCD(int32_t input_x, int32_t input_y,
+                              int32_t *lcd_x, int32_t *lcd_y)
+{
+    if(input_x < 0 || input_y < 0)
+    {
+        return 0;
+    }
+
+    switch(LCD_SCAN_MODE)
+    {
+        case 0:
+            *lcd_x = input_x;
+            *lcd_y = input_y;
+            break;
+        case 1:
+            *lcd_x = input_y;
+            *lcd_y = input_x;
+            break;
+        case 2:
+            *lcd_x = (int32_t)LCD_X_LENGTH - 1 - input_x;
+            *lcd_y = input_y;
+            break;
+        case 3:
+            *lcd_x = input_y;
+            *lcd_y = (int32_t)LCD_Y_LENGTH - 1 - input_x;
+            break;
+        case 4:
+            *lcd_x = input_x;
+            *lcd_y = (int32_t)LCD_Y_LENGTH - 1 - input_y;
+            break;
+        case 5:
+            *lcd_x = (int32_t)LCD_X_LENGTH - 1 - input_y;
+            *lcd_y = input_x;
+            break;
+        case 6:
+            *lcd_x = (int32_t)LCD_X_LENGTH - 1 - input_x;
+            *lcd_y = (int32_t)LCD_Y_LENGTH - 1 - input_y;
+            break;
+        case 7:
+            *lcd_x = (int32_t)LCD_X_LENGTH - 1 - input_y;
+            *lcd_y = (int32_t)LCD_Y_LENGTH - 1 - input_x;
+            break;
+        default:
+            return 0;
+    }
+
+    if(*lcd_x < 0 || *lcd_y < 0 ||
+       *lcd_x >= LCD_X_LENGTH || *lcd_y >= LCD_Y_LENGTH)
+    {
+        return 0;
+    }
+
+    return 1;
+}
 
 static void GTP_Touch_Down(int32_t id,int32_t x,int32_t y,int32_t w)
 {
@@ -454,8 +513,16 @@ static void Goodix_TS_Work_Func(void)
     
     finger = point_data[GTP_ADDR_LENGTH];//状态寄存器数据
 
-    if (finger == 0x00)		//没有数据，退出
+    if (finger == 0x00)		//没有有效坐标；若此前有触点，则补发释放事件
     {
+        if(pre_touch)
+        {
+            for(i = 0; i < pre_touch; i++)
+            {
+                GTP_Touch_Up(pre_id[i]);
+            }
+            pre_touch = 0;
+        }
         return;
     }
 
@@ -514,48 +581,11 @@ static void Goodix_TS_Work_Func(void)
             input_y  = coor_data[3] | (coor_data[4] << 8);	//y坐标
             input_w  = coor_data[5] | (coor_data[6] << 8);	//size
 					//printf("X:%d, Y:%d \n", input_x, input_y);
-            {
-					/*根据扫描模式更正X/Y起始方向*/
-				switch(LCD_SCAN_MODE)
-				{
-					case 0:
-					  x  = input_x;
-					  y  = input_y;
-						break;
-					case 1:
-					  x  = input_y;
-						y  = input_x;										
-						break;	
-					case 2:
-					  x  = ILI9806G_LESS_PIXEL - input_x;
-					  y  = input_y;									
-						break;
-					case 3:
-						x  = input_y;
-						y  = ILI9806G_LESS_PIXEL - input_x;										
-						break;	
-					case 4:
-					  x  = input_x;
-					  y  = ILI9806G_MORE_PIXEL - input_y;
-						break;										
-					case 5:
-					  x  = 800 - input_y;
-					  y  = input_x;
-						break;	
-					case 6:
-					  x  = ILI9806G_LESS_PIXEL - input_x;
-					  y  = ILI9806G_MORE_PIXEL - input_y;
-						break;										
-					case 7:
-					  x  = 800 - input_y;
-					  y  = ILI9806G_LESS_PIXEL - input_x;
-						break;									
-					default:
-					break;
-				}
-								//printf("X:%d, Y:%d \n", x, y);
-								GTP_Touch_Down( id, x, y, input_w);//数据处理
-            }
+			if(GTP_Map_To_LCD(input_x, input_y, &x, &y))
+			{
+				//printf("X:%d, Y:%d \n", x, y);
+				GTP_Touch_Down(id, x, y, input_w);//数据处理
+			}
         }
     }
     else if (pre_touch)		//touch_ num=0 且pre_touch！=0

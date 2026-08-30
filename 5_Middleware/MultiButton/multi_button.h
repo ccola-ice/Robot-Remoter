@@ -10,7 +10,7 @@
 #include "string.h"
 
 //According to your need to modify the constants.
-#define TICKS_INTERVAL    5	//ms
+#define TICKS_INTERVAL    10	//ms, driven by TIM6 in main.c
 #define DEBOUNCE_TICKS    3	//MAX 8
 #define SHORT_TICKS       (30 /TICKS_INTERVAL)
 #define LONG_TICKS        (500 /TICKS_INTERVAL)
