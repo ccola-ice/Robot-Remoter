@@ -9,7 +9,8 @@
 
 #define PARAM_FLASH_SAVE_ADDR 		0*4096 
 
-#define FM_FLAG 	0x0002
+#define FM_FLAG 	0x0003
+#define FM_PREVIOUS_FLAG 0x0002
 #define FM_VERSION	"V1.0.0"
 #define FM_TIME		"2024.07.10"
 
@@ -39,10 +40,14 @@ typedef struct param_Config   // 用户参数设置结构体
 	u8 throttleProtect;//油门保护值0%
 	u8 PPM_Out;//是否PPM输出
 	u8 NRF_Power;//NRF发射功率
+	u8 NRF_Channel;//NRF射频频道，范围0~125
+	u8 NRF_DataRate;//NRF空中速率：0=250Kbps，1=1Mbps，2=2Mbps
 	char *version;
 	char *version_time;
 }param_Config;
 #pragma pack()
+
+extern volatile param_Config param;
 
 unsigned char set_default_param(void);
 unsigned char write_default_param(void);

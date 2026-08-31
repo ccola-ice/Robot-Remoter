@@ -56,8 +56,6 @@
 #include "gt9xx.h"
 #include "palette.h"
 #include "param.h"
-#include "ugui.h"
-#include "ugui_config.h"
 #include "malloc.h"
 
 #include <stddef.h>
@@ -138,13 +136,14 @@ void setup(void)
 		printf("\r\n外部Flash文件系统挂载失败！(%d)\r\n",res);
 		while(1);
 	}
-	while(nrf24l01_check() != 0)
+	if(nrf24l01_check() != 0)
 	{
-		Delay_ms(100);
-		//Beeper = !Beeper;//蜂鸣器5Hz报警，表示无线模块故障
+		printf("NRF模块未连接，继续启动，可在菜单中重新检测。\r\n");
 	}
 	nmea_decode_init();//NMEA解码初始化准备
 	write_default_param();
+	nrf24l01_apply_settings(param.NRF_Mode, param.NRF_Channel,
+						param.NRF_Power, param.NRF_DataRate);
 	ILI9806G_GramScan(LCD_SCAN_MODE); //设置LCD显示方向，截图必需设置好液晶显示方向和截图窗口	
 
 	printf("\r\n*****************************初始化设置完成**********************************\r\n");
@@ -177,15 +176,15 @@ int hardware_test(void)
 	// 用来设置截图名字，防止重复，实际应用中可以使用系统时间来命名。
 	snipaste_name_count++; 
 	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
-	printf("\r\n正在截图...");	
-	if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
-	{
-		printf("\r\n截图成功！");
-	}
-	else
-	{
-		printf("\r\n截图失败！");
-	}
+	// printf("\r\n正在截图...");	
+	// if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
+	// {
+	// 	printf("\r\n截图成功！");
+	// }
+	// else
+	// {
+	// 	printf("\r\n截图失败！");
+	// }
 	f_mount(NULL,"0:",1);
 
 	//显示指定大小字符对比

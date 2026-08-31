@@ -5,6 +5,8 @@ u8 RX_BUF[RX_PLOAD_WIDTH];		//接收数据缓存
 u8 TX_BUF[TX_PLOAD_WIDTH];		//发射数据缓存
 u8 TX_ADDRESS[TX_ADR_WIDTH] = {0x34,0x43,0x10,0x10,0x01};  // 定义一个静态发送地址
 u8 RX_ADDRESS[RX_ADR_WIDTH] = {0x34,0x43,0x10,0x10,0x01};
+static u8 nrf_channel = CHANAL;
+static u8 nrf_rf_setup = 0x0f;
 
 void Delay(__IO u32 nCount)
 {
@@ -243,11 +245,11 @@ void NRF_RX_Mode(void)
 	
 	SPI_NRF_WriteReg(NRF_WRITE_REG+EN_RXADDR,0x01);//使能通道0的接收地址    
 	
-	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_CH,CHANAL);      //设置RF通信频率    
+	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_CH,nrf_channel);      //设置RF通信频率    
 	
 	SPI_NRF_WriteReg(NRF_WRITE_REG+RX_PW_P0,RX_PLOAD_WIDTH);//选择通道0的有效数据宽度      
 	
-	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_SETUP,0x0f); //设置TX发射参数,0db增益,2Mbps,低噪声增益开启   
+	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_SETUP,nrf_rf_setup); //设置TX发射功率和空中速率   
 	
 	SPI_NRF_WriteReg(NRF_WRITE_REG+CONFIG, 0x0f);  //配置基本工作模式的参数;PWR_UP,EN_CRC,16BIT_CRC,接收模式 
 
@@ -274,9 +276,9 @@ void NRF_TX_Mode(void)
 	
 	SPI_NRF_WriteReg(NRF_WRITE_REG+SETUP_RETR,0x1a);//设置自动重发间隔时间:500us + 86us;最大自动重发次数:10次
 	
-	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_CH,CHANAL);       //设置RF通道为CHANAL
+	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_CH,nrf_channel);       //设置RF通道
 	
-	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_SETUP,0x0f);  //设置TX发射参数,0db增益,2Mbps,低噪声增益开启   
+	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_SETUP,nrf_rf_setup);  //设置TX发射功率和空中速率   
 		
 	SPI_NRF_WriteReg(NRF_WRITE_REG+CONFIG,0x0e);    //配置基本工作模式的参数;PWR_UP,EN_CRC,16BIT_CRC,发射模式,开启所有中断
 
@@ -285,6 +287,27 @@ void NRF_TX_Mode(void)
 	/*CE拉高，进入发送模式*/	
 	NRF_CE_HIGH();
     Delay(0xffff); //CE要拉高一段时间才进入发送模式
+}
+
+void NRF_SetRFConfig(uint8_t channel, uint8_t rf_setup)
+{
+	if(channel > 125U)
+	{
+		channel = 125U;
+	}
+
+	nrf_channel = channel;
+	nrf_rf_setup = rf_setup;
+}
+
+void NRF_PowerDown(void)
+{
+	uint8_t config;
+
+	NRF_CE_LOW();
+	config = SPI_NRF_ReadReg(CONFIG);
+	config &= (uint8_t)~0x02U;
+	SPI_NRF_WriteReg(NRF_WRITE_REG + CONFIG, config);
 }
 
 /**

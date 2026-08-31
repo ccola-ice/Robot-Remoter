@@ -33,6 +33,8 @@ unsigned char set_default_param(void)
 	param.throttleProtect = 0;//油门保护值，默认0%
 	param.PPM_Out = OFF;//PPM输出，默认关闭
 	param.NRF_Power = 0x09;//0x0f=0dBm;0x0d=-6dBm;0xb=-12dBm;0x09=-18dBm;功率越大，dBm越大
+	param.NRF_Channel = 40;//NRF频道，2400MHz + channel
+	param.NRF_DataRate = 2;//默认2Mbps
 	param.version   = FM_VERSION;
 	param.version_time = FM_TIME;
     
@@ -46,7 +48,19 @@ unsigned char write_default_param(void)
 {
 	FLASH_Read_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);			//从FLASH中读取参数结构体
 	
-	if(param.writeFlag!=FM_FLAG)	//判断是否为最新版本
+	if(param.writeFlag == FM_PREVIOUS_FLAG)
+	{
+		/* 仅迁移本版本新增的NRF字段，保留原有通道校准等用户参数。 */
+		param.writeFlag = FM_FLAG;
+		param.NRF_Channel = 40;
+		param.NRF_DataRate = 2;
+		param.version = FM_VERSION;
+		param.version_time = FM_TIME;
+		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR);
+		FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);
+		printf("migrate params to NRF settings version\r\n");
+	}
+	else if(param.writeFlag!=FM_FLAG)	//判断是否为最新版本
 	{
 		param.writeFlag = FM_FLAG;
 		set_default_param();		//设置默认参数
@@ -56,6 +70,10 @@ unsigned char write_default_param(void)
 		FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);	//写入FLASH
 		printf("update default params\r\n");
 	}
+
+	/* 指针只在运行期使用，不依赖Flash中保存的旧地址。 */
+	param.version = FM_VERSION;
+	param.version_time = FM_TIME;
 
 	return  0;
 }

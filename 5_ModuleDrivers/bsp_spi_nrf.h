@@ -105,6 +105,8 @@ uint8_t SPI_NRF_WriteBuf(uint8_t reg ,uint8_t *pBuf,uint8_t bytes);
 
 void NRF_TX_Mode(void);
 void NRF_RX_Mode(void);
+void NRF_SetRFConfig(uint8_t channel, uint8_t rf_setup);
+void NRF_PowerDown(void);
 uint8_t NRF_Rx_Dat(uint8_t *rxbuf);
 uint8_t NRF_Tx_Dat(uint8_t *txbuf);
 uint8_t NRF_Check(void); 

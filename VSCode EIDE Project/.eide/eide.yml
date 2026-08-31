@@ -47,10 +47,6 @@ virtualFolder:
             - path: ../5_Middleware/MultiButton/multi_button.c
             - path: ../5_Middleware/MultiButton/multi_button_user.c
           folders: []
-        - name: uGUI
-          files:
-            - path: ../5_Middleware/uGUI/ugui.c
-          folders: []
         - name: Malloc
           files:
             - path: ../5_Middleware/Malloc/malloc.c
@@ -194,7 +190,6 @@ targets:
         - ../3_Protocol/nmea_decode/include
         - ../5_Middleware/MPU6050/eMPL
         - ../5_Middleware/MultiButton
-        - ../5_Middleware/uGUI
         - ../5_Middleware/Malloc
         - ../5_ModuleDrivers
         - ../5_ModuleDrivers/fonts

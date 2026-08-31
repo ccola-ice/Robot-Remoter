@@ -10,6 +10,71 @@ uint16_t LIGHT_VALUE;
 float MQ_VALUE_Converted;
 float LIGHT_VALUE_Converted;
 
+void nrf24l01_apply_settings(uint8_t enabled, uint8_t channel,
+                            uint8_t power_register, uint8_t data_rate)
+{
+    uint8_t rf_setup;
+
+    if(channel > 125U)
+    {
+        channel = 125U;
+    }
+
+    /* Bit0 enables LNA; bits2:1 select power; rate uses bits5 and 3. */
+    rf_setup = (uint8_t)(0x01U | (power_register & 0x06U));
+    if(data_rate == 0U)
+    {
+        rf_setup |= 0x20U;       /* 250Kbps */
+    }
+    else if(data_rate >= 2U)
+    {
+        rf_setup |= 0x08U;       /* 2Mbps */
+    }
+
+    NRF_SetRFConfig(channel, rf_setup);
+    if(enabled != 0U)
+    {
+        NRF_TX_Mode();
+    }
+    else
+    {
+        NRF_PowerDown();
+    }
+}
+
+uint8_t nrf24l01_read_runtime(uint8_t *enabled, uint8_t *channel,
+                             uint8_t *power_register, uint8_t *data_rate)
+{
+    uint8_t config = SPI_NRF_ReadReg(CONFIG);
+    uint8_t rf_channel = SPI_NRF_ReadReg(RF_CH);
+    uint8_t rf_setup = SPI_NRF_ReadReg(RF_SETUP);
+
+    /* 本项目始终开启CRC；该位异常或频道越界表示寄存器回读无效。 */
+    if(((config & 0x0cU) != 0x0cU) || (rf_channel > 125U))
+    {
+        return 1U;
+    }
+
+    *enabled = ((config & 0x02U) != 0U) ? 1U : 0U;
+    *channel = rf_channel;
+    *power_register = (uint8_t)(0x09U | (rf_setup & 0x06U));
+
+    if((rf_setup & 0x20U) != 0U)
+    {
+        *data_rate = 0U;
+    }
+    else if((rf_setup & 0x08U) != 0U)
+    {
+        *data_rate = 2U;
+    }
+    else
+    {
+        *data_rate = 1U;
+    }
+
+    return 0U;
+}
+
 //无线模块检测
 uint8_t nrf24l01_check(void)
 {
