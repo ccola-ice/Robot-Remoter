@@ -7,7 +7,8 @@
 #define ON  1
 #define OFF 0
 
-#define PARAM_FLASH_SAVE_ADDR 		0*4096 
+/* FatFs uses SPI Flash sectors 0..2559; keep parameters in the reserved area. */
+#define PARAM_FLASH_SAVE_ADDR 		(2560UL * 4096UL)
 
 #define FM_FLAG 	0x0003
 #define FM_PREVIOUS_FLAG 0x0002
@@ -51,9 +52,9 @@ extern volatile param_Config param;
 
 unsigned char set_default_param(void);
 unsigned char write_default_param(void);
+void param_load_defaults(volatile param_Config *config);
 
-void write_param(void);
-void read_param(uint8_t data, uint32_t WriteAddr);
+uint8_t write_param(void);
 
 
 

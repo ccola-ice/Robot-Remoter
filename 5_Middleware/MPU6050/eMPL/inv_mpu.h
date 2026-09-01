@@ -133,6 +133,18 @@ void mget_ms(unsigned long *time);
 unsigned short inv_row_2_scale(const signed char *row);
 unsigned short inv_orientation_matrix_to_scalar(const signed char *mtx);
 u8 run_self_test(void);
+
+#define MPU_DMP_INIT_OK                    0U
+#define MPU_DMP_INIT_ERROR_DEVICE          1U
+#define MPU_DMP_INIT_ERROR_SENSORS         2U
+#define MPU_DMP_INIT_ERROR_FIFO            3U
+#define MPU_DMP_INIT_ERROR_SAMPLE_RATE     4U
+#define MPU_DMP_INIT_ERROR_FIRMWARE        5U
+#define MPU_DMP_INIT_ERROR_ORIENTATION     6U
+#define MPU_DMP_INIT_ERROR_FEATURES        7U
+#define MPU_DMP_INIT_ERROR_FIFO_RATE       8U
+#define MPU_DMP_INIT_ERROR_ENABLE          9U
+
 u8 mpu_dmp_init(void);
 u8 mpu_dmp_get_data(float *pitch,float *roll,float *yaw);
 

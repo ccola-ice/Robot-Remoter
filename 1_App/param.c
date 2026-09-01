@@ -1,52 +1,67 @@
 #include "param.h"
-#include "bsp_i2c_eeprom.h"
 #include "bsp_spi_flash.h"
-#include <stddef.h>
+#include <string.h>
 
 #define   PARAM_DATA_SIZE  sizeof(param)
+#define   PARAM_FLASH_LEGACY_ADDR 0UL
 
 volatile  param_Config    param;
-struct param_Config * pt_param  = &param;
+
+void param_load_defaults(volatile param_Config *config)
+{
+	uint8_t i;
+
+	config->writeFlag = FM_FLAG;
+	for(i = 0U; i < chNum; i++)
+	{
+		config->chLower[i] = 0U;
+		config->chMiddle[i] = 2047U;
+		config->chUpper[i] = 4095U;
+		config->PWMadjustValue[i] = 0;
+		config->chReverse[i] = OFF;
+	}
+	config->PWMadjustUnit = 2U;
+	config->warnBatVolt = 3.7f;
+	config->throttlePreference = ON;
+	config->batVoltAdjust = 1000U;
+	config->modelType = 0U;
+	config->NRF_Mode = ON;
+	config->keySound = ON;
+	config->onImage = 0U;
+	config->RecWarnBatVolt = 10.9f;
+	config->clockMode = OFF;
+	config->clockTime = 19U;
+	config->clockCheck = OFF;
+	config->throttleProtect = 0U;
+	config->PPM_Out = OFF;
+	config->NRF_Power = 0x09U;
+	config->NRF_Channel = 40U;
+	config->NRF_DataRate = 2U;
+	config->version = FM_VERSION;
+	config->version_time = FM_TIME;
+}
 
 unsigned char set_default_param(void)
 {
-    for(int i=0;i<chNum;i++)
-	{
-		param.chLower[i] 	= 0;	//遥杆的最小值
-		param.chMiddle[i]   = 2047;	//遥杆的中值
-		param.chUpper[i] 	= 4095;	//遥杆的最大值
-		param.PWMadjustValue[i]=0;//微调值
-		param.chReverse[i] = OFF;	//通道的正反，1为正常，0为反转
-	}
-	param.PWMadjustUnit = 2;//微调单位
-	param.warnBatVolt = 3.7;//报警电压
-	param.throttlePreference = ON;//左手油门
-	param.batVoltAdjust = 1000;//电池电压校准值
-	param.modelType = 0;//模型类型：翼0，车1，船2
-	param.NRF_Mode = ON;//无线发射，默认启动
-	param.keySound = ON;//按键声音，默认启动
-	param.onImage = 0;//开机画面，0反白,1正常，默认反白
-	param.RecWarnBatVolt = 10.9;//接收机的报警电压
-	param.clockMode = OFF;//闹钟是否报警，默认关闭
-	param.clockTime = 19;//闹钟时间，默认5min
-	param.clockCheck = OFF;//开机是否自检一下油门，默认关闭
-	param.throttleProtect = 0;//油门保护值，默认0%
-	param.PPM_Out = OFF;//PPM输出，默认关闭
-	param.NRF_Power = 0x09;//0x0f=0dBm;0x0d=-6dBm;0xb=-12dBm;0x09=-18dBm;功率越大，dBm越大
-	param.NRF_Channel = 40;//NRF频道，2400MHz + channel
-	param.NRF_DataRate = 2;//默认2Mbps
-	param.version   = FM_VERSION;
-	param.version_time = FM_TIME;
+	param_load_defaults(&param);
     
 	return 0;
 }
 
-//pt_param->clockTime = 44;
-//write_param();
-
 unsigned char write_default_param(void)
 {
+	uint8_t legacy_loaded = 0U;
+
 	FLASH_Read_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);			//从FLASH中读取参数结构体
+	if((param.writeFlag != FM_FLAG) && (param.writeFlag != FM_PREVIOUS_FLAG))
+	{
+		/* Read old firmware data once, but never erase/write the FatFs sector. */
+		FLASH_Read_Data((uint8_t *)&param, PARAM_FLASH_LEGACY_ADDR, PARAM_DATA_SIZE);
+		if((param.writeFlag == FM_FLAG) || (param.writeFlag == FM_PREVIOUS_FLAG))
+		{
+			legacy_loaded = 1U;
+		}
+	}
 	
 	if(param.writeFlag == FM_PREVIOUS_FLAG)
 	{
@@ -60,13 +75,18 @@ unsigned char write_default_param(void)
 		FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);
 		printf("migrate params to NRF settings version\r\n");
 	}
+	else if((param.writeFlag == FM_FLAG) && (legacy_loaded != 0U))
+	{
+		param.version = FM_VERSION;
+		param.version_time = FM_TIME;
+		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR);
+		FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);
+		printf("migrate params away from FatFs sector\r\n");
+	}
 	else if(param.writeFlag!=FM_FLAG)	//判断是否为最新版本
 	{
-		param.writeFlag = FM_FLAG;
 		set_default_param();		//设置默认参数
-		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR + 0*4096);
-		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR + 1*4096);
-		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR + 2*4096);
+		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR);
 		FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);	//写入FLASH
 		printf("update default params\r\n");
 	}
@@ -78,29 +98,22 @@ unsigned char write_default_param(void)
 	return  0;
 }
 
-#if 0
-//使用结构体指针的形式，有点脱裤子放屁
-void write_param(param_Config * pt_param, uint32_t data, uint32_t WriteAddr, uint8_t size)
-{
-	pt_param->writeFlag  =  data;
-	FLASH_Write_Data((uint8_t *)&(pt_param->writeFlag), WriteAddr, size);
-}
-#endif
-
 //向flash中的参数结构体写入新的数据
 //由于flash写入数据前必须擦除整个扇区，所以写入参数的操作只能是以写入整个结构体的形式完成。
 //使用方法：更新param里的某个元素；调用write_param。
 //param.clockTime = 33;
 //write_param();
-void write_param(void)
+uint8_t write_param(void)
 {
+	param_Config verify_param;
+
+	param.writeFlag = FM_FLAG;
+	param.version = FM_VERSION;
+	param.version_time = FM_TIME;
 	FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR);
 	FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, sizeof(param));	//每次都写入整个param结构体
-}
-
-//从flash读出参数,保存到对应的结构体变量中
-//地址采用 PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, clockTime) 的形式
-void read_param(uint8_t data, uint32_t WriteAddr)
-{
-	FLASH_Read_Data((uint8_t *)&data, WriteAddr, sizeof(data));
+	FLASH_Read_Data((uint8_t *)&verify_param, PARAM_FLASH_SAVE_ADDR,
+					sizeof(verify_param));
+	return (memcmp((const void *)&param, &verify_param, sizeof(param)) == 0) ?
+		   0U : 1U;
 }

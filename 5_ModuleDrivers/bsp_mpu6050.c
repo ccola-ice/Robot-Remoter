@@ -8,17 +8,24 @@ u8 MPU_Init(void)
 { 
 	u8 res;
 	IIC_Init();//初始化IIC总线
-	MPU_Write_Byte(MPU_PWR_MGMT1_REG,0X80);	//复位MPU6050
+	if(MPU_Write_Byte(MPU_PWR_MGMT1_REG,0X80) != 0U)	//复位MPU6050
+		return 1U;
     Delay_ms(100);
-	MPU_Write_Byte(MPU_PWR_MGMT1_REG,0X00);	//唤醒MPU6050 
-	MPU_Set_Gyro_Fsr(3);					//陀螺仪传感器,±2000dps
-	MPU_Set_Accel_Fsr(0);					//加速度传感器,±2g
-	MPU_Set_Rate(50);						//设置采样率50Hz
-	MPU_Write_Byte(MPU_INT_EN_REG,0X00);	//关闭所有中断
-	MPU_Write_Byte(MPU_USER_CTRL_REG,0X00);	//I2C主模式关闭
-	MPU_Write_Byte(MPU_FIFO_EN_REG,0X00);	//关闭FIFO
-	MPU_Write_Byte(MPU_INTBP_CFG_REG,0X80);	//INT引脚低电平有效
-	res=MPU_Read_Byte(MPU_DEVICE_ID_REG);
+	if(MPU_Write_Byte(MPU_PWR_MGMT1_REG,0X00) != 0U)	//唤醒MPU6050
+		return 1U;
+	if(MPU_Set_Gyro_Fsr(3) != 0U)			//陀螺仪传感器,±2000dps
+		return 1U;
+	if(MPU_Set_Accel_Fsr(0) != 0U)			//加速度传感器,±2g
+		return 1U;
+	if(MPU_Set_Rate(50) != 0U)				//设置采样率50Hz
+		return 1U;
+	if(MPU_Write_Byte(MPU_INT_EN_REG,0X00) != 0U ||
+	   MPU_Write_Byte(MPU_USER_CTRL_REG,0X00) != 0U ||
+	   MPU_Write_Byte(MPU_FIFO_EN_REG,0X00) != 0U ||
+	   MPU_Write_Byte(MPU_INTBP_CFG_REG,0X80) != 0U)
+		return 1U;
+	if(MPU_Read_Len(MPU_ADDR, MPU_DEVICE_ID_REG, 1U, &res) != 0U)
+		return 1U;
 	if(res==MPU_ADDR)//器件ID正确
 	{
 		MPU_Write_Byte(MPU_PWR_MGMT1_REG,0X01);	//设置CLKSEL,PLL X轴为参考
@@ -136,7 +143,11 @@ u8 MPU_Write_Len(u8 addr,u8 reg,u8 len,u8 *buf)
 		return 1;		
 	}
     IIC_Send_Byte(reg);	//写寄存器地址
-    IIC_Wait_Ack();		//等待应答
+	if(IIC_Wait_Ack())	//等待应答
+	{
+		IIC_Stop();
+		return 1;
+	}
 	for(i=0;i<len;i++)
 	{
 		IIC_Send_Byte(buf[i]);	//发送数据
@@ -167,10 +178,18 @@ u8 MPU_Read_Len(u8 addr,u8 reg,u8 len,u8 *buf)
 		return 1;		
 	}
     IIC_Send_Byte(reg);	//写寄存器地址
-    IIC_Wait_Ack();		//等待应答
+	if(IIC_Wait_Ack())	//等待应答
+	{
+		IIC_Stop();
+		return 1;
+	}
     IIC_Start();
 	IIC_Send_Byte((addr<<1)|1);//发送器件地址+读命令	
-    IIC_Wait_Ack();		//等待应答 
+    if(IIC_Wait_Ack())	//等待应答
+	{
+		IIC_Stop();
+		return 1;
+	}
 	while(len)
 	{
 		if(len==1)*buf=IIC_Read_Byte(0);//读数据,发送nACK 
@@ -197,7 +216,11 @@ u8 MPU_Write_Byte(u8 reg,u8 data)
 		return 1;		
 	}
     IIC_Send_Byte(reg);	//写寄存器地址
-    IIC_Wait_Ack();		//等待应答 
+	if(IIC_Wait_Ack())	//等待应答
+	{
+		IIC_Stop();
+		return 1;
+	}
 	IIC_Send_Byte(data);//发送数据
 	if(IIC_Wait_Ack())	//等待ACK
 	{
@@ -213,18 +236,10 @@ u8 MPU_Write_Byte(u8 reg,u8 data)
 //返回值:读到的数据
 u8 MPU_Read_Byte(u8 reg)
 {
-	u8 res;
-    IIC_Start(); 
-	IIC_Send_Byte((MPU_ADDR<<1)|0);//发送器件地址+写命令	
-	IIC_Wait_Ack();		//等待应答 
-    IIC_Send_Byte(reg);	//写寄存器地址
-    IIC_Wait_Ack();		//等待应答
-    IIC_Start();
-	IIC_Send_Byte((MPU_ADDR<<1)|1);//发送器件地址+读命令	
-    IIC_Wait_Ack();		//等待应答 
-	res=IIC_Read_Byte(0);//读取数据,发送nACK 
-    IIC_Stop();			//产生一个停止条件 
-	return res;		
+	u8 value = 0xffU;
+	if(MPU_Read_Len(MPU_ADDR, reg, 1U, &value) != 0U)
+		return 0xffU;
+	return value;
 }
 
 

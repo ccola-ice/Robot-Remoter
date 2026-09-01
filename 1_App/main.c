@@ -58,11 +58,10 @@
 #include "param.h"
 #include "malloc.h"
 
-#include <stddef.h>
-
 #include "inv_mpu.h"
 
 #define MALLOC_TEST 0
+#define MPU_DMP_BOOT_ATTEMPTS 3U
 
 extern unsigned int Task_Delay[5];
 
@@ -71,7 +70,6 @@ extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 
 extern SD_Error Status;
 extern volatile  param_Config param;;
-extern param_Config * pt_param;
 
 FATFS fs_sdcard;                   	/* SD卡 FatFs工作区 */
 FATFS fs_flash;                    	/* SPI Flash FatFs工作区 */
@@ -88,6 +86,7 @@ short gyrox,gyroy,gyroz;	//陀螺仪原始数据
 short temp;					//温度
 uint8_t imu_data_valid;
 static uint8_t imu_read_failures;
+static uint8_t imu_dmp_ready;
 float yaw_new;
 
 u8 finish_1hz=0,finish_2hz=0,finish_5hz=0,finish_10hz=0,finish_20hz=0,finish_33hz=0,finish_50hz=0,finish_100hz=0;
@@ -95,6 +94,10 @@ volatile u8 finish_button_10ms=0;
 
 void setup(void)
 {
+	u8 dmp_result = MPU_DMP_INIT_ERROR_DEVICE;
+	u8 dmp_attempt;
+	char dmp_status[48];
+
 	// put your setup code here, to run once:
 	SysTick_Init();
 	Exti_Init();
@@ -113,10 +116,7 @@ void setup(void)
 	gui_boot_begin();
 	gui_boot_update(18U, 0U, "Display controller online", 0U);
 
-	if(MPU_Init() != 0U)	//使用的是软件I2C
-	{
-		gui_boot_update(22U, 1U, "MPU6050 base init failed", 1U);
-	}
+	gui_boot_update(22U, 1U, "MPU6050 interface prepared", 0U);
 	EXTI_MPU_Config();
 	GPS_USART_Config();
 	GPS_DMA_Config();
@@ -125,13 +125,40 @@ void setup(void)
 	Independent_Dual_ADC3_Init();
 	gui_boot_update(30U, 1U, "Input devices configured", 0U);
 	gui_boot_update(34U, 1U, "Starting MPU6050 DMP", 0U);
-	while(mpu_dmp_init() != 0)
+	for(dmp_attempt = 0U; dmp_attempt < MPU_DMP_BOOT_ATTEMPTS; dmp_attempt++)
 	{
-		gui_boot_update(34U, 1U, "MPU6050 DMP retrying", 1U);
-		printf("MPU6050 DMP 初始化失败！\n\r");
+		dmp_result = mpu_dmp_init();
+		if(dmp_result == MPU_DMP_INIT_OK)
+		{
+			imu_dmp_ready = 1U;
+			break;
+		}
+
+		printf("MPU6050 DMP初始化失败：阶段错误码 %u，第%u/%u次。\r\n",
+			   (uint16_t)dmp_result, (uint16_t)(dmp_attempt + 1U),
+			   (uint16_t)MPU_DMP_BOOT_ATTEMPTS);
+		if((dmp_attempt + 1U) < MPU_DMP_BOOT_ATTEMPTS)
+		{
+			sprintf(dmp_status, "DMP error E%u, retry %u/%u",
+					(uint16_t)dmp_result, (uint16_t)(dmp_attempt + 2U),
+					(uint16_t)MPU_DMP_BOOT_ATTEMPTS);
+			gui_boot_update(34U, 1U, dmp_status, 1U);
+			Delay_ms(50U);
+		}
 	}
-	printf("MPU6050 DMP库 初始化成功！\n\r");
-	gui_boot_update(42U, 1U, "MPU6050 DMP online", 0U);
+	if(imu_dmp_ready != 0U)
+	{
+		printf("MPU6050 DMP库初始化成功！\r\n");
+		gui_boot_update(42U, 1U, "MPU6050 DMP online", 0U);
+	}
+	else
+	{
+		sprintf(dmp_status, "MPU6050 offline - DMP error E%u",
+				(uint16_t)dmp_result);
+		printf("MPU6050已离线，系统继续启动。错误码：%u\r\n",
+			   (uint16_t)dmp_result);
+		gui_boot_update(42U, 1U, dmp_status, 1U);
+	}
 	gui_boot_update(48U, 2U, "Starting SD card", 0U);
 	while(SD_Init() != SD_OK)
 	{    
@@ -241,13 +268,6 @@ int main(void)
 	ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
 	menu_init();
 	menu_process();
-	
-	read_param(param.RecWarnBatVolt, PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, RecWarnBatVolt));
-	read_param(param.chMiddle[1],    PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, chMiddle[1]));
-	read_param(param.clockTime,      PARAM_FLASH_SAVE_ADDR + offsetof(param_Config, clockTime));
-	printf("RecWarnBatVolt: %f\r\n", param.RecWarnBatVolt);
-	printf("chMiddle[1]:%d\r\n", param.chMiddle[1]);
-	printf("clockTime:%d\r\n", param.clockTime);
 
 	BASIC_TIM6_Configuration(8400-1, 99); 				//周期：10ms
 	GENERAL_TIM2_InitConfiguration(65536-1,128-1);		//周期：100ms
@@ -260,9 +280,12 @@ int main(void)
     {
 		if(finish_1hz == 1)
 		{
-			temp = MPU_Get_Temperature();
-			MPU_Get_Accelerometer(&aacx,&aacy,&aacz);
-			MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);
+			if(imu_dmp_ready != 0U)
+			{
+				temp = MPU_Get_Temperature();
+				MPU_Get_Accelerometer(&aacx,&aacy,&aacz);
+				MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);
+			}
 			finish_1hz = 0;
 		}
 		
@@ -280,12 +303,13 @@ int main(void)
 
 		if(finish_10hz == 1)
 		{
-			if(mpu_dmp_get_data(&pitch,&roll,&yaw) == 0)
+			if((imu_dmp_ready != 0U) &&
+			   (mpu_dmp_get_data(&pitch,&roll,&yaw) == 0U))
 			{
 				imu_data_valid = 1U;
 				imu_read_failures = 0U;
 			}
-			else
+			else if(imu_dmp_ready != 0U)
 			{
 				if(imu_read_failures < 10U)
 				{
@@ -296,9 +320,15 @@ int main(void)
 					imu_data_valid = 0U;
 				}
 			}
+			else
+			{
+				imu_data_valid = 0U;
+			}
 			RTC_TimeAndDate_Show(); // 显示时间和日期
 			finish_10hz = 0;
 		}
+
+		finish_10hz = 0;
 
 		if(finish_50hz == 1)
 		{

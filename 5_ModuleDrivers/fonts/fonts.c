@@ -1,6 +1,7 @@
 #include "fonts.h"
 #include "bsp_spi_flash.h"
 #include "bsp_usart_debug.h"
+#include <string.h>
 
 /*
  * 常用ASCII表，偏移量32，大小:16（高度）* 8 （宽度）
@@ -1397,11 +1398,16 @@ int GetGBKCode_from_EXFlash( uint8_t * pBuffer, uint16_t c)
 
 	High8bit = c >> 8;      /* 取高8位数据 */
 	Low8bit  = c & 0x00FF;  /* 取低8位数据 */		
+	if((High8bit < 0xa1U) || (High8bit > 0xf7U) ||
+	   (Low8bit < 0xa1U) || (Low8bit > 0xfeU))
+	{
+		memset(pBuffer, 0, WIDTH_CH_CHAR * HEIGHT_CH_CHAR / 8U);
+		return -1;
+	}
 	
 	/*GB2312 公式*/
 	pos = ((High8bit-0xa1)*94+Low8bit-0xa1)*WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8; 
 	FLASH_Read_Data(pBuffer,GBKCODE_START_ADDRESS+pos,WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8); //读取字库数据  
-	printf ( "%02x %02x %02x %02x\n", pBuffer[0],pBuffer[1],pBuffer[2],pBuffer[3]);
 
 	return 0;  
 }
