@@ -68,9 +68,63 @@ static void gui_draw_progress_bar(uint16_t x, uint16_t y, uint16_t width,
 	ILI9806G_DrawRectangle(x, y, width, height, 0U);
 }
 
+static void gui_update_progress_bar(uint16_t x, uint16_t y, uint16_t width,
+								uint16_t height, uint32_t percent_x10,
+								uint16_t fill_color, uint16_t *previous_width,
+								uint8_t draw_frame)
+{
+	uint16_t inner_width;
+	uint16_t filled_width;
+	uint16_t old_width;
+	uint16_t changed_width;
+
+	if(percent_x10 > 1000UL)
+	{
+		percent_x10 = 1000UL;
+	}
+
+	inner_width = (width > 4U) ? (width - 4U) : 0U;
+	filled_width = (uint16_t)((inner_width * percent_x10 + 500UL) / 1000UL);
+	old_width = (*previous_width <= inner_width) ? *previous_width : 0U;
+
+	if(draw_frame != 0U)
+	{
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DrawRectangle(x, y, width, height, 1U);
+		LCD_SetTextColor(BLACK);
+		ILI9806G_DrawRectangle(x, y, width, height, 0U);
+		old_width = 0U;
+	}
+	else
+	{
+		changed_width = (filled_width > old_width) ?
+						(filled_width - old_width) : (old_width - filled_width);
+		/* Ignore one-pixel ADC/float jitter to avoid continuous LCD writes. */
+		if(changed_width < 2U)
+		{
+			return;
+		}
+	}
+
+	if(filled_width > old_width)
+	{
+		LCD_SetTextColor(fill_color);
+		ILI9806G_DrawRectangle(x + 2U + old_width, y + 2U,
+							  filled_width - old_width, height - 4U, 1U);
+	}
+	else if(old_width > filled_width)
+	{
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DrawRectangle(x + 2U + filled_width, y + 2U,
+							  old_width - filled_width, height - 4U, 1U);
+	}
+
+	*previous_width = filled_width;
+}
+
 static void gui_draw_channel_card(uint16_t x, uint16_t y, uint8_t channel,
 							  uint16_t value, uint16_t bar_color,
-							  uint8_t draw_frame)
+							  uint16_t *previous_width, uint8_t draw_frame)
 {
 	uint16_t shown_value = (value > 4095U) ? 4095U : value;
 	uint16_t bar_x = x + 170U;
@@ -91,9 +145,9 @@ static void gui_draw_channel_card(uint16_t x, uint16_t y, uint8_t channel,
 	sprintf(displayBuffer, "%4u", value);
 	ILI9806G_DispString_EN(x + 88U, y + 7U, displayBuffer);
 
-	gui_draw_progress_bar(bar_x, y + 13U, bar_width, 20U,
-						  ((uint32_t)shown_value * 1000UL) / 4095UL,
-						  bar_color);
+	gui_update_progress_bar(bar_x, y + 13U, bar_width, 20U,
+							((uint32_t)shown_value * 1000UL) / 4095UL,
+							bar_color, previous_width, draw_frame);
 	LCD_SetTextColor(RED);
 	ILI9806G_DrawLine(bar_x + bar_width / 2U, y + 11U,
 					  bar_x + bar_width / 2U, y + 35U);
@@ -114,7 +168,8 @@ static uint32_t gui_imu_axis_percent(float value, float limit)
 }
 
 static void gui_draw_imu_axis(uint16_t y, const char *name, float value,
-						  float limit, uint16_t color, uint8_t draw_frame)
+						  float limit, uint16_t color,
+						  uint16_t *previous_width, uint8_t draw_frame)
 {
 	if(draw_frame != 0U)
 	{
@@ -131,8 +186,9 @@ static void gui_draw_imu_axis(uint16_t y, const char *name, float value,
 	LCD_SetTextColor(color);
 	sprintf(displayBuffer, "%+7.1f deg", value);
 	ILI9806G_DispString_EN(156U, y + 8U, displayBuffer);
-	gui_draw_progress_bar(20U, y + 48U, 760U, 22U,
-						  gui_imu_axis_percent(value, limit), color);
+	gui_update_progress_bar(20U, y + 48U, 760U, 22U,
+							gui_imu_axis_percent(value, limit), color,
+							previous_width, draw_frame);
 	LCD_SetTextColor(RED);
 	ILI9806G_DrawLine(400U, y + 45U, 400U, y + 73U);
 }
@@ -229,7 +285,6 @@ void main_menu(uint8_t selected_item)
 	uint8_t i;
 	uint16_t card_x;
 	uint16_t card_y;
-	uint16_t card_color;
 	uint8_t first_draw = 0U;
 
 	if(selected_item >= 6U)
@@ -259,33 +314,43 @@ void main_menu(uint8_t selected_item)
 
 	for(i = 0; i < 6U; i++)
 	{
-		if((first_draw == 0U) && (i != selected_item) &&
-		   (i != last_selected_item))
-		{
-			continue;
-		}
-
 		card_x = ((i & 1U) == 0U) ? 4U : 404U;
 		card_y = 80U + (uint16_t)(i / 2U) * 104U;
-		card_color = (i == selected_item) ? BLUE : GREY;
-		LCD_SetTextColor(card_color);
-		ILI9806G_DrawRectangle(card_x, card_y, 392U, 88U, 1U);
-		LCD_SetBackColor(card_color);
-		LCD_SetTextColor((i == selected_item) ? WHITE : BLACK);
-		sprintf(displayBuffer, "%c %u. %-18.18s",
-				(i == selected_item) ? '>' : ' ', (uint16_t)(i + 1U),
-				menu_text[i]);
-		ILI9806G_DispString_EN(card_x + 8U, card_y + 8U, displayBuffer);
-		sprintf(displayBuffer, "   %-20.20s", menu_hint[i]);
-		ILI9806G_DispString_EN(card_x + 8U, card_y + 48U, displayBuffer);
+
+		if(first_draw != 0U)
+		{
+			LCD_SetTextColor(GREY);
+			ILI9806G_DrawRectangle(card_x, card_y, 392U, 88U, 1U);
+			LCD_SetBackColor(GREY);
+			LCD_SetTextColor(BLACK);
+			sprintf(displayBuffer, "  %u. %-18.18s",
+					(uint16_t)(i + 1U), menu_text[i]);
+			ILI9806G_DispString_EN(card_x + 16U, card_y + 8U, displayBuffer);
+			sprintf(displayBuffer, "     %-20.20s", menu_hint[i]);
+			ILI9806G_DispString_EN(card_x + 16U, card_y + 48U, displayBuffer);
+		}
+
+		if((first_draw != 0U) || (i == selected_item) ||
+		   (i == last_selected_item))
+		{
+			/* A narrow indicator and outline avoid tearing from full-card fills. */
+			LCD_SetTextColor((i == selected_item) ? BLUE : GREY);
+			ILI9806G_DrawRectangle(card_x + 4U, card_y + 4U,
+							  8U, 80U, 1U);
+			LCD_SetTextColor((i == selected_item) ? BLUE : BLACK);
+			ILI9806G_DrawRectangle(card_x, card_y, 392U, 88U, 0U);
+		}
 	}
 
 	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(WHITE);
-	ILI9806G_DrawRectangle(4U, 416U, 792U, 32U, 1U);
+	if(first_draw != 0U)
+	{
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DrawRectangle(4U, 416U, 792U, 32U, 1U);
+	}
 	LCD_SetTextColor(BLUE);
-	sprintf(displayBuffer, "Selected %u / 6: %s",
-			(uint16_t)(selected_item + 1U), menu_text[selected_item]);
+	sprintf(displayBuffer, "Selected: %u / 6 ",
+			(uint16_t)(selected_item + 1U));
 	ILI9806G_DispString_EN(4U, 416U, displayBuffer);
 	last_selected_item = selected_item;
 }
@@ -459,6 +524,7 @@ void system_data_read_and_set(void)
 void channel_monitor_page(void)
 {
 	static const uint16_t card_y[5] = {80U, 144U, 208U, 272U, 336U};
+	static uint16_t previous_bar_width[10];
 	uint16_t channel_value[10];
 	uint8_t i;
 	uint8_t first_draw = 0U;
@@ -498,9 +564,10 @@ void channel_monitor_page(void)
 	for(i = 0U; i < 5U; i++)
 	{
 		gui_draw_channel_card(4U, card_y[i], i, channel_value[i], BLUE,
-						  first_draw);
+						  &previous_bar_width[i], first_draw);
 		gui_draw_channel_card(404U, card_y[i], i + 5U,
-						  channel_value[i + 5U], GREEN, first_draw);
+						  channel_value[i + 5U], GREEN,
+						  &previous_bar_width[i + 5U], first_draw);
 	}
 
 	LCD_SetBackColor(WHITE);
@@ -509,6 +576,7 @@ void channel_monitor_page(void)
 
 void imu6050_information(void)
 {
+	static uint16_t previous_bar_width[3];
 	uint8_t first_draw = 0U;
 
 	if(display_flag == 1)
@@ -533,9 +601,12 @@ void imu6050_information(void)
 		ILI9806G_DrawRectangle(4U, 396U, 792U, 80U, 1U);
 	}
 
-	gui_draw_imu_axis(76U, "PITCH", pitch, 90.0f, BLUE, first_draw);
-	gui_draw_imu_axis(172U, "ROLL", roll, 180.0f, GREEN, first_draw);
-	gui_draw_imu_axis(268U, "YAW", yaw, 180.0f, RED, first_draw);
+	gui_draw_imu_axis(76U, "PITCH", pitch, 90.0f, BLUE,
+					   &previous_bar_width[0], first_draw);
+	gui_draw_imu_axis(172U, "ROLL", roll, 180.0f, GREEN,
+					   &previous_bar_width[1], first_draw);
+	gui_draw_imu_axis(268U, "YAW", yaw, 180.0f, RED,
+					   &previous_bar_width[2], first_draw);
 
 	LCD_SetBackColor(GREY);
 	LCD_SetTextColor(imu_data_valid ? GREEN : RED);
