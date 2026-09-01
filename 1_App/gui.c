@@ -988,65 +988,279 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
 	ILI9806G_DispString_EN(4U, LINE(13), "Blue=selected  Red=editing  OK=confirm");
 }
 
+typedef struct
+{
+	int sig;
+	int fix;
+	int mode;
+	int gps_inuse;
+	int gps_inview;
+	int bds_inuse;
+	int bds_inview;
+	int year;
+	int month;
+	int day;
+	int hour;
+	int minute;
+	int second;
+	double latitude;
+	double longitude;
+	double altitude;
+	double speed;
+	double course;
+	double hdop;
+	double pdop;
+} gui_gps_snapshot_t;
+
+static void gui_gps_draw_card(uint16_t x, uint16_t y, uint16_t width,
+							  uint16_t height, const char *title)
+{
+	LCD_SetTextColor(GREY);
+	ILI9806G_DrawRectangle(x, y, width, height, 1U);
+	LCD_SetTextColor(BLUE2);
+	ILI9806G_DrawRectangle(x, y, width, height, 0U);
+	LCD_SetFont(&Font8x16);
+	LCD_SetBackColor(GREY);
+	LCD_SetTextColor(BLACK);
+	ILI9806G_DispString_EN(x + 12U, y + 8U, (char *)title);
+}
+
 void system_data_read_and_set(void)
 {
+	static gui_gps_snapshot_t previous;
+	static uint8_t snapshot_valid;
+	gui_gps_snapshot_t current;
+	uint8_t first_draw = 0U;
+	uint8_t position_valid;
+	uint8_t time_valid;
+	uint16_t status_color;
+	uint32_t gps_level;
+	uint32_t bds_level;
+	int total_inuse;
+	int total_inview;
+	char latitude_hemisphere;
+	char longitude_hemisphere;
+	char mode;
+	double latitude;
+	double longitude;
+	const char *fix_text;
+	const char *signal_text;
+
+	memset(&current, 0, sizeof(current));
+	current.sig = info.sig;
+	current.fix = info.fix;
+	current.mode = info.mode;
+	current.gps_inuse = info.satinfo.inuse;
+	current.gps_inview = info.satinfo.inview;
+	current.bds_inuse = info.BDsatinfo.inuse;
+	current.bds_inview = info.BDsatinfo.inview;
+	current.year = beiJingTime.year;
+	current.month = beiJingTime.mon;
+	current.day = beiJingTime.day;
+	current.hour = beiJingTime.hour;
+	current.minute = beiJingTime.min;
+	current.second = beiJingTime.sec;
+	current.latitude = deg_lat;
+	current.longitude = deg_lon;
+	current.altitude = info.elv;
+	current.speed = info.speed;
+	current.course = info.direction;
+	current.hdop = info.HDOP;
+	current.pdop = info.PDOP;
+
 	if(display_flag == 1)
 	{
 		display_flag = 0;
-		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
+		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
 		I2C_GTP_IRQDisable();
+		first_draw = 1U;
+		snapshot_valid = 0U;
 	}
+
+	if(first_draw != 0U)
+	{
+		LCD_SetTextColor(BLUE2);
+		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
+		LCD_SetFont(&Font16x32);
+		LCD_SetBackColor(BLUE2);
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DispString_EN(20U, 0U, "GPS / BDS NAVIGATION");
+		LCD_SetFont(&Font8x16);
+		ILI9806G_DispString_EN(20U, 36U, "LIVE NMEA POSITION AND RECEIVER STATUS");
+
+		LCD_SetTextColor(GREY);
+		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
+		LCD_SetTextColor(BLUE2);
+		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 0U);
+
+		gui_gps_draw_card(4U, 112U, 500U, 136U, "POSITION");
+		gui_gps_draw_card(512U, 112U, 284U, 136U, "SOLUTION");
+		gui_gps_draw_card(4U, 256U, 252U, 96U, "GPS SATELLITES");
+		gui_gps_draw_card(264U, 256U, 252U, 96U, "BDS SATELLITES");
+		gui_gps_draw_card(524U, 256U, 272U, 96U, "NMEA LOCAL TIME");
+		gui_gps_draw_card(4U, 360U, 252U, 80U, "ALTITUDE");
+		gui_gps_draw_card(264U, 360U, 252U, 80U, "GROUND SPEED");
+		gui_gps_draw_card(524U, 360U, 272U, 80U, "TRUE COURSE");
+
+		LCD_SetFont(&Font8x16);
+		LCD_SetBackColor(WHITE);
+		LCD_SetTextColor(BLACK);
+		ILI9806G_DispString_EN(12U, 456U, "LEFT: BACK");
+		LCD_SetTextColor(BLUE2);
+		ILI9806G_DispString_EN(596U, 456U, "GNSS DATA / LIVE");
+	}
+
+	if((snapshot_valid != 0U) &&
+	   (memcmp(&current, &previous, sizeof(current)) == 0))
+	{
+		return;
+	}
+
+	previous = current;
+	snapshot_valid = 1U;
+	position_valid = ((current.sig > 0) && (current.fix >= 2)) ? 1U : 0U;
+	time_valid = ((current.year >= 100) && (current.month >= 1) &&
+				  (current.month <= 12) && (current.day >= 1) &&
+				  (current.day <= 31)) ? 1U : 0U;
+	mode = ((current.mode >= 32) && (current.mode <= 126)) ?
+		   (char)current.mode : '-';
+
+	if(position_valid == 0U)
+	{
+		fix_text = "NO FIX";
+		status_color = RED;
+	}
+	else if(current.sig == 2)
+	{
+		fix_text = "DGNSS FIX";
+		status_color = GREEN;
+	}
+	else if(current.fix >= 3)
+	{
+		fix_text = "3D FIX";
+		status_color = GREEN;
+	}
+	else
+	{
+		fix_text = "2D FIX";
+		status_color = YELLOW;
+	}
+
+	switch(current.sig)
+	{
+		case 1: signal_text = "STANDARD"; break;
+		case 2: signal_text = "DIFFERENTIAL"; break;
+		case 3: signal_text = "SENSITIVE"; break;
+		default: signal_text = "INVALID"; break;
+	}
+
+	total_inuse = current.gps_inuse + current.bds_inuse;
+	total_inview = current.gps_inview + current.bds_inview;
+	LCD_SetFont(&Font8x16);
+	LCD_SetBackColor(GREY);
+	LCD_SetTextColor(status_color);
+	sprintf(displayBuffer, "%-10s", fix_text);
+	ILI9806G_DispString_EN(20U, 80U, displayBuffer);
+	LCD_SetTextColor(BLACK);
+	sprintf(displayBuffer,
+			"MODE:%c  SIGNAL:%-12s  USED:%02d  VIEW:%02d  HDOP:%5.2f    ",
+			mode, signal_text, total_inuse, total_inview, current.hdop);
+	ILI9806G_DispString_EN(116U, 80U, displayBuffer);
+
+	LCD_SetFont(&Font16x32);
+	LCD_SetBackColor(GREY);
+	LCD_SetTextColor(BLUE2);
+	if(position_valid != 0U)
+	{
+		latitude = current.latitude;
+		longitude = current.longitude;
+		latitude_hemisphere = (latitude < 0.0) ? 'S' : 'N';
+		longitude_hemisphere = (longitude < 0.0) ? 'W' : 'E';
+		if(latitude < 0.0) latitude = -latitude;
+		if(longitude < 0.0) longitude = -longitude;
+		sprintf(displayBuffer, "LAT  %c %10.6f deg   ", latitude_hemisphere, latitude);
+		ILI9806G_DispString_EN(20U, 144U, displayBuffer);
+		sprintf(displayBuffer, "LON  %c %10.6f deg   ", longitude_hemisphere, longitude);
+		ILI9806G_DispString_EN(20U, 192U, displayBuffer);
+	}
+	else
+	{
+		ILI9806G_DispString_EN(20U, 144U, "LAT  -- NO VALID POSITION ");
+		ILI9806G_DispString_EN(20U, 192U, "LON  -- NO VALID POSITION ");
+	}
+
+	LCD_SetTextColor(status_color);
+	sprintf(displayBuffer, "%-13s", fix_text);
+	ILI9806G_DispString_EN(528U, 144U, displayBuffer);
+	LCD_SetFont(&Font8x16);
+	LCD_SetTextColor(BLACK);
+	sprintf(displayBuffer, "QUALITY: %-14s  ", signal_text);
+	ILI9806G_DispString_EN(528U, 184U, displayBuffer);
+	sprintf(displayBuffer, "HDOP:%5.2f  PDOP:%5.2f      ", current.hdop, current.pdop);
+	ILI9806G_DispString_EN(528U, 208U, displayBuffer);
+
+	LCD_SetFont(&Font16x32);
+	LCD_SetTextColor(BLUE2);
+	sprintf(displayBuffer, "USED %02d / %02d ", current.gps_inuse, current.gps_inview);
+	ILI9806G_DispString_EN(20U, 280U, displayBuffer);
+	sprintf(displayBuffer, "USED %02d / %02d ", current.bds_inuse, current.bds_inview);
+	ILI9806G_DispString_EN(280U, 280U, displayBuffer);
+
+	gps_level = (current.gps_inuse <= 0) ? 0UL :
+				((current.gps_inuse >= 12) ? 1000UL :
+				 (uint32_t)current.gps_inuse * 1000UL / 12UL);
+	bds_level = (current.bds_inuse <= 0) ? 0UL :
+				((current.bds_inuse >= 12) ? 1000UL :
+				 (uint32_t)current.bds_inuse * 1000UL / 12UL);
+	gui_draw_progress_bar(20U, 328U, 220U, 12U, gps_level, BLUE2);
+	gui_draw_progress_bar(280U, 328U, 220U, 12U, bds_level, GREEN);
+
+	LCD_SetBackColor(GREY);
+	if(time_valid != 0U)
+	{
+		LCD_SetFont(&Font16x32);
+		LCD_SetTextColor(BLUE2);
+		sprintf(displayBuffer, "%02d:%02d:%02d   ", current.hour,
+				current.minute, current.second);
+		ILI9806G_DispString_EN(540U, 280U, displayBuffer);
+		LCD_SetFont(&Font8x16);
+		LCD_SetTextColor(BLACK);
+		sprintf(displayBuffer, "%04d/%02d/%02d           ", current.year + 1900,
+				current.month, current.day);
+		ILI9806G_DispString_EN(540U, 328U, displayBuffer);
+	}
+	else
+	{
+		LCD_SetFont(&Font16x32);
+		LCD_SetTextColor(RED);
+		ILI9806G_DispString_EN(540U, 280U, "WAITING...     ");
+		LCD_SetFont(&Font8x16);
+		LCD_SetTextColor(BLACK);
+		ILI9806G_DispString_EN(540U, 328U, "NO VALID NMEA TIME        ");
+	}
+
+	LCD_SetFont(&Font16x32);
+	LCD_SetBackColor(GREY);
+	LCD_SetTextColor(BLUE2);
+	if(position_valid != 0U)
+	{
+		sprintf(displayBuffer, "%7.1f m   ", current.altitude);
+		ILI9806G_DispString_EN(20U, 392U, displayBuffer);
+		sprintf(displayBuffer, "%7.1f km/h", current.speed);
+		ILI9806G_DispString_EN(280U, 392U, displayBuffer);
+		sprintf(displayBuffer, "%6.1f deg     ", current.course);
+		ILI9806G_DispString_EN(540U, 392U, displayBuffer);
+	}
+	else
+	{
+		ILI9806G_DispString_EN(20U, 392U, "--           ");
+		ILI9806G_DispString_EN(280U, 392U, "--           ");
+		ILI9806G_DispString_EN(540U, 392U, "--             ");
+	}
+
 	LCD_SetFont(&Font16x32);
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(BLACK);
-	
-	/* LCD显示 */
-	/* 设置前景颜色（字体颜色）*/
-	LCD_SetTextColor(BLUE);
-	
-	//ILI9806G_DispStringLine_EN(LINE(0)," GPS Info:");
-	ILI9806G_DispStringLine_EN_CH(LINE(0),"GPS信息：");
-
-	/* 显示时间日期 */
-	sprintf(displayBuffer," Date:%4d/%02d/%02d ", beiJingTime.year+1900, beiJingTime.mon,beiJingTime.day);
-	ILI9806G_DispStringLine_EN(LINE(1),displayBuffer);
-  
-	sprintf(displayBuffer," 时间:%02d:%02d:%02d", beiJingTime.hour,beiJingTime.min,beiJingTime.sec);
-	//sprintf(displayBuffer," Time:%02d:%02d:%02d", beiJingTime.hour,beiJingTime.min,beiJingTime.sec);
-	ILI9806G_DispStringLine_EN_CH(LINE(2),displayBuffer);
-		
-	/* 纬度 经度*/
-	sprintf(displayBuffer," lat :%.6f ", deg_lat);
-	ILI9806G_DispStringLine_EN(LINE(3),displayBuffer);
-	
-	sprintf(displayBuffer," lon :%.6f",deg_lon);
-	ILI9806G_DispStringLine_EN(LINE(4),displayBuffer);
-
-	/* 正在使用的卫星 可见的卫星*/
-	sprintf(displayBuffer," GPS Sat in use:%2d ", info.satinfo.inuse);
-	ILI9806G_DispStringLine_EN(LINE(5),displayBuffer);    
-
-	sprintf(displayBuffer," GPS Sat in view:%2d", info.satinfo.inview);
-	ILI9806G_DispStringLine_EN(LINE(6),displayBuffer);    
-
-	/* 正在使用的卫星 可见的卫星*/
-	sprintf(displayBuffer," BDS Sat in use:%2d ", info.BDsatinfo.inuse);
-	ILI9806G_DispStringLine_EN(LINE(7),displayBuffer);    
-	
-	sprintf(displayBuffer," BDS Sat in view:%2d", info.BDsatinfo.inview);
-	ILI9806G_DispStringLine_EN(LINE(8),displayBuffer);    
-	
-	/* 海拔高度 */
-	sprintf(displayBuffer," Altitude:%4.2f m", info.elv);
-	ILI9806G_DispStringLine_EN(LINE(9),displayBuffer);
-	
-	/* 速度 */
-	sprintf(displayBuffer," speed:%4.2f km/h", info.speed);
-	ILI9806G_DispStringLine_EN(LINE(10),displayBuffer);
-	
-	/* 航向 */
-	sprintf(displayBuffer," Angle:%3.2f deg", info.direction);
-	ILI9806G_DispStringLine_EN(LINE(11),displayBuffer);
 }
 
 void channel_monitor_page(void)
