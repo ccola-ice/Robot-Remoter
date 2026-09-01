@@ -7,6 +7,7 @@
 #include "inv_mpu.h"
 #include "inv_mpu_dmp_motion_driver.h" 
 #include "bsp_mpu6050.h"
+#include "bsp_rtc.h"
 #include "nmea/nmea.h"
 #include "palette.h"
 #include "gt9xx.h"
@@ -38,6 +39,8 @@ extern uint8_t Image$$RW_IRAM1$$ZI$$Length;
 char displayBuffer[100];
 
 static uint8_t display_flag = 0;	//界面切换标志，每次只有第一次切换界面时才清屏（ILI9806G_Clear），其他情况不清屏
+static uint8_t clock_force_redraw = 1U;
+static uint8_t clock_last_seconds = 0xffU;
 static uint16_t boot_progress_width;
 static uint8_t boot_last_stage;
 static const uint16_t boot_stage_x[4] = {120U, 260U, 400U, 540U};
@@ -47,6 +50,44 @@ static const char *boot_stage_label[4] = {"CORE", "DEVICE", "SERVICE", "READY"};
 void gui_prepare_page(void)
 {
 	display_flag = 1;
+	clock_force_redraw = 1U;
+}
+
+void gui_clock_overlay(void)
+{
+	RTC_TimeTypeDef rtc_time;
+	RTC_DateTypeDef rtc_date;
+	char clock_text[9];
+
+	RTC_GetTime(RTC_Format_BIN, &rtc_time);
+	/* Reading the date unlocks the STM32 RTC shadow registers. */
+	RTC_GetDate(RTC_Format_BIN, &rtc_date);
+	(void)rtc_date;
+
+	if((clock_force_redraw == 0U) &&
+	   (clock_last_seconds == rtc_time.RTC_Seconds))
+	{
+		return;
+	}
+
+	clock_force_redraw = 0U;
+	clock_last_seconds = rtc_time.RTC_Seconds;
+	sprintf(clock_text, "%02u:%02u:%02u", rtc_time.RTC_Hours,
+			rtc_time.RTC_Minutes, rtc_time.RTC_Seconds);
+
+	/* A self-contained badge works on both blue and white page headers. */
+	LCD_SetTextColor(BLACK);
+	ILI9806G_DrawRectangle(700U, 4U, 92U, 24U, 1U);
+	LCD_SetTextColor(BLUE2);
+	ILI9806G_DrawRectangle(700U, 4U, 92U, 24U, 0U);
+	LCD_SetFont(&Font8x16);
+	LCD_SetBackColor(BLACK);
+	LCD_SetTextColor(WHITE);
+	ILI9806G_DispString_EN(714U, 8U, clock_text);
+
+	LCD_SetFont(&Font16x32);
+	LCD_SetBackColor(WHITE);
+	LCD_SetTextColor(BLACK);
 }
 
 void gui_boot_begin(void)

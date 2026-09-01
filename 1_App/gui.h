@@ -25,6 +25,8 @@ typedef struct
 
 void gui_prepare_page(void);
 
+void gui_clock_overlay(void);
+
 void gui_boot_begin(void);
 
 void gui_boot_update(uint8_t percent, uint8_t stage,

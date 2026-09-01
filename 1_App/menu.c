@@ -10,6 +10,7 @@
 #define MENU_ITEM_COUNT       8U
 #define MENU_EVENT_QUEUE_SIZE 8U
 #define MENU_REFRESH_TICKS    5U
+#define CLOCK_REFRESH_TICKS   20U
 #define NRF_MENU_ITEM_COUNT   6U
 #define NRF_SETTING_COUNT     4U
 #define BROWSER_MAX_ENTRIES   64U
@@ -64,6 +65,8 @@ static uint8_t event_read_index;
 static uint8_t event_write_index;
 static uint8_t selected_item;
 static uint8_t refresh_tick_count;
+static uint8_t clock_refresh_tick_count;
+static uint8_t clock_refresh_due;
 static uint8_t page_dirty;
 static uint8_t page_changed;
 static uint8_t refresh_due;
@@ -1202,6 +1205,8 @@ void menu_init(void)
     event_write_index = 0;
     selected_item = 0;
     refresh_tick_count = 0;
+    clock_refresh_tick_count = 0U;
+    clock_refresh_due = 1U;
     refresh_due = 0;
     current_page = MENU_PAGE_HOME;
     page_dirty = 1;
@@ -1228,6 +1233,12 @@ void menu_tick_10ms(void)
         refresh_tick_count = 0;
         refresh_due = 1;
     }
+
+    if(++clock_refresh_tick_count >= CLOCK_REFRESH_TICKS)
+    {
+        clock_refresh_tick_count = 0U;
+        clock_refresh_due = 1U;
+    }
 }
 
 void menu_process(void)
@@ -1251,10 +1262,18 @@ void menu_process(void)
         page_dirty = 0;
         refresh_due = 0;
         menu_draw_current_page();
+        gui_clock_overlay();
+        clock_refresh_due = 0U;
     }
     else if(refresh_due)
     {
         refresh_due = 0;
         menu_refresh_dynamic_page();
+    }
+
+    if(clock_refresh_due != 0U)
+    {
+        clock_refresh_due = 0U;
+        gui_clock_overlay();
     }
 }
