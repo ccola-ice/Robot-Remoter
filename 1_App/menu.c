@@ -2,12 +2,19 @@
 #include "gui.h"
 #include "param.h"
 #include "platform_nrf.h"
+#include "ff.h"
 
-#define MENU_ITEM_COUNT       6U
+#include <stdio.h>
+#include <string.h>
+
+#define MENU_ITEM_COUNT       7U
 #define MENU_EVENT_QUEUE_SIZE 8U
 #define MENU_REFRESH_TICKS    5U
 #define NRF_MENU_ITEM_COUNT   6U
 #define NRF_SETTING_COUNT     4U
+#define BROWSER_MAX_ENTRIES   64U
+#define BROWSER_VISIBLE_ROWS  6U
+#define BROWSER_PATH_LENGTH   256U
 
 typedef enum
 {
@@ -17,7 +24,8 @@ typedef enum
     MENU_PAGE_IMU,
     MENU_PAGE_GPS,
     MENU_PAGE_DRAW_BOARD,
-    MENU_PAGE_NRF
+    MENU_PAGE_NRF,
+    MENU_PAGE_FILE_BROWSER
 } MenuPage;
 
 static const MenuPage menu_items[MENU_ITEM_COUNT] =
@@ -27,7 +35,8 @@ static const MenuPage menu_items[MENU_ITEM_COUNT] =
     MENU_PAGE_IMU,
     MENU_PAGE_GPS,
     MENU_PAGE_DRAW_BOARD,
-    MENU_PAGE_NRF
+    MENU_PAGE_NRF,
+    MENU_PAGE_FILE_BROWSER
 };
 
 static const uint8_t nrf_power_register[4] = {0x09U, 0x0bU, 0x0dU, 0x0fU};
@@ -62,6 +71,14 @@ static uint8_t nrf_runtime_enabled;
 static uint8_t nrf_runtime_channel;
 static uint8_t nrf_runtime_power_index;
 static uint8_t nrf_runtime_data_rate;
+static GuiFileEntry browser_entries[BROWSER_MAX_ENTRIES];
+static char browser_path[BROWSER_PATH_LENGTH];
+static char browser_status[80];
+static uint8_t browser_item_count;
+static uint8_t browser_selected_item;
+static uint8_t browser_first_visible;
+static uint8_t browser_virtual_root;
+static uint16_t browser_revision;
 
 static uint8_t menu_nrf_power_index(uint8_t power_register)
 {
@@ -224,6 +241,220 @@ static void menu_handle_nrf_key(MenuKey key)
     }
 }
 
+static void menu_browser_set_status(const char *text)
+{
+    strncpy(browser_status, text, sizeof(browser_status) - 1U);
+    browser_status[sizeof(browser_status) - 1U] = '\0';
+}
+
+static void menu_browser_load_drives(void)
+{
+    memset(browser_entries, 0, sizeof(browser_entries));
+    strcpy(browser_path, "Available volumes");
+    strcpy(browser_entries[0].name, "SD Card [0:]");
+    strcpy(browser_entries[1].name, "SPI Flash [1:]");
+    browser_entries[0].is_directory = 1U;
+    browser_entries[1].is_directory = 1U;
+    browser_item_count = 2U;
+    browser_selected_item = 0U;
+    browser_first_visible = 0U;
+    browser_virtual_root = 1U;
+    browser_revision++;
+    menu_browser_set_status("Select a volume and press OK");
+}
+
+static uint8_t menu_browser_load_directory(void)
+{
+    DIR directory;
+    FILINFO file_info;
+    FRESULT result;
+    char long_name[_MAX_LFN + 1U];
+    const char *source_name;
+
+    browser_item_count = 0U;
+    result = f_opendir(&directory, browser_path);
+    if(result != FR_OK)
+    {
+        sprintf(browser_status, "Open failed - FatFs error %u", (uint16_t)result);
+        browser_selected_item = 0U;
+        browser_first_visible = 0U;
+        browser_virtual_root = 0U;
+        browser_revision++;
+        return 0U;
+    }
+
+    while(browser_item_count < BROWSER_MAX_ENTRIES)
+    {
+        memset(&file_info, 0, sizeof(file_info));
+        long_name[0] = '\0';
+        file_info.lfname = long_name;
+        file_info.lfsize = sizeof(long_name);
+        result = f_readdir(&directory, &file_info);
+        if((result != FR_OK) || (file_info.fname[0] == '\0'))
+        {
+            break;
+        }
+
+        source_name = (long_name[0] != '\0') ? long_name : file_info.fname;
+        if((strcmp(source_name, ".") == 0) || (strcmp(source_name, "..") == 0))
+        {
+            continue;
+        }
+
+        strncpy(browser_entries[browser_item_count].name, source_name,
+                GUI_FILE_NAME_LENGTH - 1U);
+        browser_entries[browser_item_count].name[GUI_FILE_NAME_LENGTH - 1U] = '\0';
+        browser_entries[browser_item_count].size = file_info.fsize;
+        browser_entries[browser_item_count].date = file_info.fdate;
+        browser_entries[browser_item_count].time = file_info.ftime;
+        browser_entries[browser_item_count].is_directory =
+            ((file_info.fattrib & AM_DIR) != 0U) ? 1U : 0U;
+        browser_item_count++;
+    }
+
+    f_closedir(&directory);
+    browser_selected_item = 0U;
+    browser_first_visible = 0U;
+    browser_virtual_root = 0U;
+    browser_revision++;
+    if(result != FR_OK)
+    {
+        sprintf(browser_status, "Read failed - FatFs error %u", (uint16_t)result);
+    }
+    else if(browser_item_count >= BROWSER_MAX_ENTRIES)
+    {
+        menu_browser_set_status("Showing the first 64 entries");
+    }
+    else
+    {
+        sprintf(browser_status, "%u item(s)", (uint16_t)browser_item_count);
+    }
+    return 1U;
+}
+
+static void menu_browser_adjust_window(void)
+{
+    if(browser_selected_item < browser_first_visible)
+    {
+        browser_first_visible = browser_selected_item;
+    }
+    else if(browser_selected_item >=
+            (uint8_t)(browser_first_visible + BROWSER_VISIBLE_ROWS))
+    {
+        browser_first_visible =
+            (uint8_t)(browser_selected_item - BROWSER_VISIBLE_ROWS + 1U);
+    }
+}
+
+static void menu_browser_enter_selected(void)
+{
+    size_t path_length;
+    size_t name_length;
+
+    if(browser_item_count == 0U)
+    {
+        return;
+    }
+
+    if(browser_virtual_root != 0U)
+    {
+        strcpy(browser_path, (browser_selected_item == 0U) ? "0:" : "1:");
+        menu_browser_load_directory();
+        page_dirty = 1U;
+        page_changed = 1U;
+        return;
+    }
+
+    if(browser_entries[browser_selected_item].is_directory != 0U)
+    {
+        path_length = strlen(browser_path);
+        name_length = strlen(browser_entries[browser_selected_item].name);
+        if((path_length + name_length + 2U) >= sizeof(browser_path))
+        {
+            menu_browser_set_status("Path is too long");
+            page_dirty = 1U;
+            return;
+        }
+
+        browser_path[path_length++] = '/';
+        memcpy(&browser_path[path_length],
+               browser_entries[browser_selected_item].name, name_length + 1U);
+        menu_browser_load_directory();
+        page_dirty = 1U;
+        page_changed = 1U;
+    }
+    else
+    {
+        sprintf(browser_status, "File: %.42s | %lu bytes",
+                browser_entries[browser_selected_item].name,
+                browser_entries[browser_selected_item].size);
+        page_dirty = 1U;
+    }
+}
+
+static void menu_browser_go_back(void)
+{
+    char *last_separator;
+
+    if(browser_virtual_root != 0U)
+    {
+        current_page = MENU_PAGE_HOME;
+        page_dirty = 1U;
+        page_changed = 1U;
+        return;
+    }
+
+    last_separator = strrchr(browser_path, '/');
+    if(last_separator == NULL)
+    {
+        menu_browser_load_drives();
+    }
+    else
+    {
+        *last_separator = '\0';
+        menu_browser_load_directory();
+    }
+    page_dirty = 1U;
+    page_changed = 1U;
+}
+
+static void menu_handle_browser_key(MenuKey key)
+{
+    switch(key)
+    {
+        case MENU_KEY_LEFT:
+            if(browser_item_count != 0U)
+            {
+                browser_selected_item = (browser_selected_item == 0U) ?
+                    (browser_item_count - 1U) : (browser_selected_item - 1U);
+                menu_browser_adjust_window();
+                page_dirty = 1U;
+            }
+            break;
+
+        case MENU_KEY_RIGHT:
+            if(browser_item_count != 0U)
+            {
+                browser_selected_item =
+                    (uint8_t)((browser_selected_item + 1U) % browser_item_count);
+                menu_browser_adjust_window();
+                page_dirty = 1U;
+            }
+            break;
+
+        case MENU_KEY_OK:
+            menu_browser_enter_selected();
+            break;
+
+        case MENU_KEY_BACK:
+            menu_browser_go_back();
+            break;
+
+        default:
+            break;
+    }
+}
+
 static uint8_t menu_get_key(MenuKey *key)
 {
     if(event_read_index == event_write_index)
@@ -257,6 +488,10 @@ static void menu_handle_home_key(MenuKey key)
             {
                 menu_nrf_load_settings();
             }
+            else if(current_page == MENU_PAGE_FILE_BROWSER)
+            {
+                menu_browser_load_drives();
+            }
             page_dirty = 1;
             page_changed = 1;
             break;
@@ -272,6 +507,12 @@ static void menu_handle_page_key(MenuKey key)
     if(current_page == MENU_PAGE_NRF)
     {
         menu_handle_nrf_key(key);
+        return;
+    }
+
+    if(current_page == MENU_PAGE_FILE_BROWSER)
+    {
+        menu_handle_browser_key(key);
         return;
     }
 
@@ -323,6 +564,12 @@ static void menu_draw_current_page(void)
                               nrf_status_text[nrf_status], nrf_runtime_valid,
                               nrf_runtime_enabled, nrf_runtime_channel,
                               nrf_runtime_power_index, nrf_runtime_data_rate);
+            break;
+
+        case MENU_PAGE_FILE_BROWSER:
+            file_browser_page(browser_path, browser_entries, browser_item_count,
+                              browser_selected_item, browser_first_visible,
+                              browser_revision, browser_status);
             break;
 
         default:

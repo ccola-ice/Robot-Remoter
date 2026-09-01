@@ -1,7 +1,7 @@
 #include "FATFS_FLASH_test.h"
 #include "bsp_Systick.h"
 
-FATFS fs;                   /* FatFs文件系统对象 */
+extern FATFS fs_flash;      /* SPI Flash独立FatFs工作区 */
 FIL fnew_flash;				/* 文件对象 */
 FIL fnew_sdcard;			/* 文件对象 */
 FRESULT res;                /* 文件操作结果 */
@@ -21,7 +21,7 @@ void fatfs_flash_test(void)
 	printf("\nFLASH文件系统移植测试1: \n\r");
     
 	//在外部SPI Flash挂载文件系统，文件系统挂载时会对SPI设备初始化
-    res = f_mount(&fs,"1:",1);
+    res = f_mount(&fs_flash,"1:",1);
 	
     printf("\r\nfmount res=%d",res);
 	
@@ -34,7 +34,7 @@ void fatfs_flash_test(void)
 		//格式化后需要重新挂载文件系统
 		res = f_mount(NULL,"1:",1);
 		
-		res = f_mount(&fs,"1:",1);		
+		res = f_mount(&fs_flash,"1:",1);		
 	}
 	
 	res = f_open(&fnew_flash, "1:english.txt", FA_CREATE_ALWAYS|FA_READ|FA_WRITE);
@@ -81,7 +81,7 @@ void fatfs_flash_test2(void)
 {
 	printf("\r\nFLASH文件系统移植测试2: \r\n");
 	//在外部SPI Flash挂载文件系统，文件系统挂载时会对SPI设备初始化
-	res = f_mount(&fs,"1:",1);
+	res = f_mount(&fs_flash,"1:",1);
 	if(res!=FR_OK)
 	{
 		printf("\r\n！！外部Flash挂载文件系统失败。(%d)\r\n",res);
@@ -103,8 +103,7 @@ void fatfs_flash_test2(void)
 	strcpy(fpath,"1:");
 	scan_files(fpath);
 
-	/* 不再使用文件系统，取消挂载文件系统 */
-	f_mount(NULL,"1:",1);
+	/* 文件浏览器仍需使用该卷，因此保持挂载。 */
 	
 	printf("===========================FLASH文件系统移植测试结束=============================\n\r");
 }

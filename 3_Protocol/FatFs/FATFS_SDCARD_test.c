@@ -1,7 +1,7 @@
 #include "FATFS_SDCARD_test.h"
 #include "bsp_Systick.h"
 
-extern FATFS fs;                   	/* FatFs文件系统对象 */
+extern FATFS fs_sdcard;            	/* SD卡独立FatFs工作区 */
 extern FIL fnew_sdcard;				/* 文件对象 */
 extern FRESULT res;                	/* 文件操作结果 */
 extern unsigned int fnum;			/* 文件成功读写数量 */
@@ -13,7 +13,7 @@ void fatfs_sdcard_test(void)
 	printf("===========================SD卡文件系统移植测试开始=============================\n\r");
 	
 	//在SDCard挂载文件系统，文件系统挂载时会对SDCard设备初始化
-	res = f_mount(&fs,"0:",1);
+	res = f_mount(&fs_sdcard,"0:",1);
 	
 	/*----------------------- 格式化测试 ---------------------------*/  
 	/* 如果没有文件系统就格式化创建文件系统 */
@@ -31,7 +31,7 @@ void fatfs_sdcard_test(void)
 			/* 格式化后，先取消挂载 */
 			res = f_mount(NULL,"0:",1);			
 			/* 重新挂载	*/			
-			res = f_mount(&fs,"0:",1);
+			res = f_mount(&fs_sdcard,"0:",1);
 		}
 		else
 		{
@@ -103,8 +103,7 @@ void fatfs_sdcard_test(void)
 	/* 不再读写，关闭文件 */
 	f_close(&fnew_sdcard);	
   
-	/* 不再使用文件系统，取消挂载文件系统 */
-	f_mount(NULL,"0:",1);
+	/* 文件浏览器仍需使用该卷，因此保持挂载。 */
 	
 	printf("===========================SD卡文件系统移植测试结束=============================\n\r");
 }

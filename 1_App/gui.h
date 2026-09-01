@@ -3,6 +3,17 @@
 
 #include <stdint.h>
 
+#define GUI_FILE_NAME_LENGTH 128U
+
+typedef struct
+{
+    char name[GUI_FILE_NAME_LENGTH];
+    uint32_t size;
+    uint16_t date;
+    uint16_t time;
+    uint8_t is_directory;
+} GuiFileEntry;
+
 void gui_prepare_page(void);
 
 void gui_boot_begin(void);
@@ -19,6 +30,11 @@ void channel_monitor_page(void);
 void imu6050_information(void);
 
 void main_menu(uint8_t selected_item);
+
+void file_browser_page(const char *path, const GuiFileEntry *entries,
+                       uint8_t item_count, uint8_t selected_item,
+                       uint8_t first_visible, uint16_t revision,
+                       const char *status_text);
 
 void nrf_settings_page(uint8_t selected_item, uint8_t editing,
                        uint8_t enabled, uint8_t channel,

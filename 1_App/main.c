@@ -73,7 +73,8 @@ extern SD_Error Status;
 extern volatile  param_Config param;;
 extern param_Config * pt_param;
 
-extern FATFS fs;                   	/* FatFs文件系统对象 */
+FATFS fs_sdcard;                   	/* SD卡 FatFs工作区 */
+FATFS fs_flash;                    	/* SPI Flash FatFs工作区 */
 extern FIL fnew_sdcard;				/* 文件对象 */
 extern FRESULT res;                	/* 文件操作结果 */
 extern unsigned int fnum;			/* 文件成功读写数量 */
@@ -141,7 +142,7 @@ void setup(void)
 	gui_boot_update(55U, 2U, "SD card online", 0U);
 	GTP_Init_Panel();
 	gui_boot_update(62U, 2U, "Touch controller online", 0U);
-	res = f_mount(&fs,"0:",1);//挂载sd文件系统
+	res = f_mount(&fs_sdcard,"0:",1);//挂载sd文件系统
 	if(res != FR_OK )
 	{
 		gui_boot_update(62U, 2U, "SD filesystem mount failed", 1U);
@@ -149,7 +150,7 @@ void setup(void)
 		while(1);
 	}
 	gui_boot_update(68U, 2U, "SD filesystem mounted", 0U);
-	res = f_mount(&fs,"1:",1);//挂载flash文件系统
+	res = f_mount(&fs_flash,"1:",1);//挂载flash文件系统
 	if(res!=FR_OK)
 	{
 		gui_boot_update(68U, 2U, "Flash filesystem failed", 1U);

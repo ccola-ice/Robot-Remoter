@@ -384,30 +384,34 @@ void system_basic_information(void)
 void main_menu(uint8_t selected_item)
 {
 	static uint8_t last_selected_item = 0xffU;
-	static const char *menu_text[6] =
+	static const char *menu_text[7] =
 	{
 		"System Information",
 		"Channel Monitor",
 		"IMU / MPU6050",
 		"GPS / BDS",
 		"Touch Draw Board",
-		"NRF Wireless"
+		"NRF Wireless",
+		"File Browser"
 	};
-	static const char *menu_hint[6] =
+	static const char *menu_hint[7] =
 	{
 		"Memory / firmware",
 		"10 analog channels",
 		"Live attitude / motion",
 		"Position / satellites",
 		"Touch drawing tools",
-		"Radio setup / status"
+		"Radio setup / status",
+		"Browse SD card and SPI Flash"
 	};
 	uint8_t i;
 	uint16_t card_x;
 	uint16_t card_y;
+	uint16_t card_width;
+	uint16_t card_height;
 	uint8_t first_draw = 0U;
 
-	if(selected_item >= 6U)
+	if(selected_item >= 7U)
 	{
 		selected_item = 0U;
 	}
@@ -432,22 +436,36 @@ void main_menu(uint8_t selected_item)
 		ILI9806G_DispString_EN(20U, 32U, "LEFT/RIGHT: Select     OK: Enter");
 	}
 
-	for(i = 0; i < 6U; i++)
+	for(i = 0; i < 7U; i++)
 	{
-		card_x = ((i & 1U) == 0U) ? 4U : 404U;
-		card_y = 80U + (uint16_t)(i / 2U) * 104U;
+		if(i < 6U)
+		{
+			card_x = ((i & 1U) == 0U) ? 4U : 404U;
+			card_y = 72U + (uint16_t)(i / 2U) * 86U;
+			card_width = 392U;
+			card_height = 72U;
+		}
+		else
+		{
+			card_x = 4U;
+			card_y = 330U;
+			card_width = 792U;
+			card_height = 64U;
+		}
 
 		if(first_draw != 0U)
 		{
 			LCD_SetTextColor(GREY);
-			ILI9806G_DrawRectangle(card_x, card_y, 392U, 88U, 1U);
+			ILI9806G_DrawRectangle(card_x, card_y, card_width, card_height, 1U);
 			LCD_SetBackColor(GREY);
 			LCD_SetTextColor(BLACK);
+			LCD_SetFont(&Font16x32);
 			sprintf(displayBuffer, "%u. %-18.18s",
 					(uint16_t)(i + 1U), menu_text[i]);
-			ILI9806G_DispString_EN(card_x + 20U, card_y + 8U, displayBuffer);
-			sprintf(displayBuffer, "%-22.22s", menu_hint[i]);
-			ILI9806G_DispString_EN(card_x + 20U, card_y + 48U, displayBuffer);
+			ILI9806G_DispString_EN(card_x + 20U, card_y + 4U, displayBuffer);
+			LCD_SetFont(&Font8x16);
+			sprintf(displayBuffer, "%-40.40s", menu_hint[i]);
+			ILI9806G_DispString_EN(card_x + 20U, card_y + 44U, displayBuffer);
 		}
 
 		if((first_draw != 0U) || (i == selected_item) ||
@@ -456,12 +474,13 @@ void main_menu(uint8_t selected_item)
 			/* A narrow indicator and outline avoid tearing from full-card fills. */
 			LCD_SetTextColor((i == selected_item) ? BLUE : GREY);
 			ILI9806G_DrawRectangle(card_x + 4U, card_y + 4U,
-							  8U, 80U, 1U);
+							  8U, card_height - 8U, 1U);
 			LCD_SetTextColor((i == selected_item) ? BLUE : BLACK);
-			ILI9806G_DrawRectangle(card_x, card_y, 392U, 88U, 0U);
+			ILI9806G_DrawRectangle(card_x, card_y, card_width, card_height, 0U);
 		}
 	}
 
+	LCD_SetFont(&Font16x32);
 	LCD_SetBackColor(WHITE);
 	if(first_draw != 0U)
 	{
@@ -469,10 +488,166 @@ void main_menu(uint8_t selected_item)
 		ILI9806G_DrawRectangle(4U, 416U, 792U, 32U, 1U);
 	}
 	LCD_SetTextColor(BLUE);
-	sprintf(displayBuffer, "Selected: %u / 6 ",
+	sprintf(displayBuffer, "Selected: %u / 7 ",
 			(uint16_t)(selected_item + 1U));
 	ILI9806G_DispString_EN(4U, 416U, displayBuffer);
 	last_selected_item = selected_item;
+}
+
+static void gui_file_safe_text(char *destination, const char *source,
+							   uint8_t maximum_length)
+{
+	uint8_t index = 0U;
+	uint8_t value;
+
+	while((source[index] != '\0') && (index < maximum_length))
+	{
+		value = (uint8_t)source[index];
+		destination[index] = ((value >= 32U) && (value <= 126U)) ?
+							(char)value : '?';
+		index++;
+	}
+	destination[index] = '\0';
+}
+
+static void gui_file_size_text(uint32_t size, char *text)
+{
+	if(size < 1024UL)
+	{
+		sprintf(text, "%lu B", size);
+	}
+	else if(size < (1024UL * 1024UL))
+	{
+		sprintf(text, "%lu KB", size / 1024UL);
+	}
+	else
+	{
+		sprintf(text, "%lu.%01lu MB", size / (1024UL * 1024UL),
+				(size % (1024UL * 1024UL)) * 10UL / (1024UL * 1024UL));
+	}
+}
+
+void file_browser_page(const char *path, const GuiFileEntry *entries,
+					   uint8_t item_count, uint8_t selected_item,
+					   uint8_t first_visible, uint16_t revision,
+					   const char *status_text)
+{
+	static uint16_t last_revision = 0xffffU;
+	static uint8_t last_selected_item = 0xffU;
+	static uint8_t last_first_visible = 0xffU;
+	char safe_text[44];
+	char size_text[16];
+	uint8_t row;
+	uint8_t item_index;
+	uint16_t row_y;
+	uint8_t first_draw = 0U;
+	uint8_t content_changed;
+
+	if(display_flag == 1)
+	{
+		display_flag = 0;
+		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
+		I2C_GTP_IRQDisable();
+		first_draw = 1U;
+		last_revision = 0xffffU;
+		last_selected_item = 0xffU;
+		last_first_visible = 0xffU;
+	}
+
+	content_changed = ((first_draw != 0U) || (revision != last_revision) ||
+					   (first_visible != last_first_visible)) ? 1U : 0U;
+	LCD_SetFont(&Font16x32);
+	if(first_draw != 0U)
+	{
+		LCD_SetTextColor(BLUE);
+		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
+		LCD_SetBackColor(BLUE);
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DispString_EN(20U, 0U, "FILE BROWSER");
+		ILI9806G_DispString_EN(20U, 32U, "SD Card / SPI Flash  Read-only mode");
+	}
+
+	if(content_changed != 0U)
+	{
+		LCD_SetTextColor(GREY);
+		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
+		LCD_SetBackColor(GREY);
+		LCD_SetTextColor(BLACK);
+		gui_file_safe_text(safe_text, path, 42U);
+		sprintf(displayBuffer, "Path: %-42.42s", safe_text);
+		ILI9806G_DispString_EN(12U, 72U, displayBuffer);
+
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DrawRectangle(4U, 112U, 792U, 288U, 1U);
+		if(item_count == 0U)
+		{
+			LCD_SetBackColor(WHITE);
+			LCD_SetTextColor(GREY);
+			ILI9806G_DispString_EN(260U, 224U, "<EMPTY DIRECTORY>");
+		}
+
+		for(row = 0U; row < 6U; row++)
+		{
+			item_index = (uint8_t)(first_visible + row);
+			if(item_index >= item_count)
+			{
+				break;
+			}
+
+			row_y = 112U + (uint16_t)row * 48U;
+			LCD_SetTextColor(GREY);
+			ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 1U);
+			LCD_SetBackColor(GREY);
+			LCD_SetTextColor(BLACK);
+			gui_file_safe_text(safe_text, entries[item_index].name, 35U);
+			if(entries[item_index].is_directory != 0U)
+			{
+				sprintf(displayBuffer, "DIR  %-35.35s", safe_text);
+			}
+			else
+			{
+				gui_file_size_text(entries[item_index].size, size_text);
+				sprintf(displayBuffer, "FILE %-27.27s %10s",
+						safe_text, size_text);
+			}
+			ILI9806G_DispString_EN(20U, row_y + 4U, displayBuffer);
+		}
+	}
+
+	for(row = 0U; row < 6U; row++)
+	{
+		item_index = (uint8_t)(first_visible + row);
+		if(item_index >= item_count)
+		{
+			break;
+		}
+		if((content_changed == 0U) && (item_index != selected_item) &&
+		   (item_index != last_selected_item))
+		{
+			continue;
+		}
+
+		row_y = 112U + (uint16_t)row * 48U;
+		LCD_SetTextColor((item_index == selected_item) ? BLUE : GREY);
+		ILI9806G_DrawRectangle(8U, row_y + 4U, 8U, 32U, 1U);
+		LCD_SetTextColor((item_index == selected_item) ? BLUE : BLACK);
+		ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 0U);
+	}
+
+	LCD_SetFont(&Font8x16);
+	LCD_SetBackColor(WHITE);
+	LCD_SetTextColor(BLUE);
+	ILI9806G_DispString_EN(12U, 408U,
+						"LEFT/RIGHT Select   OK Open   BACK Parent/Exit");
+	LCD_SetFont(&Font16x32);
+	LCD_SetTextColor(BLACK);
+	gui_file_safe_text(safe_text, status_text, 40U);
+	sprintf(displayBuffer, "Status: %-40.40s", safe_text);
+	ILI9806G_DispString_EN(12U, 432U, displayBuffer);
+
+	last_revision = revision;
+	last_selected_item = selected_item;
+	last_first_visible = first_visible;
 }
 
 void nrf_settings_page(uint8_t selected_item, uint8_t editing,
@@ -762,4 +937,3 @@ void Draw_Board(void)
 		I2C_GTP_IRQEnable();
 	}	
 }
-
