@@ -5,6 +5,13 @@
 
 void gui_prepare_page(void);
 
+void gui_boot_begin(void);
+
+void gui_boot_update(uint8_t percent, uint8_t stage,
+                     const char *status_text, uint8_t warning);
+
+void gui_boot_finish(void);
+
 void system_basic_information(void);
 
 void channel_monitor_page(void);

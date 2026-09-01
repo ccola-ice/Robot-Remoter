@@ -108,96 +108,100 @@ void setup(void)
 	NRF_SPI_Init();
 	SRAM_FSMC_Config();
 	ILI9806G_Init();
-	MPU_Init();	//使用的是软件I2C
+	ILI9806G_GramScan(LCD_SCAN_MODE);
+	gui_boot_begin();
+	gui_boot_update(18U, 0U, "Display controller online", 0U);
+
+	if(MPU_Init() != 0U)	//使用的是软件I2C
+	{
+		gui_boot_update(22U, 1U, "MPU6050 base init failed", 1U);
+	}
 	EXTI_MPU_Config();
 	GPS_USART_Config();
 	GPS_DMA_Config();
 	user_BUTTON_init();
 	Independent_Dual_ADC1_Init();
 	Independent_Dual_ADC3_Init();
+	gui_boot_update(30U, 1U, "Input devices configured", 0U);
+	gui_boot_update(34U, 1U, "Starting MPU6050 DMP", 0U);
 	while(mpu_dmp_init() != 0)
 	{
+		gui_boot_update(34U, 1U, "MPU6050 DMP retrying", 1U);
 		printf("MPU6050 DMP 初始化失败！\n\r");
 	}
 	printf("MPU6050 DMP库 初始化成功！\n\r");
+	gui_boot_update(42U, 1U, "MPU6050 DMP online", 0U);
+	gui_boot_update(48U, 2U, "Starting SD card", 0U);
 	while(SD_Init() != SD_OK)
 	{    
+		gui_boot_update(48U, 2U, "SD card retrying", 1U);
 		printf("SD卡初始化失败！\r\n");
 	}
-	printf("SD卡初始化成功！\r\n");	
+	printf("SD卡初始化成功！\r\n");
+	gui_boot_update(55U, 2U, "SD card online", 0U);
 	GTP_Init_Panel();
+	gui_boot_update(62U, 2U, "Touch controller online", 0U);
 	res = f_mount(&fs,"0:",1);//挂载sd文件系统
 	if(res != FR_OK )
 	{
+		gui_boot_update(62U, 2U, "SD filesystem mount failed", 1U);
 		printf("\r\nSD卡文件系统挂载失败，检查SD卡格式！(%d)\r\n",res);
 		while(1);
 	}
+	gui_boot_update(68U, 2U, "SD filesystem mounted", 0U);
 	res = f_mount(&fs,"1:",1);//挂载flash文件系统
 	if(res!=FR_OK)
 	{
+		gui_boot_update(68U, 2U, "Flash filesystem failed", 1U);
 		printf("\r\n外部Flash文件系统挂载失败！(%d)\r\n",res);
 		while(1);
 	}
+	gui_boot_update(74U, 2U, "Flash filesystem mounted", 0U);
 	if(nrf24l01_check() != 0)
 	{
+		gui_boot_update(80U, 2U, "NRF24L01 not detected", 1U);
 		printf("NRF模块未连接，继续启动，可在菜单中重新检测。\r\n");
+	}
+	else
+	{
+		gui_boot_update(80U, 2U, "NRF24L01 online", 0U);
 	}
 	nmea_decode_init();//NMEA解码初始化准备
 	write_default_param();
 	nrf24l01_apply_settings(param.NRF_Mode, param.NRF_Channel,
 						param.NRF_Power, param.NRF_DataRate);
-	ILI9806G_GramScan(LCD_SCAN_MODE); //设置LCD显示方向，截图必需设置好液晶显示方向和截图窗口	
+	gui_boot_update(84U, 2U, "Runtime services ready", 0U);
 
 	printf("\r\n*****************************初始化设置完成**********************************\r\n");
 }
 
 int hardware_test(void)
 {
-	static uint8_t snipaste_name_count = 0;
-	char snipaste_name[40];
-
 	eeprom_test();
+	gui_boot_update(87U, 2U, "EEPROM test completed", 0U);
 	flash_test();
+	gui_boot_update(90U, 2U, "SPI Flash test completed", 0U);
 	if(sram_read_write_test() == 1)
 	{
 		printf("sram 测试成功\r\n");
+		gui_boot_update(92U, 2U, "External SRAM test passed", 0U);
 		// my_mem_init(SRAMIN);		//初始化内部内存池
 		// my_mem_init(SRAMEX);		//初始化外部内存池
 	}
+	else
+	{
+		gui_boot_update(92U, 2U, "External SRAM test failed", 1U);
+	}
 	fatfs_flash_test();
 	fatfs_flash_test2();
+	gui_boot_update(95U, 2U, "Flash filesystem tested", 0U);
 	fatfs_sdcard_test();
-
-	f_mount(&fs,"0:",1);
-	LCD_Show_BMP(100,100,"0:Pictures/football.bmp"); //srcdata/Picture/football.bmp
-	Delay_ms(1000);
-	jpgDisplay("0:Pictures/musicplayer.jpg");
-	Delay_ms(1000);
-
-	// 截图相关函数，截图时间较慢 ,尽量减小jpg大小
-	// 用来设置截图名字，防止重复，实际应用中可以使用系统时间来命名。
-	snipaste_name_count++; 
-	sprintf(snipaste_name,"0:screen_shot_%d.bmp",snipaste_name_count);
-	// printf("\r\n正在截图...");	
-	// if(Screen_Shot(0,0,LCD_X_LENGTH,LCD_Y_LENGTH,snipaste_name) == 0)
-	// {
-	// 	printf("\r\n截图成功！");
-	// }
-	// else
-	// {
-	// 	printf("\r\n截图失败！");
-	// }
-	f_mount(NULL,"0:",1);
-
-	//显示指定大小字符对比
-	ILI9806G_DispStringLine_EN_CH(LINE(0),"Remoter");
-	ILI9806G_DisplayStringEx(0,1*48,48,48,(uint8_t *)"Remoter",0);
-	ILI9806G_DisplayStringEx(0,2*56,56,56,(uint8_t *)"Remoter",0);
-	Delay_ms(1000);
+	gui_boot_update(97U, 2U, "SD filesystem tested", 0U);
 	
 	//扩展串口4测试
 	USART_printf(EXPAND_USART,"THIS IS UART4\r\n");
 	USART_printf(EXPAND_USART,"UART4测试正常\r\n");
+	gui_boot_update(99U, 2U, "Self-test sequence complete", 0U);
 
 #if MALLOC_TEST
 	printf("\n\r=================malloc================\n\r");
@@ -229,6 +233,7 @@ int main(void)
 	setup();
 
 	hardware_test();
+	gui_boot_finish();
 
 	LCD_SetFont(&Font16x32);
 	LCD_SetColors(GREEN,BLACK);	

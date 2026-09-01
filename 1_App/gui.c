@@ -3,6 +3,7 @@
 #include "bsp_adc1_independent_dual.h"
 #include "bsp_adc3_independent_dual.h"
 #include "bsp_usart_debug.h"
+#include "bsp_Systick.h"
 #include "inv_mpu.h"
 #include "inv_mpu_dmp_motion_driver.h" 
 #include "bsp_mpu6050.h"
@@ -36,10 +37,129 @@ extern uint8_t Image$$RW_IRAM1$$ZI$$Length;
 char displayBuffer[100];
 
 static uint8_t display_flag = 0;	//界面切换标志，每次只有第一次切换界面时才清屏（ILI9806G_Clear），其他情况不清屏
+static uint16_t boot_progress_width;
+static uint8_t boot_last_stage;
+static const uint16_t boot_stage_x[4] = {120U, 260U, 400U, 540U};
+static const uint8_t boot_stage_text_x[4] = {44U, 36U, 32U, 40U};
+static const char *boot_stage_label[4] = {"CORE", "DEVICE", "SERVICE", "READY"};
 
 void gui_prepare_page(void)
 {
 	display_flag = 1;
+}
+
+void gui_boot_begin(void)
+{
+	uint8_t i;
+
+	boot_progress_width = 0U;
+	boot_last_stage = 0xffU;
+	LCD_SetBackColor(BLACK);
+	LCD_SetTextColor(BLACK);
+	ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
+
+	LCD_SetFont(&Font8x16);
+	LCD_SetBackColor(BLACK);
+	LCD_SetTextColor(BLUE2);
+	ILI9806G_DispString_EN(20U, 16U, "REMOTER / EMBEDDED CONTROL PLATFORM");
+	ILI9806G_DispString_EN(608U, 16U, "REAL BOOT STATUS");
+
+	LCD_SetTextColor(BLUE2);
+	ILI9806G_DrawRectangle(72U, 64U, 656U, 192U, 0U);
+	ILI9806G_DrawLine(104U, 232U, 696U, 232U);
+
+	LCD_SetFont(&Font24x48);
+	LCD_SetTextColor(WHITE);
+	ILI9806G_DispString_EN(316U, 88U, "REMOTER");
+	LCD_SetFont(&Font16x32);
+	LCD_SetTextColor(BLUE2);
+	ILI9806G_DispString_EN(240U, 152U, "ROBOT CONTROL SYSTEM");
+	LCD_SetFont(&Font8x16);
+	LCD_SetTextColor(GREY);
+	ILI9806G_DispString_EN(272U, 208U, "STM32F407 / NRF24L01 / MPU6050");
+
+	LCD_SetTextColor(WHITE);
+	ILI9806G_DrawRectangle(120U, 304U, 560U, 24U, 1U);
+	LCD_SetTextColor(BLUE2);
+	ILI9806G_DrawRectangle(120U, 304U, 560U, 24U, 0U);
+
+	for(i = 0U; i < 4U; i++)
+	{
+		LCD_SetTextColor(BLUE2);
+		ILI9806G_DrawRectangle(boot_stage_x[i], 392U, 120U, 32U, 0U);
+		LCD_SetBackColor(BLACK);
+		ILI9806G_DispString_EN(boot_stage_x[i] + boot_stage_text_x[i], 400U,
+							(char *)boot_stage_label[i]);
+	}
+
+	LCD_SetFont(&Font16x32);
+	LCD_SetTextColor(WHITE);
+	ILI9806G_DispString_EN(616U, 344U, "  0%");
+}
+
+void gui_boot_update(uint8_t percent, uint8_t stage,
+					 const char *status_text, uint8_t warning)
+{
+	uint16_t next_width;
+
+	if(percent > 100U)
+	{
+		percent = 100U;
+	}
+	if(stage > 3U)
+	{
+		stage = 3U;
+	}
+
+	next_width = (uint16_t)((556UL * percent) / 100UL);
+	if(next_width > boot_progress_width)
+	{
+		LCD_SetTextColor(BLUE2);
+		ILI9806G_DrawRectangle(122U + boot_progress_width, 306U,
+							  next_width - boot_progress_width, 20U, 1U);
+		boot_progress_width = next_width;
+	}
+
+	if(stage != boot_last_stage)
+	{
+		LCD_SetFont(&Font8x16);
+		LCD_SetTextColor(BLUE2);
+		ILI9806G_DrawRectangle(boot_stage_x[stage], 392U, 120U, 32U, 1U);
+		LCD_SetBackColor(BLUE2);
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DispString_EN(boot_stage_x[stage] + boot_stage_text_x[stage],
+							400U, (char *)boot_stage_label[stage]);
+		boot_last_stage = stage;
+	}
+
+	LCD_SetFont(&Font16x32);
+	LCD_SetBackColor(BLACK);
+	LCD_SetTextColor(BLACK);
+	ILI9806G_DrawRectangle(120U, 344U, 440U, 32U, 1U);
+	LCD_SetTextColor((warning != 0U) ? YELLOW : WHITE);
+	ILI9806G_DispString_EN(120U, 344U, (char *)status_text);
+	LCD_SetTextColor(WHITE);
+	sprintf(displayBuffer, "%3u%%", (uint16_t)percent);
+	ILI9806G_DispString_EN(616U, 344U, displayBuffer);
+
+	/* Briefly hold each completed real milestone so it remains readable. */
+	Delay_ms(80U);
+}
+
+void gui_boot_finish(void)
+{
+	gui_boot_update(100U, 3U, "System ready", 0U);
+	LCD_SetFont(&Font8x16);
+	LCD_SetTextColor(GREEN);
+	ILI9806G_DrawRectangle(boot_stage_x[3], 392U, 120U, 32U, 1U);
+	LCD_SetBackColor(GREEN);
+	LCD_SetTextColor(BLACK);
+	ILI9806G_DispString_EN(boot_stage_x[3] + boot_stage_text_x[3], 400U,
+						"READY");
+	LCD_SetBackColor(BLACK);
+	LCD_SetTextColor(GREY);
+	ILI9806G_DispString_EN(288U, 456U, "CONTROL IS NOW ONLINE");
+	Delay_ms(600U);
 }
 
 static void gui_draw_progress_bar(uint16_t x, uint16_t y, uint16_t width,
@@ -642,3 +762,4 @@ void Draw_Board(void)
 		I2C_GTP_IRQEnable();
 	}	
 }
+
