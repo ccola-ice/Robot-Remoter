@@ -7,7 +7,6 @@
 #include "tjpgd.h"
 #include "ff.h"
 #include "jpgPort.h"
-#include "malloc.h"
 
 /* User defined device identifier */
 typedef struct {
@@ -94,7 +93,6 @@ void jpgDisplay(char *pic_name)
 	/* 申请解码空间 */
     /* Allocate a work area for TJpgDec */
 	work = (char *)malloc(sizeof(char)*7*1024);  //内部SRAM中申请内存
-    //work = (char *)mymalloc(1,sizeof(char)*7*1024);//外部SRAM中申请内存
 	
     /* Prepare to decompress */
     res = jd_prepare(&jdec, in_func, work, 7*1024, &devid);
@@ -121,7 +119,6 @@ void jpgDisplay(char *pic_name)
     }
 	
     free(work);		/* Discard work area */
-	//myfree(1,work);		//释放内存
 	
     f_close(devid.fp);       /* Close the JPEG file */
 }

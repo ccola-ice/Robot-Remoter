@@ -18,6 +18,7 @@
 
 #include "bsp_spi_flash.h"
 #include "bsp_spi_nrf.h"
+#include "bsp_sdio_sd.h"
 
 #include "bsp_adc1_independent_dual.h"
 #include "bsp_adc3_independent_dual.h"
@@ -36,14 +37,11 @@
 
 #include "jpgPort.h"
 #include "platform_nrf.h"
-#include "platform_mpu.h"
 #include "FLASH_test.h"
 #include "EEPROM_test.h"
-#include "SDCARD_test.h"
 #include "SRAM_test.h"
 #include "FATFS_FLASH_test.h"
 #include "FATFS_SDCARD_test.h"
-#include "LCD_test.h"
 #include "nmea_decode_test.h"
 #include "inv_mpu.h"
 #include "inv_mpu_dmp_motion_driver.h" 
@@ -56,11 +54,9 @@
 #include "gt9xx.h"
 #include "palette.h"
 #include "param.h"
-#include "malloc.h"
 
 #include "inv_mpu.h"
 
-#define MALLOC_TEST 0
 #define MPU_DMP_BOOT_ATTEMPTS 3U
 
 extern unsigned int Task_Delay[5];
@@ -68,7 +64,6 @@ extern unsigned int Task_Delay[5];
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
 extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 
-extern SD_Error Status;
 extern volatile  param_Config param;;
 
 FATFS fs_sdcard;                   	/* SD卡 FatFs工作区 */
@@ -76,9 +71,6 @@ FATFS fs_flash;                    	/* SPI Flash FatFs工作区 */
 extern FIL fnew_sdcard;				/* 文件对象 */
 extern FRESULT res;                	/* 文件操作结果 */
 extern unsigned int fnum;			/* 文件成功读写数量 */
-
-uint32_t *p1=0;
-uint8_t sramx=1;			//0:内部SRAM 1:外部SRAM
 
 float pitch,roll,yaw; 		//dmp解算欧拉角
 short aacx,aacy,aacz;		//加速度传感器原始数据
@@ -213,8 +205,6 @@ int hardware_test(void)
 	{
 		printf("sram 测试成功\r\n");
 		gui_boot_update(92U, 2U, "External SRAM test passed", 0U);
-		// my_mem_init(SRAMIN);		//初始化内部内存池
-		// my_mem_init(SRAMEX);		//初始化外部内存池
 	}
 	else
 	{
@@ -231,27 +221,6 @@ int hardware_test(void)
 	USART_printf(EXPAND_USART,"UART4测试正常\r\n");
 	gui_boot_update(99U, 2U, "Self-test sequence complete", 0U);
 
-#if MALLOC_TEST
-	printf("\n\r=================malloc================\n\r");
-	printf ( "SRAMIN USED:%d%%\r\n", my_mem_perused(SRAMIN) );//显示内部内存使用率
-	printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-	p1 = mymalloc ( sramx, 1024 * 16 );//申请2K字节
-	if(p1 == NULL){
-	printf("mymalloc error!,p1返回失败！\r\n");
-	}
-	else{
-		*(p1+0) = 548;
-		*(p1+1) = 1048;
-		*(p1+2) = 2048;
-		*(p1+3) = 3048;
-		*(p1+4) = 4048;
-		printf(" *(p1+0) = %d\n\r *(p1+1) = %d\n\r *(p1+2) = %d\n\r *(p1+3) = %d\n\r *(p1+4) = %d\n\r",*(p1+0),*(p1+1),*(p1+2),*(p1+3),*(p1+4));
-		printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-		myfree(sramx,p1);											//释放内存
-		printf ( "SRAMEX USED:%d%%\r\n", my_mem_perused(SRAMEX) );//显示外部内存使用率
-	}
-	p1=0;														//指向空地
-#endif
 
 	return 0;
 }

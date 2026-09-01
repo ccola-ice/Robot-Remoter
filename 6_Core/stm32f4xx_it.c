@@ -51,7 +51,6 @@
 #include "platform_nrf.h"
 #include "bsp_adc1_independent_dual.h"
 #include "bsp_adc3_independent_dual.h"
-#include "malloc.h"
 #include "menu.h"
 #include "bsp_gpio_stick.h"
 #include "nmea_decode_test.h"
@@ -345,10 +344,10 @@ void BASIC_TIM_IRQHandler(void)
 //定时器7中断服务函数：
 void GENERAL_TIM7_IRQHandler(void)
 {
-	if(TIM_GetITStatus(BASIC_TIM7, TIM_IT_Update) != RESET ) 
+	if(TIM_GetITStatus(BASIC_TIM7, TIM_IT_Update) != RESET )
 	{
-      TIM_ClearITPendingBit(BASIC_TIM7,TIM_IT_Update);  		 
-	}		 	
+      TIM_ClearITPendingBit(BASIC_TIM7,TIM_IT_Update);
+	}
 }
 
 //GPS DMA中断服务函数：

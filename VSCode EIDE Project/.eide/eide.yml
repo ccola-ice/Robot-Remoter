@@ -19,17 +19,12 @@ virtualFolder:
       files:
         - path: ../7_Test/EEPROM_test.c
         - path: ../7_Test/FLASH_test.c
-        - path: ../7_Test/SDCARD_test.c
         - path: ../7_Test/SRAM_test.c
-        - path: ../7_Test/LCD_test.c
         - path: ../7_Test/nmea_decode_test.c
       folders: []
     - name: Platforn
       files:
         - path: ../2_Platform/platform_nrf.c
-        - path: ../2_Platform/platform_io.c
-        - path: ../2_Platform/platform_mpu.c
-        - path: ../2_Platform/platform_sdcard.c
       folders: []
     - name: Middleware
       files: []
@@ -46,10 +41,6 @@ virtualFolder:
           files:
             - path: ../5_Middleware/MultiButton/multi_button.c
             - path: ../5_Middleware/MultiButton/multi_button_user.c
-          folders: []
-        - name: Malloc
-          files:
-            - path: ../5_Middleware/Malloc/malloc.c
           folders: []
         - name: jpgLib
           files:
@@ -190,7 +181,6 @@ targets:
         - ../3_Protocol/nmea_decode/include
         - ../5_Middleware/MPU6050/eMPL
         - ../5_Middleware/MultiButton
-        - ../5_Middleware/Malloc
         - ../5_ModuleDrivers
         - ../5_ModuleDrivers/fonts
         - ../5_ModuleDrivers/touch
