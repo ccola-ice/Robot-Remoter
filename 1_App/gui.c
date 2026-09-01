@@ -275,12 +275,12 @@ void main_menu(uint8_t selected_item)
 	};
 	static const char *menu_hint[6] =
 	{
-		"Memory and firmware",
+		"Memory / firmware",
 		"10 analog channels",
-		"Live attitude and motion",
-		"Position and satellites",
+		"Live attitude / motion",
+		"Position / satellites",
 		"Touch drawing tools",
-		"Radio setup and status"
+		"Radio setup / status"
 	};
 	uint8_t i;
 	uint16_t card_x;
@@ -323,11 +323,11 @@ void main_menu(uint8_t selected_item)
 			ILI9806G_DrawRectangle(card_x, card_y, 392U, 88U, 1U);
 			LCD_SetBackColor(GREY);
 			LCD_SetTextColor(BLACK);
-			sprintf(displayBuffer, "  %u. %-18.18s",
+			sprintf(displayBuffer, "%u. %-18.18s",
 					(uint16_t)(i + 1U), menu_text[i]);
-			ILI9806G_DispString_EN(card_x + 16U, card_y + 8U, displayBuffer);
-			sprintf(displayBuffer, "     %-20.20s", menu_hint[i]);
-			ILI9806G_DispString_EN(card_x + 16U, card_y + 48U, displayBuffer);
+			ILI9806G_DispString_EN(card_x + 20U, card_y + 8U, displayBuffer);
+			sprintf(displayBuffer, "%-22.22s", menu_hint[i]);
+			ILI9806G_DispString_EN(card_x + 20U, card_y + 48U, displayBuffer);
 		}
 
 		if((first_draw != 0U) || (i == selected_item) ||
