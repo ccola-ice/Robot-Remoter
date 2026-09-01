@@ -23,6 +23,7 @@ extern float pitch,roll,yaw; 		//欧拉角
 extern short aacx,aacy,aacz;		//加速度传感器原始数据
 extern short gyrox,gyroy,gyroz;		//陀螺仪原始数据
 extern short temp;					//温度
+extern uint8_t imu_data_valid;
 
 /* ARM scatter-loading symbols: their addresses are the linker-calculated sizes. */
 extern uint8_t Image$$ER_IROM1$$Length;
@@ -56,7 +57,7 @@ static void gui_draw_progress_bar(uint16_t x, uint16_t y, uint16_t width,
 	inner_width = (width > 4U) ? (width - 4U) : 0U;
 	filled_width = (uint16_t)((inner_width * percent_x10 + 500UL) / 1000UL);
 
-	LCD_SetTextColor(GREY);
+	LCD_SetTextColor(WHITE);
 	ILI9806G_DrawRectangle(x, y, width, height, 1U);
 	if(filled_width > 0U)
 	{
@@ -68,18 +69,27 @@ static void gui_draw_progress_bar(uint16_t x, uint16_t y, uint16_t width,
 }
 
 static void gui_draw_channel_card(uint16_t x, uint16_t y, uint8_t channel,
-							  uint16_t value, uint16_t bar_color)
+							  uint16_t value, uint16_t bar_color,
+							  uint8_t draw_frame)
 {
 	uint16_t shown_value = (value > 4095U) ? 4095U : value;
 	uint16_t bar_x = x + 170U;
 	uint16_t bar_width = 206U;
 
-	LCD_SetTextColor(GREY);
-	ILI9806G_DrawRectangle(x, y, 392U, 46U, 1U);
+	if(draw_frame != 0U)
+	{
+		LCD_SetTextColor(GREY);
+		ILI9806G_DrawRectangle(x, y, 392U, 46U, 1U);
+		LCD_SetBackColor(GREY);
+		LCD_SetTextColor(BLACK);
+		sprintf(displayBuffer, "CH%02u", (uint16_t)(channel + 1U));
+		ILI9806G_DispString_EN(x + 8U, y + 7U, displayBuffer);
+	}
+
 	LCD_SetBackColor(GREY);
 	LCD_SetTextColor(BLACK);
-	sprintf(displayBuffer, "CH%02u  %4u", (uint16_t)(channel + 1U), value);
-	ILI9806G_DispString_EN(x + 8U, y + 7U, displayBuffer);
+	sprintf(displayBuffer, "%4u", value);
+	ILI9806G_DispString_EN(x + 88U, y + 7U, displayBuffer);
 
 	gui_draw_progress_bar(bar_x, y + 13U, bar_width, 20U,
 						  ((uint32_t)shown_value * 1000UL) / 4095UL,
@@ -87,6 +97,44 @@ static void gui_draw_channel_card(uint16_t x, uint16_t y, uint8_t channel,
 	LCD_SetTextColor(RED);
 	ILI9806G_DrawLine(bar_x + bar_width / 2U, y + 11U,
 					  bar_x + bar_width / 2U, y + 35U);
+}
+
+static uint32_t gui_imu_axis_percent(float value, float limit)
+{
+	if(value < -limit)
+	{
+		value = -limit;
+	}
+	else if(value > limit)
+	{
+		value = limit;
+	}
+
+	return (uint32_t)(((value + limit) * 1000.0f) / (2.0f * limit) + 0.5f);
+}
+
+static void gui_draw_imu_axis(uint16_t y, const char *name, float value,
+						  float limit, uint16_t color, uint8_t draw_frame)
+{
+	if(draw_frame != 0U)
+	{
+		LCD_SetTextColor(GREY);
+		ILI9806G_DrawRectangle(4U, y, 792U, 80U, 1U);
+		LCD_SetBackColor(GREY);
+		LCD_SetTextColor(BLACK);
+		ILI9806G_DispString_EN(20U, y + 8U, (char *)name);
+		sprintf(displayBuffer, "Range: +/-%3.0f deg", limit);
+		ILI9806G_DispString_EN(476U, y + 8U, displayBuffer);
+	}
+
+	LCD_SetBackColor(GREY);
+	LCD_SetTextColor(color);
+	sprintf(displayBuffer, "%+7.1f deg", value);
+	ILI9806G_DispString_EN(156U, y + 8U, displayBuffer);
+	gui_draw_progress_bar(20U, y + 48U, 760U, 22U,
+						  gui_imu_axis_percent(value, limit), color);
+	LCD_SetTextColor(RED);
+	ILI9806G_DrawLine(400U, y + 45U, 400U, y + 73U);
 }
 
 void system_basic_information(void)
@@ -159,61 +207,87 @@ void system_basic_information(void)
 
 void main_menu(uint8_t selected_item)
 {
-	static const char *menu_text[5] =
+	static uint8_t last_selected_item = 0xffU;
+	static const char *menu_text[6] =
 	{
 		"System Information",
 		"Channel Monitor",
-		"GPS / BDS Information",
+		"IMU / MPU6050",
+		"GPS / BDS",
 		"Touch Draw Board",
-		"NRF Wireless Settings"
+		"NRF Wireless"
 	};
-	static const char *menu_hint[5] =
+	static const char *menu_hint[6] =
 	{
-		"Firmware and memory usage",
-		"ADC channels and attitude",
-		"Position, time and satellites",
+		"Memory and firmware",
+		"10 analog channels",
+		"Live attitude and motion",
+		"Position and satellites",
 		"Touch drawing tools",
-		"Radio setup and live status"
+		"Radio setup and status"
 	};
-	static const uint16_t card_y[5] = {80U, 144U, 208U, 272U, 336U};
 	uint8_t i;
+	uint16_t card_x;
+	uint16_t card_y;
 	uint16_t card_color;
+	uint8_t first_draw = 0U;
+
+	if(selected_item >= 6U)
+	{
+		selected_item = 0U;
+	}
 
 	if(display_flag == 1)
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
 		I2C_GTP_IRQDisable();
+		first_draw = 1U;
+		last_selected_item = 0xffU;
 	}
 	
 	LCD_SetFont(&Font16x32);
-	LCD_SetTextColor(BLUE);
-	ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-	LCD_SetBackColor(BLUE);
-	LCD_SetTextColor(WHITE);
-	ILI9806G_DispString_EN(20U, 0U, "REMOTER CONTROL CENTER");
-	ILI9806G_DispString_EN(20U, 32U, "LEFT/RIGHT: Select     OK: Enter");
-
-	for(i = 0; i < 5U; i++)
+	if(first_draw != 0U)
 	{
+		LCD_SetTextColor(BLUE);
+		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
+		LCD_SetBackColor(BLUE);
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DispString_EN(20U, 0U, "REMOTER CONTROL CENTER");
+		ILI9806G_DispString_EN(20U, 32U, "LEFT/RIGHT: Select     OK: Enter");
+	}
+
+	for(i = 0; i < 6U; i++)
+	{
+		if((first_draw == 0U) && (i != selected_item) &&
+		   (i != last_selected_item))
+		{
+			continue;
+		}
+
+		card_x = ((i & 1U) == 0U) ? 4U : 404U;
+		card_y = 80U + (uint16_t)(i / 2U) * 104U;
 		card_color = (i == selected_item) ? BLUE : GREY;
 		LCD_SetTextColor(card_color);
-		ILI9806G_DrawRectangle(4U, card_y[i], 792U, 48U, 1U);
+		ILI9806G_DrawRectangle(card_x, card_y, 392U, 88U, 1U);
 		LCD_SetBackColor(card_color);
 		LCD_SetTextColor((i == selected_item) ? WHITE : BLACK);
-		sprintf(displayBuffer, "%c %u. %-22.22s %-19.19s",
+		sprintf(displayBuffer, "%c %u. %-18.18s",
 				(i == selected_item) ? '>' : ' ', (uint16_t)(i + 1U),
-				menu_text[i], menu_hint[i]);
-		ILI9806G_DispString_EN(12U, card_y[i] + 8U, displayBuffer);
+				menu_text[i]);
+		ILI9806G_DispString_EN(card_x + 8U, card_y + 8U, displayBuffer);
+		sprintf(displayBuffer, "   %-20.20s", menu_hint[i]);
+		ILI9806G_DispString_EN(card_x + 8U, card_y + 48U, displayBuffer);
 	}
 
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(WHITE);
 	ILI9806G_DrawRectangle(4U, 416U, 792U, 32U, 1U);
 	LCD_SetTextColor(BLUE);
-	sprintf(displayBuffer, "Selected %u / 5: %s",
+	sprintf(displayBuffer, "Selected %u / 6: %s",
 			(uint16_t)(selected_item + 1U), menu_text[selected_item]);
 	ILI9806G_DispString_EN(4U, 416U, displayBuffer);
+	last_selected_item = selected_item;
 }
 
 void nrf_settings_page(uint8_t selected_item, uint8_t editing,
@@ -382,9 +456,9 @@ void system_data_read_and_set(void)
 	ILI9806G_DispStringLine_EN(LINE(11),displayBuffer);
 }
 
-void mpu6050_euler_information(void)
+void channel_monitor_page(void)
 {
-	static const uint16_t card_y[5] = {124U, 182U, 240U, 298U, 356U};
+	static const uint16_t card_y[5] = {80U, 144U, 208U, 272U, 336U};
 	uint16_t channel_value[10];
 	uint8_t i;
 	uint8_t first_draw = 0U;
@@ -414,27 +488,65 @@ void mpu6050_euler_information(void)
 		LCD_SetBackColor(BLUE);
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DispString_EN(20U, 0U, "CHANNEL MONITOR");
-		ILI9806G_DispString_EN(20U, 32U, "10 analog inputs + MPU6050 attitude");
+		ILI9806G_DispString_EN(20U, 32U, "10 analog inputs / optimized live view");
 
 		LCD_SetBackColor(WHITE);
 		LCD_SetTextColor(BLUE);
 		ILI9806G_DispString_EN(4U, 424U, "0..4095  Red=center 2048  BACK=Exit");
 	}
 
-	LCD_SetTextColor(GREY);
-	ILI9806G_DrawRectangle(4U, 72U, 792U, 40U, 1U);
-	LCD_SetBackColor(GREY);
-	LCD_SetTextColor(BLUE);
-	sprintf(displayBuffer, "P:%6.1f  R:%6.1f  Y:%6.1f  T:%5.1f C",
-			pitch, roll, yaw, (float)temp / 100.0f);
-	ILI9806G_DispString_EN(12U, 76U, displayBuffer);
-
 	for(i = 0U; i < 5U; i++)
 	{
-		gui_draw_channel_card(4U, card_y[i], i, channel_value[i], BLUE);
+		gui_draw_channel_card(4U, card_y[i], i, channel_value[i], BLUE,
+						  first_draw);
 		gui_draw_channel_card(404U, card_y[i], i + 5U,
-						  channel_value[i + 5U], GREEN);
+						  channel_value[i + 5U], GREEN, first_draw);
 	}
+
+	LCD_SetBackColor(WHITE);
+	LCD_SetTextColor(BLACK);
+}
+
+void imu6050_information(void)
+{
+	uint8_t first_draw = 0U;
+
+	if(display_flag == 1)
+	{
+		display_flag = 0;
+		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
+		I2C_GTP_IRQDisable();
+		first_draw = 1U;
+	}
+
+	LCD_SetFont(&Font16x32);
+	if(first_draw != 0U)
+	{
+		LCD_SetTextColor(BLUE);
+		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
+		LCD_SetBackColor(BLUE);
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DispString_EN(20U, 0U, "IMU / MPU6050");
+		ILI9806G_DispString_EN(20U, 32U, "DMP attitude / 100 Hz sensor / 20 FPS UI");
+
+		LCD_SetTextColor(GREY);
+		ILI9806G_DrawRectangle(4U, 396U, 792U, 80U, 1U);
+	}
+
+	gui_draw_imu_axis(76U, "PITCH", pitch, 90.0f, BLUE, first_draw);
+	gui_draw_imu_axis(172U, "ROLL", roll, 180.0f, GREEN, first_draw);
+	gui_draw_imu_axis(268U, "YAW", yaw, 180.0f, RED, first_draw);
+
+	LCD_SetBackColor(GREY);
+	LCD_SetTextColor(imu_data_valid ? GREEN : RED);
+	sprintf(displayBuffer, "%-7s TEMP:%5.1f C  ACC:%6d %6d %6d ",
+			imu_data_valid ? "ONLINE" : "WAITING", (float)temp / 100.0f,
+			aacx, aacy, aacz);
+	ILI9806G_DispString_EN(12U, 400U, displayBuffer);
+	LCD_SetTextColor(BLACK);
+	sprintf(displayBuffer, "GYRO:%6d %6d %6d             BACK=Exit ",
+			gyrox, gyroy, gyroz);
+	ILI9806G_DispString_EN(12U, 436U, displayBuffer);
 
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(BLACK);
@@ -459,4 +571,3 @@ void Draw_Board(void)
 		I2C_GTP_IRQEnable();
 	}	
 }
-

@@ -85,6 +85,8 @@ float pitch,roll,yaw; 		//dmp解算欧拉角
 short aacx,aacy,aacz;		//加速度传感器原始数据
 short gyrox,gyroy,gyroz;	//陀螺仪原始数据
 short temp;					//温度
+uint8_t imu_data_valid;
+static uint8_t imu_read_failures;
 float yaw_new;
 
 u8 finish_1hz=0,finish_2hz=0,finish_5hz=0,finish_10hz=0,finish_20hz=0,finish_33hz=0,finish_50hz=0,finish_100hz=0;
@@ -252,13 +254,9 @@ int main(void)
     {
 		if(finish_1hz == 1)
 		{
-			if(mpu_dmp_get_data(&pitch,&roll,&yaw) == 0)
-			{
-				temp = MPU_Get_Temperature();					//得到温度值
-				// MPU_Get_Accelerometer(&aacx,&aacy,&aacz);	//得到加速度传感器数据
-				// MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);		//得到陀螺仪数据
-			}
-			//printf("finish_1hz = %d\n\r",finish_1hz);
+			temp = MPU_Get_Temperature();
+			MPU_Get_Accelerometer(&aacx,&aacy,&aacz);
+			MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);
 			finish_1hz = 0;
 		}
 		
@@ -276,6 +274,22 @@ int main(void)
 
 		if(finish_10hz == 1)
 		{
+			if(mpu_dmp_get_data(&pitch,&roll,&yaw) == 0)
+			{
+				imu_data_valid = 1U;
+				imu_read_failures = 0U;
+			}
+			else
+			{
+				if(imu_read_failures < 10U)
+				{
+					imu_read_failures++;
+				}
+				if(imu_read_failures >= 10U)
+				{
+					imu_data_valid = 0U;
+				}
+			}
 			RTC_TimeAndDate_Show(); // 显示时间和日期
 			finish_10hz = 0;
 		}

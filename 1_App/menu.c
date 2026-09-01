@@ -3,9 +3,9 @@
 #include "param.h"
 #include "platform_nrf.h"
 
-#define MENU_ITEM_COUNT       5U
+#define MENU_ITEM_COUNT       6U
 #define MENU_EVENT_QUEUE_SIZE 8U
-#define MENU_REFRESH_TICKS    10U
+#define MENU_REFRESH_TICKS    5U
 #define NRF_MENU_ITEM_COUNT   6U
 #define NRF_SETTING_COUNT     4U
 
@@ -14,6 +14,7 @@ typedef enum
     MENU_PAGE_HOME = 0,
     MENU_PAGE_SYSTEM_INFO,
     MENU_PAGE_MONITOR,
+    MENU_PAGE_IMU,
     MENU_PAGE_GPS,
     MENU_PAGE_DRAW_BOARD,
     MENU_PAGE_NRF
@@ -23,6 +24,7 @@ static const MenuPage menu_items[MENU_ITEM_COUNT] =
 {
     MENU_PAGE_SYSTEM_INFO,
     MENU_PAGE_MONITOR,
+    MENU_PAGE_IMU,
     MENU_PAGE_GPS,
     MENU_PAGE_DRAW_BOARD,
     MENU_PAGE_NRF
@@ -300,7 +302,11 @@ static void menu_draw_current_page(void)
             break;
 
         case MENU_PAGE_MONITOR:
-            mpu6050_euler_information();
+            channel_monitor_page();
+            break;
+
+        case MENU_PAGE_IMU:
+            imu6050_information();
             break;
 
         case MENU_PAGE_GPS:
@@ -330,7 +336,11 @@ static void menu_refresh_dynamic_page(void)
 {
     if(current_page == MENU_PAGE_MONITOR)
     {
-        mpu6050_euler_information();
+        channel_monitor_page();
+    }
+    else if(current_page == MENU_PAGE_IMU)
+    {
+        imu6050_information();
     }
     else if(current_page == MENU_PAGE_GPS)
     {

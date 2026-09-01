@@ -7,7 +7,9 @@ void gui_prepare_page(void);
 
 void system_basic_information(void);
 
-void mpu6050_euler_information(void);
+void channel_monitor_page(void);
+
+void imu6050_information(void);
 
 void main_menu(uint8_t selected_item);
 

@@ -2991,8 +2991,13 @@ u8 mpu_dmp_get_data(float *pitch,float *roll,float *yaw)
 	short gyro[3], accel[3], sensors;
 	unsigned char more;
 	long quat[4]; 
-	if(dmp_read_fifo(gyro, accel, quat, &sensor_timestamp, &sensors,&more))
-		return 1;	 
+	/* Always use the newest packet. Slow display drawing can leave multiple
+	 * DMP packets queued; draining them here prevents latency and FIFO buildup. */
+	do
+	{
+		if(dmp_read_fifo(gyro, accel, quat, &sensor_timestamp, &sensors, &more))
+			return 1;
+	} while(more != 0U);
 	/* Gyro and accel data are written to the FIFO by the DMP in chip frame and hardware units.
 	 * This behavior is convenient because it keeps the gyro and accel outputs of dmp_read_fifo and mpu_read_fifo consistent.
 	**/

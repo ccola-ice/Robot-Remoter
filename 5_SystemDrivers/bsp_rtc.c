@@ -38,8 +38,7 @@ void RTC_TimeAndDate_Set(void)
   */
 void RTC_TimeAndDate_Show(void)
 {
-	uint8_t Rtctmp=0;
-	char LCDTemp[100];
+	static uint8_t Rtctmp = 0xffU;
 	RTC_TimeTypeDef RTC_TimeStructure;
 	RTC_DateTypeDef RTC_DateStructure;
 	
