@@ -4,6 +4,72 @@
 
 #define RTC_PRINT
 
+static uint8_t RTC_IsLeapYear(uint16_t year)
+{
+	return (uint8_t)(((year % 4U) == 0U) &&
+	                (((year % 100U) != 0U) || ((year % 400U) == 0U)));
+}
+
+static uint8_t RTC_DaysInMonth(uint16_t year, uint8_t month)
+{
+	static const uint8_t days[12] =
+	{
+		31U, 28U, 31U, 30U, 31U, 30U,
+		31U, 31U, 30U, 31U, 30U, 31U
+	};
+
+	if ((month == 0U) || (month > 12U))
+	{
+		return 0U;
+	}
+
+	if ((month == 2U) && RTC_IsLeapYear(year))
+	{
+		return 29U;
+	}
+
+	return days[month - 1U];
+}
+
+/* STM32 RTC weekday: Monday = 1, ..., Sunday = 7. */
+static uint8_t RTC_CalculateWeekday(uint16_t year, uint8_t month, uint8_t day)
+{
+	static const uint8_t month_offset[12] =
+	{
+		0U, 3U, 2U, 5U, 0U, 3U, 5U, 1U, 4U, 6U, 2U, 4U
+	};
+	uint16_t adjusted_year = year;
+	uint8_t weekday;
+
+	if (month < 3U)
+	{
+		adjusted_year--;
+	}
+
+	weekday = (uint8_t)((adjusted_year + adjusted_year / 4U - adjusted_year / 100U +
+	                     adjusted_year / 400U + month_offset[month - 1U] + day) % 7U);
+
+	return (weekday == 0U) ? 7U : weekday;
+}
+
+static uint8_t RTC_CompileMonth(void)
+{
+	const char *date = __DATE__;
+
+	if ((date[0] == 'J') && (date[1] == 'a')) return 1U;
+	if ((date[0] == 'F')) return 2U;
+	if ((date[0] == 'M') && (date[2] == 'r')) return 3U;
+	if ((date[0] == 'A') && (date[1] == 'p')) return 4U;
+	if ((date[0] == 'M') && (date[2] == 'y')) return 5U;
+	if ((date[0] == 'J') && (date[2] == 'n')) return 6U;
+	if ((date[0] == 'J') && (date[2] == 'l')) return 7U;
+	if ((date[0] == 'A') && (date[1] == 'u')) return 8U;
+	if ((date[0] == 'S')) return 9U;
+	if ((date[0] == 'O')) return 10U;
+	if ((date[0] == 'N')) return 11U;
+	return 12U;
+}
+
 /**
   * @brief  设置时间和日期
   * @param  无
@@ -13,22 +79,87 @@ void RTC_TimeAndDate_Set(void)
 {
 	RTC_TimeTypeDef RTC_TimeStructure;
 	RTC_DateTypeDef RTC_DateStructure;
-	
-	// 初始化时间
+	const char *compile_date = __DATE__;
+	const char *compile_time = __TIME__;
+	uint16_t year = (uint16_t)((compile_date[7] - '0') * 1000 +
+	                           (compile_date[8] - '0') * 100 +
+	                           (compile_date[9] - '0') * 10 +
+	                           (compile_date[10] - '0'));
+	uint8_t month = RTC_CompileMonth();
+	uint8_t day = (uint8_t)(((compile_date[4] == ' ') ? 0 : (compile_date[4] - '0')) * 10 +
+	                        (compile_date[5] - '0'));
+
+	/* 首次启动使用本次固件的编译时间，避免继续使用历史固定日期。 */
 	RTC_TimeStructure.RTC_H12 = RTC_H12_AMorPM;
-	RTC_TimeStructure.RTC_Hours = HOURS;        
-	RTC_TimeStructure.RTC_Minutes = MINUTES;      
-	RTC_TimeStructure.RTC_Seconds = SECONDS;      
-	RTC_SetTime(RTC_Format_BINorBCD, &RTC_TimeStructure);
+	RTC_TimeStructure.RTC_Hours = (uint8_t)((compile_time[0] - '0') * 10 + (compile_time[1] - '0'));
+	RTC_TimeStructure.RTC_Minutes = (uint8_t)((compile_time[3] - '0') * 10 + (compile_time[4] - '0'));
+	RTC_TimeStructure.RTC_Seconds = (uint8_t)((compile_time[6] - '0') * 10 + (compile_time[7] - '0'));
+
+	RTC_DateStructure.RTC_WeekDay = RTC_CalculateWeekday(year, month, day);
+	RTC_DateStructure.RTC_Date = day;
+	RTC_DateStructure.RTC_Month = month;
+	RTC_DateStructure.RTC_Year = (uint8_t)(year - 2000U);
+
+	if ((RTC_SetDate(RTC_Format_BINorBCD, &RTC_DateStructure) == SUCCESS) &&
+	    (RTC_SetTime(RTC_Format_BINorBCD, &RTC_TimeStructure) == SUCCESS))
+	{
+		RTC_WriteBackupRegister(RTC_BKP_DRX, RTC_BKP_DATA);
+	}
+}
+
+/**
+  * @brief  使用外部可靠日历时间校准RTC
+  * @retval 1: 已校准，0: 输入无效、无需校准或写入失败
+  */
+uint8_t RTC_SynchronizeCalendar(uint16_t year, uint8_t month, uint8_t day,
+                                uint8_t hour, uint8_t minute, uint8_t second)
+{
+	RTC_TimeTypeDef current_time;
+	RTC_DateTypeDef current_date;
+	RTC_TimeTypeDef target_time;
+	RTC_DateTypeDef target_date;
+	int16_t second_error;
+
+	if ((year < 2000U) || (year > 2099U) ||
+	    (month == 0U) || (month > 12U) ||
+	    (day == 0U) || (day > RTC_DaysInMonth(year, month)) ||
+	    (hour > 23U) || (minute > 59U) || (second > 59U))
+	{
+		return 0U;
+	}
+
+	RTC_GetTime(RTC_Format_BIN, &current_time);
+	RTC_GetDate(RTC_Format_BIN, &current_date);
+
+	second_error = (int16_t)current_time.RTC_Seconds - (int16_t)second;
+	if ((current_date.RTC_Year == (uint8_t)(year - 2000U)) &&
+	    (current_date.RTC_Month == month) &&
+	    (current_date.RTC_Date == day) &&
+	    (current_time.RTC_Hours == hour) &&
+	    (current_time.RTC_Minutes == minute) &&
+	    (second_error >= -1) && (second_error <= 1))
+	{
+		return 0U;
+	}
+
+	target_date.RTC_WeekDay = RTC_CalculateWeekday(year, month, day);
+	target_date.RTC_Date = day;
+	target_date.RTC_Month = month;
+	target_date.RTC_Year = (uint8_t)(year - 2000U);
+
+	target_time.RTC_H12 = RTC_H12_AM;
+	target_time.RTC_Hours = hour;
+	target_time.RTC_Minutes = minute;
+	target_time.RTC_Seconds = second;
+
+	if ((RTC_SetDate(RTC_Format_BIN, &target_date) == ERROR) ||
+	    (RTC_SetTime(RTC_Format_BIN, &target_time) == ERROR))
+	{
+		return 0U;
+	}
+
 	RTC_WriteBackupRegister(RTC_BKP_DRX, RTC_BKP_DATA);
-	
-  // 初始化日期	
-	RTC_DateStructure.RTC_WeekDay = WEEKDAY;       
-	RTC_DateStructure.RTC_Date = DATE;         
-	RTC_DateStructure.RTC_Month = MONTH;         
-	RTC_DateStructure.RTC_Year = YEAR;        
-	RTC_SetDate(RTC_Format_BINorBCD, &RTC_DateStructure);
-	RTC_WriteBackupRegister(RTC_BKP_DRX, RTC_BKP_DATA);
+	return 1U;
 }
 
 /**

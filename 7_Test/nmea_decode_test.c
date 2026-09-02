@@ -4,6 +4,7 @@
 #include "nmea/nmea.h"
 #include "ff.h"
 #include "bsp_fsmc_lcd.h"
+#include "bsp_rtc.h"
 
 double deg_lat;//转换成[degree].[degree]格式的纬度
 double deg_lon;//转换成[degree].[degree]格式的经度
@@ -33,6 +34,13 @@ void nmea_decode_init(void)
   */
 int nmea_decode_test(void)
 {
+	  static int last_rtc_year = -1;
+	  static int last_rtc_month = -1;
+	  static int last_rtc_day = -1;
+	  static int last_rtc_hour = -1;
+	  static int last_rtc_minute = -1;
+	  static int last_rtc_second = -1;
+
       if(GPS_HalfTransferEnd)     /* 接收到GPS_RBUFF_SIZE一半的数据 */
       {
         /* 进行nmea格式解码 */
@@ -53,6 +61,29 @@ int nmea_decode_test(void)
       {    
         /* 对解码后的时间进行转换，转换成北京时间 */
         GMTconvert(&info.utc,&beiJingTime,8,1);
+
+		/* NMEA提供完整日期后，每个新GPS秒最多校准一次RTC。 */
+		if ((beiJingTime.year != last_rtc_year) ||
+		    (beiJingTime.mon != last_rtc_month) ||
+		    (beiJingTime.day != last_rtc_day) ||
+		    (beiJingTime.hour != last_rtc_hour) ||
+		    (beiJingTime.min != last_rtc_minute) ||
+		    (beiJingTime.sec != last_rtc_second))
+		{
+			RTC_SynchronizeCalendar((uint16_t)(beiJingTime.year + 1900),
+			                        (uint8_t)beiJingTime.mon,
+			                        (uint8_t)beiJingTime.day,
+			                        (uint8_t)beiJingTime.hour,
+			                        (uint8_t)beiJingTime.min,
+			                        (uint8_t)beiJingTime.sec);
+
+			last_rtc_year = beiJingTime.year;
+			last_rtc_month = beiJingTime.mon;
+			last_rtc_day = beiJingTime.day;
+			last_rtc_hour = beiJingTime.hour;
+			last_rtc_minute = beiJingTime.min;
+			last_rtc_second = beiJingTime.sec;
+		}
         
         /* 输出解码得到的信息 */
 		//printf("\r\n时间%d-%02d-%02d,%d:%d:%d\r\n", beiJingTime.year+1900, beiJingTime.mon,beiJingTime.day,beiJingTime.hour,beiJingTime.min,beiJingTime.sec);

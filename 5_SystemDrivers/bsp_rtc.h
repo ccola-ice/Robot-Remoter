@@ -13,17 +13,7 @@
 #define SYNCHPREDIV          0XFF
 
 
-// 时间宏定义
-#define RTC_H12_AMorPM			 RTC_H12_AM  
-#define HOURS                15          // 0~23
-#define MINUTES              41          // 0~59
-#define SECONDS              00          // 0~59
-
-// 日期宏定义
-#define WEEKDAY              7          // 1~7
-#define DATE                 06         // 1~31
-#define MONTH                10          // 1~12
-#define YEAR                 24         // 0~99
+#define RTC_H12_AMorPM             RTC_H12_AM
 
 // 时间格式宏定义
 #define RTC_Format_BINorBCD         RTC_Format_BIN
@@ -31,12 +21,14 @@
 // 备份域寄存器宏定义
 #define RTC_BKP_DRX                 RTC_BKP_DR0
 // 写入到备份寄存器的数据宏定义
-#define RTC_BKP_DATA                0X32F2
+#define RTC_BKP_DATA                0X32F3
  
                                   
 void RTC_CLK_Config(void);
 void RTC_TimeAndDate_Set(void);
 void RTC_TimeAndDate_Show(void);
+uint8_t RTC_SynchronizeCalendar(uint16_t year, uint8_t month, uint8_t day,
+                                uint8_t hour, uint8_t minute, uint8_t second);
 
 void RTC_Config(void);
 
