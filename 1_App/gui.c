@@ -746,17 +746,25 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 							 uint8_t dirty, uint16_t revision,
 							 const char *status_text)
 {
-	static uint16_t last_revision = 0xffffU;
 	static uint8_t last_selected_item = 0xffU;
 	static uint8_t last_first_visible = 0xffU;
+	static uint8_t last_visible_count;
+	static uint8_t last_editing = 0xffU;
+	static uint8_t last_dirty = 0xffU;
+	static GuiParamRow last_rows[GUI_PARAM_VISIBLE_ROWS];
+	static char last_status_text[80];
 	uint8_t row;
 	uint8_t item_index;
 	uint8_t selected_item;
 	uint8_t first_draw = 0U;
-	uint8_t content_changed;
+	uint8_t window_changed;
+	uint8_t state_changed;
+	uint8_t row_text_changed;
+	uint8_t indicator_changed;
 	uint16_t row_y;
 	uint16_t scroll_height;
 	uint16_t scroll_y;
+	uint16_t selection_color;
 	const char *state_text;
 
 	if(display_flag == 1)
@@ -765,10 +773,15 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
 		I2C_GTP_IRQDisable();
 		first_draw = 1U;
-		last_revision = 0xffffU;
 		last_selected_item = 0xffU;
 		last_first_visible = 0xffU;
+		last_visible_count = 0U;
+		last_editing = 0xffU;
+		last_dirty = 0xffU;
+		memset(last_rows, 0, sizeof(last_rows));
+		last_status_text[0] = '\0';
 	}
+	(void)revision;
 
 	if(visible_count == 0U)
 	{
@@ -779,8 +792,13 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 		selected_row = 0U;
 	}
 	selected_item = (uint8_t)(first_visible + selected_row);
-	content_changed = ((first_draw != 0U) || (revision != last_revision) ||
-					   (first_visible != last_first_visible)) ? 1U : 0U;
+	window_changed = ((first_draw != 0U) ||
+					  (first_visible != last_first_visible) ||
+					  (visible_count != last_visible_count)) ? 1U : 0U;
+	state_changed = ((first_draw != 0U) ||
+					 (editing != last_editing) || (dirty != last_dirty) ||
+					 (first_visible != last_first_visible) ||
+					 (strcmp(status_text, last_status_text) != 0)) ? 1U : 0U;
 
 	if(first_draw != 0U)
 	{
@@ -791,77 +809,12 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 		LCD_SetFont(&Font16x32);
 		ILI9806G_DispString_EN(20U, 0U, "PARAMETER SETTINGS");
 		ILI9806G_DispString_EN(20U, 32U, "Scrollable configuration / explicit Flash save");
-	}
 
-	if(content_changed != 0U)
-	{
-		state_text = (editing != 0U) ? "EDITING" :
-					 ((dirty != 0U) ? "UNSAVED" : "SAVED");
 		LCD_SetTextColor(GREY);
 		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
-		LCD_SetBackColor(GREY);
-		LCD_SetTextColor(BLACK);
-		LCD_SetFont(&Font8x16);
-		sprintf(displayBuffer, "ITEMS %u-%u / %u     STATE: %s",
-				(uint16_t)(first_visible + 1U),
-				(uint16_t)(first_visible + visible_count),
-				(uint16_t)total_items, state_text);
-		ILI9806G_DispString_EN(20U, 80U, displayBuffer);
-
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DrawRectangle(4U, 112U, 792U, 288U, 1U);
-	}
 
-	for(row = 0U; row < visible_count; row++)
-	{
-		item_index = (uint8_t)(first_visible + row);
-		if((content_changed == 0U) && (item_index != selected_item) &&
-		   (item_index != last_selected_item))
-		{
-			continue;
-		}
-
-		row_y = 112U + (uint16_t)row * 48U;
-		if(item_index == selected_item)
-		{
-			LCD_SetTextColor((editing != 0U) ? RED : BLUE);
-			LCD_SetBackColor((editing != 0U) ? RED : BLUE);
-		}
-		else
-		{
-			LCD_SetTextColor(GREY);
-			LCD_SetBackColor(GREY);
-		}
-		ILI9806G_DrawRectangle(4U, row_y, 768U, 40U, 1U);
-		LCD_SetTextColor((item_index == selected_item) ? WHITE : BLACK);
-		LCD_SetFont(&Font16x32);
-		sprintf(displayBuffer, "%-23.23s %-20.20s",
-				rows[row].label, rows[row].value);
-		ILI9806G_DispString_EN(20U, row_y + 4U, displayBuffer);
-	}
-
-	/* A compact scrollbar shows where the six-row window is in the list. */
-	LCD_SetTextColor(GREY);
-	ILI9806G_DrawRectangle(780U, 116U, 8U, 280U, 1U);
-	scroll_height = (uint16_t)(280UL * visible_count / total_items);
-	if(scroll_height < 24U)
-	{
-		scroll_height = 24U;
-	}
-	if(total_items > visible_count)
-	{
-		scroll_y = (uint16_t)(116U +
-			(256UL * first_visible / (total_items - visible_count)));
-	}
-	else
-	{
-		scroll_y = 116U;
-	}
-	LCD_SetTextColor(BLUE);
-	ILI9806G_DrawRectangle(780U, scroll_y, 8U, scroll_height, 1U);
-
-	if(content_changed != 0U)
-	{
 		LCD_SetBackColor(WHITE);
 		LCD_SetTextColor(BLUE);
 		LCD_SetFont(&Font8x16);
@@ -869,8 +822,100 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 			"LEFT/RIGHT Select/Change   OK Edit/Confirm   BACK Cancel/Exit");
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DrawRectangle(4U, 432U, 792U, 32U, 1U);
+	}
+
+	if(state_changed != 0U)
+	{
+		state_text = (editing != 0U) ? "EDITING" :
+					 ((dirty != 0U) ? "UNSAVED" : "SAVED");
+		LCD_SetBackColor(GREY);
+		LCD_SetTextColor((editing != 0U) ? RED :
+					 ((dirty != 0U) ? RED : BLACK));
+		LCD_SetFont(&Font8x16);
+		sprintf(displayBuffer,
+				"ITEMS %u-%u / %u     STATE: %-8s                              ",
+				(uint16_t)(first_visible + 1U),
+				(uint16_t)(first_visible + visible_count),
+				(uint16_t)total_items, state_text);
+		ILI9806G_DispString_EN(20U, 80U, displayBuffer);
+	}
+
+	for(row = 0U; row < visible_count; row++)
+	{
+		item_index = (uint8_t)(first_visible + row);
+		row_y = 112U + (uint16_t)row * 48U;
+		row_text_changed = ((window_changed != 0U) ||
+			(strcmp(rows[row].label, last_rows[row].label) != 0) ||
+			(strcmp(rows[row].value, last_rows[row].value) != 0)) ? 1U : 0U;
+		indicator_changed = ((window_changed != 0U) ||
+			(item_index == selected_item) ||
+			(item_index == last_selected_item)) ? 1U : 0U;
+
+		if((first_draw != 0U) || (row >= last_visible_count))
+		{
+			LCD_SetTextColor(GREY);
+			ILI9806G_DrawRectangle(4U, row_y, 768U, 40U, 1U);
+			LCD_SetTextColor(BLACK);
+			ILI9806G_DrawRectangle(4U, row_y, 768U, 40U, 0U);
+		}
+
+		if(row_text_changed != 0U)
+		{
+			LCD_SetBackColor(GREY);
+			LCD_SetTextColor(BLACK);
+			LCD_SetFont(&Font16x32);
+			sprintf(displayBuffer, "%-23.23s %-20.20s",
+					rows[row].label, rows[row].value);
+			ILI9806G_DispString_EN(20U, row_y + 4U, displayBuffer);
+		}
+
+		if(indicator_changed != 0U)
+		{
+			/* Narrow marker and outline avoid tearing from full-width fills. */
+			LCD_SetTextColor(GREY);
+			ILI9806G_DrawRectangle(8U, row_y + 4U, 8U, 32U, 1U);
+			LCD_SetTextColor(BLACK);
+			ILI9806G_DrawRectangle(4U, row_y, 768U, 40U, 0U);
+			if(item_index == selected_item)
+			{
+				selection_color = (editing != 0U) ? RED : BLUE;
+				LCD_SetTextColor(selection_color);
+				ILI9806G_DrawRectangle(8U, row_y + 4U, 8U, 32U, 1U);
+				ILI9806G_DrawRectangle(4U, row_y, 768U, 40U, 0U);
+			}
+		}
+
+		strcpy(last_rows[row].label, rows[row].label);
+		strcpy(last_rows[row].value, rows[row].value);
+	}
+
+	if(window_changed != 0U)
+	{
+		/* Scrollbar is redrawn only when the six-row window actually moves. */
+		LCD_SetTextColor(GREY);
+		ILI9806G_DrawRectangle(780U, 116U, 8U, 280U, 1U);
+		scroll_height = (uint16_t)(280UL * visible_count / total_items);
+		if(scroll_height < 24U)
+		{
+			scroll_height = 24U;
+		}
+		if(total_items > visible_count)
+		{
+			scroll_y = (uint16_t)(116U +
+				(256UL * first_visible / (total_items - visible_count)));
+		}
+		else
+		{
+			scroll_y = 116U;
+		}
+		LCD_SetTextColor(BLUE);
+		ILI9806G_DrawRectangle(780U, scroll_y, 8U, scroll_height, 1U);
+	}
+
+	if(state_changed != 0U)
+	{
 		LCD_SetBackColor(WHITE);
-		LCD_SetTextColor((dirty != 0U) ? RED : BLACK);
+		LCD_SetTextColor(((editing != 0U) || (dirty != 0U)) ? RED : BLACK);
 		LCD_SetFont(&Font16x32);
 		sprintf(displayBuffer, "Status: %-39.39s", status_text);
 		ILI9806G_DispString_EN(12U, 432U, displayBuffer);
@@ -878,9 +923,13 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(BLACK);
-	last_revision = revision;
 	last_selected_item = selected_item;
 	last_first_visible = first_visible;
+	last_visible_count = visible_count;
+	last_editing = editing;
+	last_dirty = dirty;
+	strncpy(last_status_text, status_text, sizeof(last_status_text) - 1U);
+	last_status_text[sizeof(last_status_text) - 1U] = '\0';
 }
 
 void nrf_settings_page(uint8_t selected_item, uint8_t editing,

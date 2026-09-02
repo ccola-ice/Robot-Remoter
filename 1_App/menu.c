@@ -456,10 +456,27 @@ static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
     }
 }
 
-static void menu_param_adjust_float(float *value, int8_t direction,
+static void menu_param_adjust_float(void *packed_field, int8_t direction,
                                     int16_t minimum_x10, int16_t maximum_x10)
 {
-    int16_t value_x10 = (int16_t)(*value * 10.0f + 0.5f);
+    float value;
+    int16_t value_x10;
+    uint8_t byte_index;
+    uint8_t *value_bytes = (uint8_t *)&value;
+    volatile uint8_t *field_bytes = (volatile uint8_t *)packed_field;
+
+    /*
+     * param_Config is the byte-packed SPI Flash image.  Its float members are
+     * not 4-byte aligned, so dereferencing a float pointer to either member
+     * makes ARMCC emit VLDR/VSTR on an unaligned address and can HardFault.
+     * Volatile byte copies keep the packed access explicitly byte-addressable
+     * while the FPU arithmetic uses an aligned local float.
+     */
+    for(byte_index = 0U; byte_index < sizeof(value); byte_index++)
+    {
+        value_bytes[byte_index] = field_bytes[byte_index];
+    }
+    value_x10 = (int16_t)(value * 10.0f + 0.5f);
 
     value_x10 = (int16_t)(value_x10 + direction);
     if(value_x10 < minimum_x10)
@@ -470,7 +487,11 @@ static void menu_param_adjust_float(float *value, int8_t direction,
     {
         value_x10 = maximum_x10;
     }
-    *value = (float)value_x10 / 10.0f;
+    value = (float)value_x10 / 10.0f;
+    for(byte_index = 0U; byte_index < sizeof(value); byte_index++)
+    {
+        field_bytes[byte_index] = value_bytes[byte_index];
+    }
 }
 
 static void menu_param_adjust(int8_t direction)
