@@ -426,10 +426,11 @@ void system_basic_information(void)
 void main_menu(uint8_t selected_item)
 {
 	static uint8_t last_selected_item = 0xffU;
-	static const char *menu_text[8] =
+	static const char *menu_text[9] =
 	{
 		"System Information",
 		"Channel Monitor",
+		"Digital Inputs",
 		"IMU / MPU6050",
 		"GPS / BDS",
 		"Touch Draw Board",
@@ -437,10 +438,11 @@ void main_menu(uint8_t selected_item)
 		"File Browser",
 		"Parameter Settings"
 	};
-	static const char *menu_hint[8] =
+	static const char *menu_hint[9] =
 	{
 		"Memory / firmware",
 		"10 analog channels",
+		"6 buttons / toggle channels",
 		"Live attitude / motion",
 		"Position / satellites",
 		"Touch drawing tools",
@@ -455,7 +457,7 @@ void main_menu(uint8_t selected_item)
 	uint16_t card_height;
 	uint8_t first_draw = 0U;
 
-	if(selected_item >= 8U)
+	if(selected_item >= 9U)
 	{
 		selected_item = 0U;
 	}
@@ -480,12 +482,12 @@ void main_menu(uint8_t selected_item)
 		ILI9806G_DispString_EN(20U, 32U, "LEFT/RIGHT: Select     OK: Enter");
 	}
 
-	for(i = 0; i < 8U; i++)
+	for(i = 0; i < 9U; i++)
 	{
 		card_x = ((i & 1U) == 0U) ? 4U : 404U;
-		card_y = 72U + (uint16_t)(i / 2U) * 82U;
+		card_y = 72U + (uint16_t)(i / 2U) * 66U;
 		card_width = 392U;
-		card_height = 70U;
+		card_height = 60U;
 
 		if(first_draw != 0U)
 		{
@@ -496,10 +498,10 @@ void main_menu(uint8_t selected_item)
 			LCD_SetFont(&Font16x32);
 			sprintf(displayBuffer, "%u. %-18.18s",
 					(uint16_t)(i + 1U), menu_text[i]);
-			ILI9806G_DispString_EN(card_x + 20U, card_y + 4U, displayBuffer);
+			ILI9806G_DispString_EN(card_x + 20U, card_y, displayBuffer);
 			LCD_SetFont(&Font8x16);
 			sprintf(displayBuffer, "%-40.40s", menu_hint[i]);
-			ILI9806G_DispString_EN(card_x + 20U, card_y + 44U, displayBuffer);
+			ILI9806G_DispString_EN(card_x + 20U, card_y + 38U, displayBuffer);
 		}
 
 		if((first_draw != 0U) || (i == selected_item) ||
@@ -522,10 +524,128 @@ void main_menu(uint8_t selected_item)
 		ILI9806G_DrawRectangle(4U, 416U, 792U, 32U, 1U);
 	}
 	LCD_SetTextColor(BLUE);
-	sprintf(displayBuffer, "Selected: %u / 8 ",
+	sprintf(displayBuffer, "Selected: %u / 9 ",
 			(uint16_t)(selected_item + 1U));
 	ILI9806G_DispString_EN(4U, 416U, displayBuffer);
 	last_selected_item = selected_item;
+}
+
+void digital_channel_monitor_page(const uint8_t *raw_values,
+								  const uint8_t *stable_values)
+{
+	static const char *channel_pin[6] =
+	{
+		"PD6", "PD3", "PA8", "PD7", "PE3", "PE2"
+	};
+	static const uint8_t channel_is_button[6] = {1U, 0U, 1U, 1U, 0U, 0U};
+	static uint8_t last_raw[6] = {0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU};
+	static uint8_t last_stable[6] = {0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU};
+	uint8_t channel;
+	uint8_t first_draw = 0U;
+	uint16_t card_x;
+	uint16_t card_y;
+	uint16_t state_color;
+	const char *state_text;
+
+	if(display_flag == 1U)
+	{
+		display_flag = 0U;
+		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
+		I2C_GTP_IRQDisable();
+		first_draw = 1U;
+		for(channel = 0U; channel < 6U; channel++)
+		{
+			last_raw[channel] = 0xffU;
+			last_stable[channel] = 0xffU;
+		}
+	}
+
+	if(first_draw != 0U)
+	{
+		LCD_SetTextColor(BLUE2);
+		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
+		LCD_SetBackColor(BLUE2);
+		LCD_SetTextColor(WHITE);
+		LCD_SetFont(&Font16x32);
+		ILI9806G_DispString_EN(20U, 0U, "DIGITAL CHANNEL MONITOR");
+		LCD_SetFont(&Font8x16);
+		ILI9806G_DispString_EN(20U, 36U,
+			"DCH1..DCH6 / RAW AND 30 ms DEBOUNCED VALUES");
+
+		for(channel = 0U; channel < 6U; channel++)
+		{
+			card_x = ((channel & 1U) == 0U) ? 4U : 404U;
+			card_y = 72U + (uint16_t)(channel / 2U) * 112U;
+			LCD_SetTextColor(GREY);
+			ILI9806G_DrawRectangle(card_x, card_y, 392U, 104U, 1U);
+			LCD_SetTextColor(BLUE2);
+			ILI9806G_DrawRectangle(card_x, card_y, 392U, 104U, 0U);
+
+			LCD_SetBackColor(GREY);
+			LCD_SetTextColor(BLACK);
+			LCD_SetFont(&Font16x32);
+			sprintf(displayBuffer, "DCH%u", (uint16_t)(channel + 1U));
+			ILI9806G_DispString_EN(card_x + 16U, card_y + 4U, displayBuffer);
+			LCD_SetFont(&Font8x16);
+			sprintf(displayBuffer, "%s / %s",
+					(channel_is_button[channel] != 0U) ? "BUTTON" : "TOGGLE",
+					channel_pin[channel]);
+			ILI9806G_DispString_EN(card_x + 136U, card_y + 12U, displayBuffer);
+		}
+
+		LCD_SetBackColor(WHITE);
+		LCD_SetTextColor(BLUE2);
+		LCD_SetFont(&Font8x16);
+		ILI9806G_DispString_EN(12U, 416U,
+			"10 ms SAMPLE / 30 ms DEBOUNCE     BUTTONS ARE ACTIVE LOW");
+		ILI9806G_DispString_EN(12U, 456U, "LEFT: BACK");
+	}
+
+	for(channel = 0U; channel < 6U; channel++)
+	{
+		card_x = ((channel & 1U) == 0U) ? 4U : 404U;
+		card_y = 72U + (uint16_t)(channel / 2U) * 112U;
+
+		if((first_draw != 0U) || (raw_values[channel] != last_raw[channel]))
+		{
+			LCD_SetBackColor(GREY);
+			LCD_SetTextColor(BLACK);
+			LCD_SetFont(&Font8x16);
+			sprintf(displayBuffer, "RAW LEVEL: %u   ",
+					(uint16_t)raw_values[channel]);
+			ILI9806G_DispString_EN(card_x + 16U, card_y + 44U, displayBuffer);
+			last_raw[channel] = raw_values[channel];
+		}
+
+		if((first_draw != 0U) ||
+		   (stable_values[channel] != last_stable[channel]))
+		{
+			if(channel_is_button[channel] != 0U)
+			{
+				state_text = (stable_values[channel] == 0U) ?
+							 "PRESSED" : "RELEASED";
+				state_color = (stable_values[channel] == 0U) ? GREEN : BLACK;
+			}
+			else
+			{
+				state_text = (stable_values[channel] == 0U) ?
+							 "POSITION A" : "POSITION B";
+				state_color = (stable_values[channel] == 0U) ? RED : BLUE2;
+			}
+
+			LCD_SetBackColor(GREY);
+			LCD_SetTextColor(state_color);
+			LCD_SetFont(&Font16x32);
+			sprintf(displayBuffer, "VALUE %u  %-10s",
+					(uint16_t)stable_values[channel], state_text);
+			ILI9806G_DispString_EN(card_x + 16U, card_y + 68U, displayBuffer);
+			last_stable[channel] = stable_values[channel];
+		}
+	}
+
+	LCD_SetFont(&Font16x32);
+	LCD_SetBackColor(WHITE);
+	LCD_SetTextColor(BLACK);
 }
 
 static void gui_file_display_text(char *destination, uint16_t destination_size,

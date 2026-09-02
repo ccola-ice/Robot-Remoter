@@ -75,6 +75,7 @@ virtualFolder:
       files:
         - path: ../5_ModuleDrivers/bsp_gpio_led.c
         - path: ../5_ModuleDrivers/bsp_gpio_button.c
+        - path: ../5_ModuleDrivers/bsp_gpio_digital_channel.c
         - path: ../5_ModuleDrivers/bsp_gpio_stick.c
         - path: ../5_ModuleDrivers/bsp_usart_debug.c
         - path: ../5_ModuleDrivers/bsp_usart_gps.c

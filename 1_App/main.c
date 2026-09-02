@@ -4,7 +4,7 @@
 
 #include "bsp_gpio_led.h"
 #include "bsp_gpio_button.h"
-#include "bsp_gpio_stick.h"
+#include "bsp_gpio_digital_channel.h"
 
 #include "bsp_usart_debug.h"
 #include "bsp_usart_extra.h"
@@ -98,7 +98,7 @@ void setup(void)
 	EXPAND_USART_Config();
 	RTC_Config();
 	LED_GPIO_Config();
-	STICK_GPIO_Config();
+	digital_channel_init();
 	EEPROM_I2C_Init();
 	FLASH_SPI_Init();
 	NRF_SPI_Init();
@@ -308,6 +308,7 @@ int main(void)
 		{
 			finish_button_10ms = 0;
 			button_ticks();
+			digital_channel_update_10ms();
 			menu_tick_10ms();
 		}
 

@@ -2,12 +2,13 @@
 #include "gui.h"
 #include "param.h"
 #include "platform_nrf.h"
+#include "bsp_gpio_digital_channel.h"
 #include "ff.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#define MENU_ITEM_COUNT       8U
+#define MENU_ITEM_COUNT       9U
 #define MENU_EVENT_QUEUE_SIZE 8U
 #define MENU_REFRESH_TICKS    5U
 #define CLOCK_REFRESH_TICKS   20U
@@ -28,6 +29,7 @@ typedef enum
     MENU_PAGE_HOME = 0,
     MENU_PAGE_SYSTEM_INFO,
     MENU_PAGE_MONITOR,
+    MENU_PAGE_DIGITAL_CHANNELS,
     MENU_PAGE_IMU,
     MENU_PAGE_GPS,
     MENU_PAGE_DRAW_BOARD,
@@ -40,6 +42,7 @@ static const MenuPage menu_items[MENU_ITEM_COUNT] =
 {
     MENU_PAGE_SYSTEM_INFO,
     MENU_PAGE_MONITOR,
+    MENU_PAGE_DIGITAL_CHANNELS,
     MENU_PAGE_IMU,
     MENU_PAGE_GPS,
     MENU_PAGE_DRAW_BOARD,
@@ -1148,6 +1151,15 @@ static void menu_draw_current_page(void)
             channel_monitor_page();
             break;
 
+        case MENU_PAGE_DIGITAL_CHANNELS:
+        {
+            uint8_t raw_values[DIGITAL_CHANNEL_COUNT];
+            uint8_t stable_values[DIGITAL_CHANNEL_COUNT];
+            digital_channel_get_snapshot(raw_values, stable_values);
+            digital_channel_monitor_page(raw_values, stable_values);
+            break;
+        }
+
         case MENU_PAGE_IMU:
             imu6050_information();
             break;
@@ -1209,6 +1221,13 @@ static void menu_refresh_dynamic_page(void)
     if(current_page == MENU_PAGE_MONITOR)
     {
         channel_monitor_page();
+    }
+    else if(current_page == MENU_PAGE_DIGITAL_CHANNELS)
+    {
+        uint8_t raw_values[DIGITAL_CHANNEL_COUNT];
+        uint8_t stable_values[DIGITAL_CHANNEL_COUNT];
+        digital_channel_get_snapshot(raw_values, stable_values);
+        digital_channel_monitor_page(raw_values, stable_values);
     }
     else if(current_page == MENU_PAGE_IMU)
     {

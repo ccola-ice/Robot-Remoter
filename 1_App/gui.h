@@ -38,6 +38,9 @@ void system_basic_information(void);
 
 void channel_monitor_page(void);
 
+void digital_channel_monitor_page(const uint8_t *raw_values,
+                                  const uint8_t *stable_values);
+
 void imu6050_information(void);
 
 void main_menu(uint8_t selected_item);
