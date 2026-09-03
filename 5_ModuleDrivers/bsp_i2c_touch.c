@@ -2,6 +2,8 @@
 #include "gt9xx.h"
 #include "bsp_usart_debug.h"
 
+#define I2C_TOUCH_ACK_RETRIES 50U
+
 static void Delay(__IO uint32_t nCount)	 //简单的延时函数
 {
 	for(; nCount != 0; nCount--);
@@ -28,6 +30,7 @@ void I2C_GTP_IRQEnable(void)
   SYSCFG_EXTILineConfig(GTP_INT_EXTI_PORTSOURCE, GTP_INT_EXTI_PINSOURCE);
 
   /* 选择 EXTI 中断源 */
+  EXTI_ClearITPendingBit(GTP_INT_EXTI_LINE);
   EXTI_InitStructure.EXTI_Line = GTP_INT_EXTI_LINE;
   EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;
   EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising;  
@@ -177,10 +180,10 @@ void I2C_ResetChip(void)
 void I2C_Touch_Init(void)
 {
   I2C_GPIO_Config(); 
- 
-  I2C_ResetChip();
 
-  I2C_GTP_IRQEnable();
+  /* 初始化期间禁止触摸中断，避免中断处理与配置过程同时访问软件I2C。 */
+  I2C_GTP_IRQDisable();
+  I2C_ResetChip();
 }
 /*
 *********************************************************************************************************
@@ -402,25 +405,22 @@ uint32_t I2C_ReadBytes(uint8_t ClientAddr,uint8_t* pBuffer, uint16_t NumByteToRe
 		goto cmd_fail;	/* 器件无应答 */
 	}
 
-	while(NumByteToRead) 
+	while(NumByteToRead)
   {
-   if(NumByteToRead == 1)
-    {
-			i2c_NAck();	/* 最后1个字节读完后，CPU产生NACK信号(驱动SDA = 1) */
-      
-      /* 发送I2C总线停止信号 */
-      i2c_Stop();
-    }
-    
-   *pBuffer = i2c_ReadByte();
-    
-    /* 读指针自增 */
-    pBuffer++; 
-      
-    /*计数器自减 */
+    *pBuffer = i2c_ReadByte();
+
+    /* 读指针自增，计数器自减 */
+    pBuffer++;
     NumByteToRead--;
-    
-    i2c_Ack();	/* 中间字节读完后，CPU产生ACK信号(驱动SDA = 0) */  
+
+    if(NumByteToRead != 0U)
+    {
+      i2c_Ack();	/* 中间字节读完后，CPU产生ACK信号 */
+    }
+    else
+    {
+      i2c_NAck();	/* 最后1个字节读完后，CPU产生NACK信号 */
+    }
   }
 
 	/* 发送I2C总线停止信号 */
@@ -451,7 +451,7 @@ uint32_t I2C_WriteBytes(uint8_t ClientAddr,uint8_t* pBuffer,  uint8_t NumByteToW
   /* 通过检查器件应答的方式，判断内部写操作是否完成, 一般小于 10ms 			
     CLK频率为200KHz时，查询次数为30次左右
   */
-  for (m = 0; m < 1000; m++)
+  for (m = 0; m < I2C_TOUCH_ACK_RETRIES; m++)
   {				
     /* 第1步：发起I2C总线启动信号 */
     i2c_Start();
@@ -465,7 +465,7 @@ uint32_t I2C_WriteBytes(uint8_t ClientAddr,uint8_t* pBuffer,  uint8_t NumByteToW
       break;
     }
   }
-  if (m  == 1000)
+  if (m == I2C_TOUCH_ACK_RETRIES)
   {
     goto cmd_fail;	/* EEPROM器件写超时 */
   }	

@@ -58,6 +58,7 @@
 #include "inv_mpu.h"
 
 #define MPU_DMP_BOOT_ATTEMPTS 3U
+#define TOUCH_BOOT_ATTEMPTS   3U
 
 extern unsigned int Task_Delay[5];
 
@@ -88,6 +89,8 @@ void setup(void)
 {
 	u8 dmp_result = MPU_DMP_INIT_ERROR_DEVICE;
 	u8 dmp_attempt;
+	int32_t touch_result = -1;
+	u8 touch_attempt;
 	char dmp_status[48];
 
 	// put your setup code here, to run once:
@@ -159,8 +162,33 @@ void setup(void)
 	}
 	printf("SD卡初始化成功！\r\n");
 	gui_boot_update(55U, 2U, "SD card online", 0U);
-	GTP_Init_Panel();
-	gui_boot_update(62U, 2U, "Touch controller online", 0U);
+	gui_boot_update(58U, 2U, "Starting touch controller", 0U);
+	for(touch_attempt = 0U; touch_attempt < TOUCH_BOOT_ATTEMPTS; touch_attempt++)
+	{
+		touch_result = GTP_Init_Panel();
+		if(touch_result == 0)
+		{
+			break;
+		}
+
+		printf("触摸控制器初始化失败：%d，第%u/%u次。\r\n",
+			   touch_result, (uint16_t)(touch_attempt + 1U),
+			   (uint16_t)TOUCH_BOOT_ATTEMPTS);
+		if((touch_attempt + 1U) < TOUCH_BOOT_ATTEMPTS)
+		{
+			gui_boot_update(58U, 2U, "Touch controller retrying", 1U);
+			Delay_ms(50U);
+		}
+	}
+	if(touch_result == 0)
+	{
+		gui_boot_update(62U, 2U, "Touch controller online", 0U);
+	}
+	else
+	{
+		gui_boot_update(62U, 2U, "Touch controller offline", 1U);
+		printf("触摸控制器已离线，系统继续启动。\r\n");
+	}
 	res = f_mount(&fs_sdcard,"0:",1);//挂载sd文件系统
 	if(res != FR_OK )
 	{

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include "bsp_i2c_touch.h"
 #include "bsp_fsmc_lcd.h"
+#include "bsp_SysTick.h"
 #include "palette.h"
 
 // 4.5寸屏GT5688驱动配置
@@ -136,7 +137,7 @@ const uint8_t CTP_CFG_GT911[] =  {
 
 TOUCH_IC touchIC = GT917S;			
 
-const TOUCH_PARAM_TypeDef touch_param[2] = 
+const TOUCH_PARAM_TypeDef touch_param[] =
 {
   /* GT917S,4.3寸屏 */
   {
@@ -146,6 +147,27 @@ const TOUCH_PARAM_TypeDef touch_param[2] =
   },
   
   /* GT911,4.3寸屏 */
+  {
+  .max_width = 800,
+  .max_height = 480,
+  .config_reg_addr = 0x8047,
+  },
+
+  /* GT5688, old panel */
+  {
+  .max_width = 800,
+  .max_height = 480,
+  .config_reg_addr = 0x8050,
+  },
+
+  /* GT9147 */
+  {
+  .max_width = 800,
+  .max_height = 480,
+  .config_reg_addr = 0x8047,
+  },
+
+  /* GT9157 */
   {
   .max_width = 800,
   .max_height = 480,
@@ -188,7 +210,7 @@ static int I2C_Transfer( struct i2c_msg *msgs,int num)
 	}
 
 	if(ret)
-		return ret;
+		return -1;
 
 	return im;   													//正常完成的传输结构个数
 }
@@ -979,7 +1001,12 @@ Output:
     } 
 		
 		//获取触摸IC的型号
-    GTP_Read_Version(); 
+    ret = GTP_Read_Version();
+    if (ret != 2)
+    {
+        GTP_ERROR("Unable to identify touch controller!");
+        return -1;
+    }
     
 #if UPDATE_CONFIG
     
@@ -1102,7 +1129,7 @@ Output:
         free(config);
         return -1;
     }
-    Delay(0xfffff);				//延迟等待芯片更新
+    Delay_ms(10U);				//延迟等待芯片更新
 		
 
 		
@@ -1117,6 +1144,12 @@ Output:
     	    GTP_DEBUG_FUNC();
 
 	    ret = GTP_I2C_Read(GTP_ADDRESS, buf, config_write_len);
+	    if (ret != 2)
+	    {
+	        GTP_ERROR("Config readback failed!");
+	        free(config);
+	        return -1;
+	    }
 			   
 					GTP_DEBUG("read ");
 
@@ -1144,10 +1177,14 @@ Output:
 	free(config);
 #endif
 		
-	 /*使能中断，这样才能检测触摸数据*/
-		I2C_GTP_IRQEnable();
-	
-    GTP_Get_Info();
+    if (GTP_Get_Info() != SUCCESS)
+    {
+        GTP_ERROR("Unable to read touch controller parameters!");
+        return -1;
+    }
+
+	 /*配置完成后再使能中断，避免软件I2C被触摸中断重入。*/
+	I2C_GTP_IRQEnable();
 		
 		
 
@@ -1168,6 +1205,7 @@ Output:
 int32_t GTP_Read_Version(void)
 {
     int32_t ret = -1;
+    uint8_t identified = 0;
     uint8_t buf[8] = {GTP_REG_VERSION >> 8, GTP_REG_VERSION & 0xff};    //寄存器地址
 
     GTP_DEBUG_FUNC();
@@ -1184,7 +1222,10 @@ int32_t GTP_Read_Version(void)
 				
 				//GT5688芯片
 				if(buf[2] == '5' && buf[3] == '6' && buf[4] == '8'&& buf[5] == '8')
+				{
 					touchIC = GT5688;
+					identified = 1;
+				}
     }        
     else if (buf[5] == 0x00)
     {
@@ -1192,7 +1233,10 @@ int32_t GTP_Read_Version(void)
 				
 				//GT911芯片
 				if(buf[2] == '9' && buf[3] == '1' && buf[4] == '1')
+				{
 					touchIC = GT911;
+					identified = 1;
+				}
     }
     else if (buf[5] == '7')
     {
@@ -1200,7 +1244,10 @@ int32_t GTP_Read_Version(void)
 				
 				//GT9147芯片
 				if(buf[2] == '9' && buf[3] == '1' && buf[4] == '4' && buf[5] == '7')
+				{
 					touchIC = GT9147;
+					identified = 1;
+				}
 		}
     else
     {
@@ -1208,9 +1255,12 @@ int32_t GTP_Read_Version(void)
 				
 				//GT9157芯片
 				if(buf[2] == '9' && buf[3] == '1' && buf[4] == '5' && buf[5] == '7')
+				{
 					touchIC = GT9157;
+					identified = 1;
+				}
 		}
-    return ret;
+    return identified ? ret : -1;
 }
 
 /*******************************************************
