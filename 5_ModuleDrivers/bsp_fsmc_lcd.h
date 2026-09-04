@@ -180,9 +180,9 @@ extern uint8_t LCD_SCAN_MODE;
 #define      ILI9806G_D15_PinSource          GPIO_PinSource10
 
 /********************************* ILI9806 常用命令 **********************************/
-#define      CMD_SetCoordinateX		 		    0x2A	     //设置X坐标
-#define      CMD_SetCoordinateY		 		    0x2B	     //设置Y坐标
-#define      CMD_SetPixel		 		      	0x2C	     //填充像素
+#define      CMD_SetCoordinateX		 		    0x2A00	     //设置X坐标
+#define      CMD_SetCoordinateY		 		    0x2B00	     //设置Y坐标
+#define      CMD_SetPixel		 		      	0x2C00	     //填充像素
 #define		 LCD_ClearLine 						ILI9806G_ClearLine
 
 /********************************** ILI9806 函数 ***************************************/
