@@ -1,4 +1,5 @@
 #include "bsp_fsmc_lcd.h"
+#include "bsp_SysTick.h"
 #include "fonts.h"	
 
 //根据液晶扫描方向而变化的XY像素宽度
@@ -10,7 +11,7 @@ uint16_t LCD_Y_LENGTH = ILI9806G_LESS_PIXEL;
 //参数可选值为0-7
 //调用ILI9806G_GramScan函数设置方向时会自动更改
 //LCD刚初始化完成时会使用本默认值
-uint8_t LCD_SCAN_MODE = 3;
+uint8_t LCD_SCAN_MODE = 5;
 
 static sFONT *LCD_Currentfonts = &Font16x32;  	//英文字体
 static uint16_t CurrentTextColor   = WHITE;		//前景色
@@ -25,7 +26,6 @@ __inline uint16_t ILI9806G_Read_Data ( void );
 static void                 ILI9806G_Write_Cmd           ( uint16_t usCmd );
 static void                 ILI9806G_Write_Data          ( uint16_t usData );
 static uint16_t             ILI9806G_Read_Data           ( void );
-static void               	ILI9806G_Delay               ( volatile uint32_t nCount );
 static void                	ILI9806G_GPIO_Config         ( void );
 static void                	ILI9806G_FSMC_Config         ( void );
 static void                	ILI9806G_REG_Config          ( void );
@@ -38,10 +38,7 @@ static uint16_t            	ILI9806G_Read_PixelData      ( void );
   * @param  nCount ：延时计数值
   * @retval 无
   */	
-static void ILI9806G_Delay( volatile uint32_t nCount )
-{
-	for ( ; nCount != 0; nCount -- );
-}
+
 
 ///**
 //  * @brief  向ILI9806G写入命令
@@ -720,11 +717,12 @@ static void ILI9806G_REG_Config ( void )
 
   ILI9806G_Write_Cmd(0x3A00);    ILI9806G_Write_Data(0x0055);
   //Sleep out
-  ILI9806G_Write_Cmd(0x1100);	   //?
-  ILI9806G_Delay (0xFFFFFF);
+  ILI9806G_Write_Cmd(0x1100);	   // Sleep out
+  Delay_ms(120U);
 
   //Display on
   ILI9806G_Write_Cmd(0x2900);
+  Delay_ms(20U);
 }
 
 
@@ -789,14 +787,12 @@ void ILI9806G_BackLed_Control ( FunctionalState enumState )
  * @retval 无
  */
 void ILI9806G_Rst ( void )
-{			
-	GPIO_ResetBits ( ILI9806G_RST_PORT, ILI9806G_RST_PIN );	 //低电平复位
+{
+    GPIO_ResetBits(ILI9806G_RST_PORT, ILI9806G_RST_PIN);
+    Delay_ms(20U);
 
-	ILI9806G_Delay ( 30000 ); 					   
-
-	GPIO_SetBits ( ILI9806G_RST_PORT, ILI9806G_RST_PIN );		 	 
-
-	ILI9806G_Delay ( 30000 ); 		
+    GPIO_SetBits(ILI9806G_RST_PORT, ILI9806G_RST_PIN);
+    Delay_ms(120U);
 }
 
 
