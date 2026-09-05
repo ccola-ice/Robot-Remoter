@@ -74,6 +74,14 @@ typedef enum
 
 
 // STEP_3(optional): Specify your special config info if needed
+/* Legacy uncalibrated mapping only. The drawing page uses measured
+ * calibration; these mirrors do not override a validated transform. */
+#ifndef GTP_NATIVE_MIRROR_X
+#define GTP_NATIVE_MIRROR_X 0
+#endif
+#ifndef GTP_NATIVE_MIRROR_Y
+#define GTP_NATIVE_MIRROR_Y 0
+#endif
 #define GTP_MAX_HEIGHT   480
 #define GTP_MAX_WIDTH    800
 #define GTP_INT_TRIGGER  0
@@ -150,15 +158,15 @@ typedef enum
 
 //***************************PART1:ON/OFF define*******************************
 
-#define GTP_DEBUG_ON         	1
+#define GTP_DEBUG_ON         	0
 #define GTP_DEBUG_ARRAY_ON    0
 #define GTP_DEBUG_FUNC_ON   	0
 // Log define
-#define GTP_INFO(fmt,arg...)           printf("<<-GTP-INFO->> "fmt"\n",##arg)
-#define GTP_ERROR(fmt,arg...)          printf("<<-GTP-ERROR->> "fmt"\n",##arg)
+#define GTP_INFO(fmt,arg...)           printf("<<-GTP-INFO->> "fmt"\r\n",##arg)
+#define GTP_ERROR(fmt,arg...)          printf("<<-GTP-ERROR->> "fmt"\r\n",##arg)
 #define GTP_DEBUG(fmt,arg...)          do{\
                                          if(GTP_DEBUG_ON)\
-                                         printf("<<-GTP-DEBUG->> [%d]"fmt"\n",__LINE__, ##arg);\
+                                         printf("<<-GTP-DEBUG->> [%d]"fmt"\r\n",__LINE__, ##arg);\
 																					}while(0)
 
 #define GTP_DEBUG_ARRAY(array, num)    do{\
@@ -172,10 +180,10 @@ typedef enum
                                                 printf("%02x   ", (a)[i]);\
                                                 if ((i + 1 ) %10 == 0)\
                                                 {\
-                                                    printf("\n");\
+                                                    printf("\r\n");\
                                                 }\
                                             }\
-                                            printf("\n");\
+                                            printf("\r\n");\
                                         }\
                                        }while(0)
 
@@ -200,9 +208,13 @@ void GTP_IRQ_Enable(void);
 int32_t GTP_Init_Panel(void);
 int8_t GTP_Send_Command(uint8_t command);
 void GTP_TouchProcess(void);
+/* Four corner targets, main-loop context. Calibration lives in RAM for one LCD scan
+ * mode. Start cancels the current stroke and redraws the page. */
 void GTP_CalibrationStart(void);
 uint8_t GTP_CalibrationIsReady(void);
 void GTP_NotifyInterrupt(void);
 void GTP_Service(void);
+/* Called by the existing TIM6 10 ms ISR; performs no I2C or drawing. */
+void GTP_Tick10ms(void);
 
 #endif /* _GOODIX_GT9XX_H_ */

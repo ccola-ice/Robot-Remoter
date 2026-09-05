@@ -346,6 +346,7 @@ void BASIC_TIM_IRQHandler(void)
 {
   if (TIM_GetITStatus(BASIC_TIM, TIM_IT_Update) != RESET)
   {
+    GTP_Tick10ms();
     finish_button_10ms = 1;
     TIM_ClearITPendingBit(BASIC_TIM, TIM_IT_Update);
   }

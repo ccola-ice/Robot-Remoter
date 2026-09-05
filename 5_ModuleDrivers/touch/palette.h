@@ -135,6 +135,8 @@ void Palette_Init(uint8_t LCD_Mode);
 void Touch_Button_Init(void);
 void Touch_Button_Down(uint16_t x,uint16_t y);
 void Touch_Button_Up(uint16_t x,uint16_t y);
+void Touch_Button_Cancel(void);
+uint8_t Palette_IsCanvasPoint(int16_t x, int16_t y);
 void Draw_Trail(int16_t pre_x,int16_t pre_y,int16_t x,int16_t y,Brush_Style* brush);
 
 

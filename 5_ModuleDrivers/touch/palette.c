@@ -9,6 +9,8 @@ uint8_t palette_flag = 0;
 
 /*画笔参数*/
 Brush_Style brush;
+/* -1: no toolbar contact; -2: cancelled until that contact is released. */
+static int8_t pressed_button = -1;
 
 static void Draw_Color_Button(void *btn);
 static void Draw_Clear_Button(void *btn);
@@ -60,6 +62,7 @@ void Palette_Init(uint8_t LCD_Mode)
 */
 void Touch_Button_Init(void)
 {
+  pressed_button = -1;
   /*第一列，主要为颜色按钮*/
   button[0].start_x = BUTTON_START_X;
   button[0].start_y = 0;
@@ -234,31 +237,46 @@ void Touch_Button_Init(void)
 * @param  y 触摸位置的y坐标
 * @retval 无
 */
-void Touch_Button_Down(uint16_t x,uint16_t y)
+static uint8_t Button_Contains(uint8_t i, uint16_t x, uint16_t y)
 {
-  uint8_t i;
-  for(i=0;i<BUTTON_NUM;i++)
-  {
-    /* 触摸到了按钮 */
-    if(x<=button[i].end_x && y<=button[i].end_y && y>=button[i].start_y && x>=button[i].start_x )
-    {
-      if(button[i].touch_flag == 0)     /*原本的状态为没有按下，则更新状态*/
-      {
-      button[i].touch_flag = 1;         /* 记录按下标志 */
-      
-      button[i].draw_btn(&button[i]);  /*重绘按钮*/
-      }        
-      
-    }
-    else if(button[i].touch_flag == 1) /* 触摸移出了按键的范围且之前有按下按钮 */
-    {
-      button[i].touch_flag = 0;         /* 清除按下标志，判断为误操作*/
-      
-      button[i].draw_btn(&button[i]);   /*重绘按钮*/
-    }
+    return x >= button[i].start_x && x < button[i].end_x &&
+           y >= button[i].start_y && y < button[i].end_y;
+}
 
-  }
+void Touch_Button_Cancel(void)
+{
+    if(pressed_button >= 0)
+    {
+        button[pressed_button].touch_flag = 0U;
+        button[pressed_button].draw_btn(&button[pressed_button]);
+    }
+    pressed_button = -1;
+    LCD_SetColors(brush.color, CL_WHITE);
+}
 
+void Touch_Button_Down(uint16_t x, uint16_t y)
+{
+    uint8_t i;
+    if(pressed_button == -1)
+    {
+        pressed_button = -2;
+        for(i = 0U; i < BUTTON_NUM; i++)
+        {
+            if(Button_Contains(i, x, y))
+            {
+                pressed_button = (int8_t)i;
+                button[i].touch_flag = 1U;
+                button[i].draw_btn(&button[i]);
+                break;
+            }
+        }
+    }
+    else if(pressed_button >= 0 && !Button_Contains(pressed_button, x, y))
+    {
+        Touch_Button_Cancel();
+        pressed_button = -2;
+    }
+    LCD_SetColors(brush.color, CL_WHITE);
 }
 
 /**
@@ -267,24 +285,14 @@ void Touch_Button_Down(uint16_t x,uint16_t y)
 * @param  y 触摸最后释放时的y坐标
 * @retval 无
 */
-void Touch_Button_Up(uint16_t x,uint16_t y)
+void Touch_Button_Up(uint16_t x, uint16_t y)
 {
-   uint8_t i; 
-   for(i=0;i<BUTTON_NUM;i++)
-   {
-     /* 触笔在按钮区域释放 */
-      if((x<button[i].end_x && x>button[i].start_x && y<button[i].end_y && y>button[i].start_y))
-      {        
-        button[i].touch_flag = 0;       /*释放触摸标志*/
-        
-        button[i].draw_btn(&button[i]); /*重绘按钮*/        
-      
-        button[i].btn_command(&button[i]);  /*执行按键的功能命令*/
-        
-        break;
-      }
-    }  
-
+    int8_t selected = pressed_button;
+    uint8_t activate = selected >= 0 && button[selected].touch_flag != 0U &&
+                       Button_Contains((uint8_t)selected, x, y);
+    Touch_Button_Cancel();
+    if(activate) button[selected].btn_command(&button[selected]);
+    LCD_SetColors(brush.color, CL_WHITE);
 }
 
 /**
@@ -296,180 +304,75 @@ void Touch_Button_Up(uint16_t x,uint16_t y)
 * @param  brush 画刷参数
 * @retval 无
 */
-void Draw_Trail(int16_t pre_x,int16_t pre_y,int16_t x,int16_t y,Brush_Style* brush)
+uint8_t Palette_IsCanvasPoint(int16_t x, int16_t y)
 {
-  /*设置画板区域为活动窗口,bsp_lcd.c驱动还没有这样的函数，用于限制绘画窗口*/
-//  RA8875_SetActiveWindow(PALETTE_START_X,PALETTE_START_Y,PALETTE_END_X,PALETTE_END_Y);
-  
-	
-  /*触摸位置在画板区域*/
-  if((x <= PALETTE_START_X) || (x >= PALETTE_END_X) ||
-     (y < PALETTE_START_Y) || (y >= PALETTE_END_Y))
-  {
-    return;
-  }
+    return x >= PALETTE_START_X && x < PALETTE_END_X &&
+           y >= PALETTE_START_Y && y < PALETTE_END_Y;
+}
 
-  /* A short tap must leave a visible point; never pass negative history
-   * coordinates into the unsigned line-drawing functions. */
-  if((pre_x < 0) || (pre_y < 0))
-  {
-    switch(brush->shape)
+/* Every brush rectangle is clipped before it reaches the unsigned LCD API. */
+static void Palette_Stamp(int16_t x, int16_t y, uint8_t width)
+{
+    int16_t left = x - width / 2;
+    int16_t top = y - width / 2;
+    int16_t right = left + width;
+    int16_t bottom = top + width;
+    if(left < PALETTE_START_X) left = PALETTE_START_X;
+    if(top < PALETTE_START_Y) top = PALETTE_START_Y;
+    if(right > PALETTE_END_X) right = PALETTE_END_X;
+    if(bottom > PALETTE_END_Y) bottom = PALETTE_END_Y;
+    if(left >= right || top >= bottom) return;
+    if(width == 1U) ILI9806G_SetPointPixel((uint16_t)left, (uint16_t)top);
+    else ILI9806G_DrawRectangle(left, top, right - left, bottom - top, 1U);
+}
+
+static void Palette_Segment(int16_t x, int16_t y, int16_t end_x,
+                            int16_t end_y, uint8_t width)
+{
+    int16_t dx = end_x > x ? end_x - x : x - end_x;
+    int16_t dy = end_y > y ? y - end_y : end_y - y;
+    int16_t step_x = x < end_x ? 1 : -1;
+    int16_t step_y = y < end_y ? 1 : -1;
+    int16_t error = dx + dy;
+    for(;;)
     {
-      case LINE_SINGLE_PIXCEL:
-        ILI9806G_SetPointPixel((uint16_t)x, (uint16_t)y);
-        break;
-      case LINE_2_PIXCEL:
-        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 1U, 1U);
-        break;
-      case LINE_4_PIXCEL:
-        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 2U, 1U);
-        break;
-      case LINE_6_PIXCEL:
-      case LINE_WITH_CIRCLE:
-        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 3U, 1U);
-        break;
-      case LINE_8_PIXCEL:
-        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 4U, 1U);
-        break;
-      case LINE_16_PIXCEL:
-        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 8U, 1U);
-        break;
-      case LINE_20_PIXCEL:
-        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 10U, 1U);
-        break;
-      case RUBBER:
-        if((x >= (PALETTE_START_X + 20)) &&
-           (x < (PALETTE_END_X - 20)) &&
-           (y >= (PALETTE_START_Y + 20)) &&
-           (y < (PALETTE_END_Y - 20)))
-        {
-          LCD_SetColors(CL_WHITE, CL_WHITE);
-          ILI9806G_DrawRectangle((uint16_t)(x - 20), (uint16_t)(y - 20),
-                                 40U, 40U, 1U);
-        }
-        break;
-      default:
-        break;
+        int16_t twice_error;
+        Palette_Stamp(x, y, width);
+        if(x == end_x && y == end_y) break;
+        twice_error = 2 * error;
+        if(twice_error >= dy) { error += dy; x += step_x; }
+        if(twice_error <= dx) { error += dx; y += step_y; }
     }
-    return;
-  }
-  if(pre_x > PALETTE_START_X)
-  {
-    switch(brush->shape)  /*根据画刷参数描绘不同的轨迹*/
+}
+
+void Draw_Trail(int16_t pre_x, int16_t pre_y, int16_t x, int16_t y,
+                Brush_Style *style)
+{
+    uint8_t width;
+    if(style == NULL || !Palette_IsCanvasPoint(x, y)) return;
+    switch(style->shape)
     {
-      /* 描绘1像素宽度的轨迹线 */
-      case LINE_SINGLE_PIXCEL:                 
-            if(pre_x< 0 || pre_y < 0) //新的笔迹
-            {      
-              //PutPixel(x,y);              
-            }
-            else //继续上一次的笔迹
-            {      
-              ILI9806G_DrawLine(pre_x,pre_y,x,y);
-            } 
-        
-        break;
-            
-      case LINE_2_PIXCEL:
-        
-				if(x-1<PALETTE_START_X||pre_x-1<PALETTE_START_X)	//画板左边界
-					break;
-
-        /* 描绘2像素宽度的轨迹线 */
-        ILI9806G_DrawLineCircle(pre_x,pre_y,x,y,1);
-        
-        break;
-      
-      case LINE_4_PIXCEL:
-				
-				if(x-2<PALETTE_START_X||pre_x-2<PALETTE_START_X)	//画板左边界
-					break;
-        
-            ILI9806G_DrawLineCircle(pre_x,pre_y,x,y,2);
-
-        break;
-      
-      case LINE_6_PIXCEL:
-        
-				if(x-3<PALETTE_START_X||pre_x-3<PALETTE_START_X)	//画板左边界
-					break;
-      
-        ILI9806G_DrawLineCircle(pre_x,pre_y,x,y,3);
-        
-        break;
-      
-      case LINE_8_PIXCEL:
-				
-				if(x-4<PALETTE_START_X||pre_x-4<PALETTE_START_X)	//画板左边界
-					break;
-        
-            ILI9806G_DrawLineCircle(pre_x,pre_y,x,y,4);
-
-        break;
-      
-     case LINE_16_PIXCEL:
-			 
-		 		if(x-8<PALETTE_START_X||pre_x-8<PALETTE_START_X)	//画板左边界
-					break;
-        
-            ILI9806G_DrawLineCircle(pre_x,pre_y,x,y,8);
-
-        break;
-            
-      case LINE_20_PIXCEL:
-				
-				if(x-10<PALETTE_START_X ||pre_x-10<PALETTE_START_X)	//画板左边界
-					break;
-        
-            ILI9806G_DrawLineCircle(pre_x,pre_y,x,y,10);
-
-        break;
-      
-      /*描绘带珠子的单像素线*/
-      case LINE_WITH_CIRCLE:  
-
-		 		if(x-3<PALETTE_START_X||pre_x-3<PALETTE_START_X)	//画板左边界
-					break;			
-           
-            if(pre_x< 0 || pre_y< 0)//新的笔迹
-            {      
-             // PutPixel(x,y); 
-            }
-            else //继续上一次的笔迹
-            {      
-              ILI9806G_DrawLine(pre_x,pre_y,x,y);
-              ILI9806G_DrawCircle(x,y,3,1);
-            } 
-        
-        break;
-           
-      /*橡皮功能*/            
-      case RUBBER:
-				
-				if(x-20<PALETTE_START_X ||						//画板左边界
-					  x+20>LCD_X_LENGTH || x-20<0 || //液晶左右边界
-						y+20>LCD_Y_LENGTH || y-20<0)	 //液晶上下边界				
-					break;	
-			
-//        if(x>PALETTE_START_X+20)
-        {
-						LCD_SetColors(CL_WHITE,CL_WHITE);
-            
-						ILI9806G_DrawRectangle( x-40/2,
-                                y-40/2,
-                                40,
-                                40,1);   
-      
-        }
-      break;
-
+        case LINE_SINGLE_PIXCEL: case LINE_WITH_CIRCLE: width = 1U; break;
+        case LINE_2_PIXCEL: width = 2U; break;
+        case LINE_4_PIXCEL: width = 4U; break;
+        case LINE_6_PIXCEL: width = 6U; break;
+        case LINE_8_PIXCEL: width = 8U; break;
+        case LINE_16_PIXCEL: width = 16U; break;
+        case LINE_20_PIXCEL: width = 20U; break;
+        case RUBBER: width = 40U; break;
+        default: return;
     }
-  }
-  
-  /*退出局限画板的绘图窗口，bsp_lcd.c驱动还没有这样的函数，用于限制绘画窗口*/
-//  RA8875_SetActiveWindow(0,0,LCD_PIXEL_WIDTH,LCD_PIXEL_HEIGHT);
-
-
+    LCD_SetColors(style->shape == RUBBER ? CL_WHITE : style->color, CL_WHITE);
+    if(!Palette_IsCanvasPoint(pre_x, pre_y)) { pre_x = x; pre_y = y; }
+    Palette_Segment(pre_x, pre_y, x, y, width);
+    if(style->shape == LINE_WITH_CIRCLE)
+    {
+        int16_t row, col;
+        for(row = -3; row <= 3; row++)
+            for(col = -3; col <= 3; col++)
+                if(row * row + col * col <= 9) Palette_Stamp(x + col, y + row, 1U);
+    }
+    LCD_SetColors(style->color, CL_WHITE);
 }
 
 
@@ -782,12 +685,12 @@ static void Command_Select_Brush(void *btn)
 */
 static void Command_Clear_Palette(void *btn)
 {
-		LCD_SetColors(CL_WHITE,CL_WHITE);
-    ILI9806G_DrawRectangle(PALETTE_START_X,
-                      PALETTE_START_Y,                    
-                      PALETTE_END_X-(PALETTE_START_X+1), 
-											PALETTE_END_Y-PALETTE_START_Y ,1);
-
+    (void)btn;
+    LCD_SetColors(CL_WHITE, CL_WHITE);
+    ILI9806G_DrawRectangle(PALETTE_START_X, PALETTE_START_Y,
+                          PALETTE_END_X - PALETTE_START_X,
+                          PALETTE_END_Y - PALETTE_START_Y, 1U);
+    LCD_SetColors(brush.color, CL_WHITE);
 }
 
 
@@ -859,11 +762,9 @@ static void ILI9806G_DrawLineCircle(uint16_t x1, uint16_t y1, uint16_t x2, uint1
   {
 		
 		//判断边界
-		if(x+thick>LCD_X_LENGTH || x-thick<0 || //液晶左右边界
-			y+thick>LCD_Y_LENGTH || y-thick<0  ) //液晶上下边界
-			continue;
-
-    ILI9806G_DrawRectangle(x,y,thick<<1,thick<<1,1);
+    if(x >= thick && y >= thick &&
+       x + thick <= LCD_X_LENGTH && y + thick <= LCD_Y_LENGTH)
+        ILI9806G_DrawRectangle(x - thick, y - thick, thick << 1, thick << 1, 1);
 //    ILI9806G_DrawCircle(x,y,thick,1);             /* Draw the current pixel */
     num += numadd;              /* Increase the numerator by the top of the fraction */
     if (num >= den)             /* Check if numerator >= denominator */

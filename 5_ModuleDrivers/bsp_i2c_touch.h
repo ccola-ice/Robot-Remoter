@@ -25,6 +25,8 @@
 #define GTP_I2C_SDA_GPIO_CLK             RCC_AHB1Periph_GPIOC
 #define GTP_I2C_SDA_SOURCE               GPIO_PinSource5
 
+/* FPC1: 24=PC4/SCL, 25=PB12/INT, 26=PC5/SDA, 27=PG8/RST.
+ * Follow the INTERACTION board nets: mainboard RST/INT labels are reversed. */
 /*¸´Î»Òý½Å*/
 #define GTP_RST_GPIO_PORT                GPIOG
 #define GTP_RST_GPIO_CLK                 RCC_AHB1Periph_GPIOG

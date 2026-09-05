@@ -1,4 +1,6 @@
 #include "bsp_usart_debug.h"
+#include "debug_text.h"
+static DebugTextState debug_text_state;
 
  /**
   * @brief  配置调试串口(串口1)嵌套向量中断控制器NVIC
@@ -84,11 +86,13 @@ void Debug_USART_Config(void)
   
   /* 使能串口接收中断 */
   USART_ITConfig ( DEBUG_USART, USART_IT_RXNE, ENABLE);
-  /* 使能串口总线空闲中断 */
-  USART_ITConfig ( DEBUG_USART, USART_IT_IDLE, ENABLE );
+  /* RX uses byte echo only. An unhandled IDLE IRQ would starve the main loop. */
+  USART_ITConfig ( DEBUG_USART, USART_IT_IDLE, DISABLE );
   
   /* 使能串口 */
   USART_Cmd(DEBUG_USART, ENABLE);
+  debug_text_state.lead = debug_text_state.previous_cr = 0U;
+  printf("[DEBUG] UART1 115200 8N1; text=UTF-8; newline=CRLF\r\n");
 }
 
 
@@ -152,15 +156,16 @@ void Usart_SendHalfWord( USART_TypeDef * pUSARTx, uint16_t ch)
 }
 
 //重定向c库函数printf到串口，重定向后可使用printf函数
+static void Debug_USART_Emit(uint8_t byte)
+{
+    Usart_SendByte(DEBUG_USART, byte);
+}
+
 int fputc(int ch, FILE *f)
 {
-		/* 发送一个字节数据到串口 */
-		USART_SendData(DEBUG_USART, (uint8_t) ch);
-		
-		/* 等待发送完毕 */
-		while (USART_GetFlagStatus(DEBUG_USART, USART_FLAG_TXE) == RESET);		
-	
-		return (ch);
+    (void)f;
+    DebugText_Put(&debug_text_state, (uint8_t)ch, Debug_USART_Emit);
+    return ch;
 }
 
 //重定向c库函数scanf到串口，重写向后可使用scanf、getchar等函数

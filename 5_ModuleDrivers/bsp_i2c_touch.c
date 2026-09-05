@@ -1,11 +1,7 @@
 #include "bsp_i2c_touch.h"
 #include "gt9xx.h"
 #include "bsp_usart_debug.h"
-
-static void Delay(__IO uint32_t nCount)	 //简单的延时函数
-{
-	for(; nCount != 0; nCount--);
-}
+#include "bsp_SysTick.h"
 
 static uint8_t g_gtp_int_trigger = GTP_INT_TRIGGER;
 
@@ -118,6 +114,9 @@ static void I2C_GPIO_Config(void)
 
   RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);
     
+    /* Release both open-drain lines before changing their GPIO mode. */
+    I2C_SCL_1();
+    I2C_SDA_1();
     /*配置SCL引脚 */   
     GPIO_InitStructure.GPIO_Pin = GTP_I2C_SCL_PIN;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
@@ -139,13 +138,9 @@ static void I2C_GPIO_Config(void)
   GPIO_InitStructure.GPIO_PuPd  = GPIO_PuPd_DOWN;
   GPIO_Init(GTP_RST_GPIO_PORT, &GPIO_InitStructure);
   
-  /*配置 INT引脚，下拉推挽输出，方便初始化 */   
   GPIO_InitStructure.GPIO_Pin = GTP_INT_GPIO_PIN;
-  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
-  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-  GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
-	//设置为下拉，方便初始化
-  GPIO_InitStructure.GPIO_PuPd  = GPIO_PuPd_DOWN;
+  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
+  GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
   GPIO_Init(GTP_INT_GPIO_PORT, &GPIO_InitStructure);
 }
 
@@ -157,35 +152,27 @@ static void I2C_GPIO_Config(void)
   */
 void I2C_ResetChip(void)
 {
-	  GPIO_InitTypeDef GPIO_InitStructure;
-
-		/*配置 INT引脚，下拉推挽输出，方便初始化 */   
-	  GPIO_InitStructure.GPIO_Pin = GTP_INT_GPIO_PIN;
-	  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
-	  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-	  GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
-	  GPIO_InitStructure.GPIO_PuPd  = GPIO_PuPd_DOWN;       //设置为下拉，方便初始化
-	  GPIO_Init(GTP_INT_GPIO_PORT, &GPIO_InitStructure);
-	  /* Select GT911 7-bit address 0x5D (8-bit write address 0xBA).
-	   * Do not rely on the GPIO output latch's power-on value here. */
-	  GPIO_ResetBits(GTP_INT_GPIO_PORT, GTP_INT_GPIO_PIN);
-
-	  /*初始化GT5688,rst为高电平，int为低电平，则gt5688的设备地址被配置为0xBA*/
-
-	  /*复位为低电平，为初始化做准备*/
-	  GPIO_ResetBits (GTP_RST_GPIO_PORT,GTP_RST_GPIO_PIN);
-	  Delay(0x0FFFFF);
-
-	  /*拉高一段时间，进行初始化*/
-	  GPIO_SetBits (GTP_RST_GPIO_PORT,GTP_RST_GPIO_PIN);
-	  Delay(0x0FFFFF);
-
-	  /*把INT引脚设置为浮空输入模式，以便接收触摸中断信号*/
-	  GPIO_InitStructure.GPIO_Pin = GTP_INT_GPIO_PIN;
-	  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
-	  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-	  GPIO_InitStructure.GPIO_PuPd  = GPIO_PuPd_NOPULL;
-	  GPIO_Init(GTP_INT_GPIO_PORT, &GPIO_InitStructure);
+    GPIO_InitTypeDef gpio;
+    I2C_GTP_IRQDisable();
+    /* Assert reset before driving INT, avoiding contention with a running IC. */
+    GPIO_ResetBits(GTP_RST_GPIO_PORT, GTP_RST_GPIO_PIN);
+    Delay_ms(20U);
+    GPIO_ResetBits(GTP_INT_GPIO_PORT, GTP_INT_GPIO_PIN);
+    gpio.GPIO_Pin = GTP_INT_GPIO_PIN;
+    gpio.GPIO_Mode = GPIO_Mode_OUT;
+    gpio.GPIO_Speed = GPIO_Speed_50MHz;
+    gpio.GPIO_OType = GPIO_OType_PP;
+    gpio.GPIO_PuPd = GPIO_PuPd_NOPULL;
+    GPIO_Init(GTP_INT_GPIO_PORT, &gpio);
+    Delay_ms(1U);
+    /* INT low selects 7-bit 0x5D / wire write address 0xBA. */
+    GPIO_SetBits(GTP_RST_GPIO_PORT, GTP_RST_GPIO_PIN);
+    Delay_ms(6U);
+    /* Keep INT low for the controller synchronization interval. */
+    Delay_ms(50U);
+    gpio.GPIO_Mode = GPIO_Mode_IN;
+    GPIO_Init(GTP_INT_GPIO_PORT, &gpio);
+    Delay_ms(50U);
 }
 
 /**
@@ -258,6 +245,7 @@ void i2c_Stop(void)
 	I2C_SCL_1();
 	i2c_Delay();
 	I2C_SDA_1();
+	i2c_Delay();
 }
 
 /*
@@ -450,57 +438,23 @@ cmd_fail:
   *     @arg NumByteToWrite:写的字节数
   * @retval  无
   */
-uint32_t I2C_WriteBytes(uint8_t ClientAddr,uint8_t* pBuffer,  uint8_t NumByteToWrite)
+uint32_t I2C_WriteBytes(uint8_t ClientAddr, uint8_t *pBuffer, uint8_t count)
 {
-	uint16_t m;	
-
-  /*　第0步：发停止信号，启动内部写操作　*/
-  i2c_Stop();
-  
-  /* 通过检查器件应答的方式，判断内部写操作是否完成, 一般小于 10ms 			
-    CLK频率为200KHz时，查询次数为30次左右
-  */
-  for (m = 0; m < 1000; m++)
-  {				
-    /* 第1步：发起I2C总线启动信号 */
+    if(pBuffer == NULL || count == 0U) return 1U;
     i2c_Start();
-    
-    /* 第2步：发起控制字节，高7bit是地址，bit0是读写控制位，0表示写，1表示读 */
-    i2c_SendByte(ClientAddr | I2C_DIR_WR);	/* 此处是写指令 */
-    
-    /* 第3步：发送一个时钟，判断器件是否正确应答 */
-    if (i2c_WaitAck() == 0)
+    i2c_SendByte(ClientAddr & 0xFEU);
+    if(i2c_WaitAck() != 0U) goto failed;
+    while(count-- != 0U)
     {
-      break;
+        i2c_SendByte(*pBuffer++);
+        if(i2c_WaitAck() != 0U) goto failed;
     }
-  }
-  if (m  == 1000)
-  {
-    goto cmd_fail;	/* EEPROM器件写超时 */
-  }	
-	
-  while(NumByteToWrite--)
-  {
-  /* 第4步：开始写入数据 */
-  i2c_SendByte(*pBuffer);
-
-  /* 第5步：检查ACK */
-  if (i2c_WaitAck() != 0)
-  {
-    goto cmd_fail;	/* 器件无应答 */
-  }
-  
-      pBuffer++;	/* 地址增1 */		
-  }
-	
-	/* 命令执行成功，发送I2C总线停止信号 */
-	i2c_Stop();
-	return 0;
-
-cmd_fail: /* 命令执行失败后，切记发送停止信号，避免影响I2C总线上其他设备 */
-	/* 发送I2C总线停止信号 */
-	i2c_Stop();
-	return 1;
+    i2c_Stop();
+    return 0U;
+failed:
+    /* GT911 is not an EEPROM: do not block for 1000 address-ACK retries. */
+    i2c_Stop();
+    return 1U;
 }
 
 

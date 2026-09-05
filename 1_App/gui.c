@@ -1711,5 +1711,6 @@ void Draw_Board(void)
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
 		Palette_Init(LCD_SCAN_MODE);
 		GTP_IRQ_Enable();
+		if(!GTP_CalibrationIsReady()) GTP_CalibrationStart();
 	}	
 }

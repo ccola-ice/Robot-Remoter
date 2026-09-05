@@ -1,5 +1,6 @@
 #include "menu.h"
 #include "gui.h"
+#include "gt9xx.h"
 #include "param.h"
 #include "platform_nrf.h"
 #include "bsp_gpio_digital_channel.h"
@@ -1186,6 +1187,12 @@ static void menu_handle_page_key(MenuKey key)
     if(current_page == MENU_PAGE_PARAMETER_SETTINGS)
     {
         menu_handle_param_key(key);
+        return;
+    }
+
+    if(current_page == MENU_PAGE_DRAW_BOARD && key == MENU_KEY_OK)
+    {
+        GTP_CalibrationStart();
         return;
     }
 
