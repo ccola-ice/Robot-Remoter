@@ -843,6 +843,29 @@ static void menu_browser_set_status(const char *text)
     browser_status[sizeof(browser_status) - 1U] = '\0';
 }
 
+static void menu_browser_trace_spi_name(const char *name_type,
+                                        const char *name)
+{
+    uint16_t index = 0U;
+    const uint16_t trace_limit = 32U;
+
+    printf("[FILE] SPI %s bytes:", name_type);
+    while((name[index] != '\0') && (index < trace_limit))
+    {
+        printf(" %02X", (uint16_t)(uint8_t)name[index]);
+        index++;
+    }
+    if(index == 0U)
+    {
+        printf(" <empty>");
+    }
+    else if(name[index] != '\0')
+    {
+        printf(" ...");
+    }
+    printf("\r\n");
+}
+
 static void menu_browser_load_drives(void)
 {
     memset(browser_entries, 0, sizeof(browser_entries));
@@ -864,8 +887,14 @@ static uint8_t menu_browser_load_directory(void)
     DIR directory;
     FILINFO file_info;
     FRESULT result;
-    char long_name[_MAX_LFN + 1U];
+    FRESULT space_result;
+    FATFS *volume_fs = NULL;
+    DWORD free_clusters = 0UL;
+    DWORD free_kb = 0UL;
+    /* CP936 may need two bytes for each FatFs LFN character. */
+    static char long_name[_MAX_LFN * 2U + 1U];
     const char *source_name;
+    uint8_t long_name_renderable;
 
     browser_item_count = 0U;
     result = f_opendir(&directory, browser_path);
@@ -891,7 +920,28 @@ static uint8_t menu_browser_load_directory(void)
             break;
         }
 
-        source_name = (long_name[0] != '\0') ? long_name : file_info.fname;
+        long_name_renderable = gui_file_name_can_render(long_name);
+        source_name = file_info.fname;
+        if((long_name[0] != '\0') &&
+           (long_name_renderable != 0U))
+        {
+            source_name = long_name;
+        }
+        else if(long_name[0] != '\0')
+        {
+            printf("[FILE] LFN is outside the installed GB2312 font; "
+                   "using SFN for display/open\r\n");
+            if((browser_path[0] == '1') && (browser_path[1] == ':'))
+            {
+                menu_browser_trace_spi_name("unsupported LFN", long_name);
+            }
+        }
+        if((browser_path[0] == '1') && (browser_path[1] == ':') &&
+           ((browser_item_count < 8U) || (long_name_renderable == 0U)))
+        {
+            menu_browser_trace_spi_name((source_name == long_name) ?
+                                        "LFN" : "SFN", source_name);
+        }
         if((strcmp(source_name, ".") == 0) || (strcmp(source_name, "..") == 0))
         {
             continue;
@@ -909,6 +959,19 @@ static uint8_t menu_browser_load_directory(void)
     }
 
     f_closedir(&directory);
+    space_result = f_getfree(browser_path, &free_clusters, &volume_fs);
+    if((space_result == FR_OK) && (volume_fs != NULL))
+    {
+        free_kb = free_clusters * volume_fs->csize * volume_fs->ssize / 1024UL;
+        printf("[FILE] volume=%c: free_clusters=%lu free_kb=%lu\r\n",
+               browser_path[0], (unsigned long)free_clusters,
+               (unsigned long)free_kb);
+    }
+    else
+    {
+        printf("[FILE] f_getfree(%c:) failed: %u\r\n",
+               browser_path[0], (uint16_t)space_result);
+    }
     browser_selected_item = 0U;
     browser_first_visible = 0U;
     browser_virtual_root = 0U;
@@ -916,6 +979,11 @@ static uint8_t menu_browser_load_directory(void)
     if(result != FR_OK)
     {
         sprintf(browser_status, "Read failed - FatFs error %u", (uint16_t)result);
+    }
+    else if((browser_path[0] == '1') && (space_result == FR_OK) &&
+            (free_clusters == 0UL))
+    {
+        menu_browser_set_status("SPI Flash full/corrupt - format required");
     }
     else if(browser_item_count >= BROWSER_MAX_ENTRIES)
     {

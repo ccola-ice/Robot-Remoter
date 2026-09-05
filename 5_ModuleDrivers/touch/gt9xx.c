@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include "bsp_i2c_touch.h"
 #include "bsp_fsmc_lcd.h"
-#include "bsp_SysTick.h"
 #include "palette.h"
 
 // 4.5寸屏GT5688驱动配置
@@ -135,9 +134,9 @@ const uint8_t CTP_CFG_GT911[] =  {
 //uint8_t config[GTP_CONFIG_MAX_LENGTH + GTP_ADDR_LENGTH]
 //                = {GTP_REG_CONFIG_DATA >> 8, GTP_REG_CONFIG_DATA & 0xff};
 
-TOUCH_IC touchIC = GT917S;			
+TOUCH_IC touchIC = GT911;			
 
-const TOUCH_PARAM_TypeDef touch_param[] =
+const TOUCH_PARAM_TypeDef touch_param[2] = 
 {
   /* GT917S,4.3寸屏 */
   {
@@ -152,31 +151,177 @@ const TOUCH_PARAM_TypeDef touch_param[] =
   .max_height = 480,
   .config_reg_addr = 0x8047,
   },
-
-  /* GT5688, old panel */
-  {
-  .max_width = 800,
-  .max_height = 480,
-  .config_reg_addr = 0x8050,
-  },
-
-  /* GT9147 */
-  {
-  .max_width = 800,
-  .max_height = 480,
-  .config_reg_addr = 0x8047,
-  },
-
-  /* GT9157 */
-  {
-  .max_width = 800,
-  .max_height = 480,
-  .config_reg_addr = 0x8047,
-  },
 };
 						
 
 static int8_t GTP_I2C_Test(void);
+
+static volatile uint8_t g_gtp_irq_pending = 0U;
+static volatile uint32_t g_gtp_irq_count = 0U;
+static uint8_t g_gtp_active_mask = 0U;
+static uint16_t g_gtp_raw_width = GTP_MAX_WIDTH;
+static uint16_t g_gtp_raw_height = GTP_MAX_HEIGHT;
+static uint8_t g_gtp_trigger_type = GTP_INT_TRIGGER;
+static int16_t pre_x[GTP_MAX_TOUCH] = {-1, -1, -1, -1, -1};
+static int16_t pre_y[GTP_MAX_TOUCH] = {-1, -1, -1, -1, -1};
+#define GTP_CAL_POINT_COUNT 3U
+
+static const int32_t g_cal_target_x[GTP_CAL_POINT_COUNT] = {80, 720, 80};
+static const int32_t g_cal_target_y[GTP_CAL_POINT_COUNT] = {80, 80, 400};
+static int32_t g_cal_raw_x[GTP_CAL_POINT_COUNT];
+static int32_t g_cal_raw_y[GTP_CAL_POINT_COUNT];
+static int64_t g_cal_sum_x;
+static int64_t g_cal_sum_y;
+static int64_t g_cal_det;
+static uint16_t g_cal_samples;
+static uint8_t g_cal_point;
+static uint8_t g_cal_pressed;
+static uint8_t g_cal_active;
+static uint8_t g_cal_valid;
+
+static void GTP_CalibrationDrawTarget(void)
+{
+    char message[32];
+    int32_t target_x = g_cal_target_x[g_cal_point];
+    int32_t target_y = g_cal_target_y[g_cal_point];
+
+    ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
+    LCD_SetFont(&Font16x32);
+    LCD_SetColors(CL_RED, CL_WHITE);
+    sprintf(message, "Touch cross %u/%u", (unsigned int)g_cal_point + 1U,
+            (unsigned int)GTP_CAL_POINT_COUNT);
+    ILI9806G_DispString_EN(280U, 220U, message);
+    ILI9806G_DrawLine((uint16_t)(target_x - 20), (uint16_t)target_y,
+                      (uint16_t)(target_x + 20), (uint16_t)target_y);
+    ILI9806G_DrawLine((uint16_t)target_x, (uint16_t)(target_y - 20),
+                      (uint16_t)target_x, (uint16_t)(target_y + 20));
+}
+
+void GTP_CalibrationStart(void)
+{
+    g_cal_point = 0U;
+    g_cal_pressed = 0U;
+    g_cal_samples = 0U;
+    g_cal_sum_x = 0;
+    g_cal_sum_y = 0;
+    g_cal_active = 1U;
+    g_cal_valid = 0U;
+    g_gtp_active_mask = 0U;
+    memset(pre_x, 0xFF, sizeof(pre_x));
+    memset(pre_y, 0xFF, sizeof(pre_y));
+    printf("<<-GTP-INFO->> unified three-point calibration started\r\n");
+    GTP_CalibrationDrawTarget();
+}
+
+uint8_t GTP_CalibrationIsReady(void)
+{
+    return g_cal_valid;
+}
+
+static void GTP_CalibrationRawDown(uint16_t raw_x, uint16_t raw_y)
+{
+    if((g_cal_active == 0U) || (g_cal_point >= GTP_CAL_POINT_COUNT))
+    {
+        return;
+    }
+
+    if(g_cal_pressed == 0U)
+    {
+        g_cal_pressed = 1U;
+        g_cal_samples = 0U;
+        g_cal_sum_x = 0;
+        g_cal_sum_y = 0;
+    }
+
+    if(g_cal_samples < 64U)
+    {
+        g_cal_sum_x += raw_x;
+        g_cal_sum_y += raw_y;
+        g_cal_samples++;
+    }
+}
+
+static void GTP_CalibrationRawUp(void)
+{
+    int32_t dx1;
+    int32_t dy1;
+    int32_t dx2;
+    int32_t dy2;
+
+    if((g_cal_active == 0U) || (g_cal_pressed == 0U) ||
+       (g_cal_samples < 3U))
+    {
+        g_cal_pressed = 0U;
+        return;
+    }
+
+    g_cal_raw_x[g_cal_point] = (int32_t)(g_cal_sum_x / g_cal_samples);
+    g_cal_raw_y[g_cal_point] = (int32_t)(g_cal_sum_y / g_cal_samples);
+    printf("<<-GTP-INFO->> cal P%u raw=(%ld,%ld) target=(%ld,%ld), samples=%u\r\n",
+           (unsigned int)g_cal_point + 1U,
+           g_cal_raw_x[g_cal_point], g_cal_raw_y[g_cal_point],
+           g_cal_target_x[g_cal_point], g_cal_target_y[g_cal_point],
+           (unsigned int)g_cal_samples);
+    g_cal_pressed = 0U;
+    g_cal_point++;
+
+    if(g_cal_point < GTP_CAL_POINT_COUNT)
+    {
+        GTP_CalibrationDrawTarget();
+        return;
+    }
+
+    dx1 = g_cal_raw_x[1] - g_cal_raw_x[0];
+    dy1 = g_cal_raw_y[1] - g_cal_raw_y[0];
+    dx2 = g_cal_raw_x[2] - g_cal_raw_x[0];
+    dy2 = g_cal_raw_y[2] - g_cal_raw_y[0];
+    g_cal_det = (int64_t)dx1 * dy2 - (int64_t)dy1 * dx2;
+
+    if((g_cal_det > -1000) && (g_cal_det < 1000))
+    {
+        printf("<<-GTP-ERROR->> calibration points invalid, retrying\r\n");
+        GTP_CalibrationStart();
+        return;
+    }
+
+    g_cal_active = 0U;
+    g_cal_valid = 1U;
+    printf("<<-GTP-INFO->> calibration ready, determinant=%lld\r\n", g_cal_det);
+    Palette_Init(LCD_SCAN_MODE);
+}
+
+static uint8_t GTP_ApplyCalibration(uint16_t raw_x, uint16_t raw_y,
+                                    int32_t *screen_x, int32_t *screen_y)
+{
+    int32_t dx1 = g_cal_raw_x[1] - g_cal_raw_x[0];
+    int32_t dy1 = g_cal_raw_y[1] - g_cal_raw_y[0];
+    int32_t dx2 = g_cal_raw_x[2] - g_cal_raw_x[0];
+    int32_t dy2 = g_cal_raw_y[2] - g_cal_raw_y[0];
+    int32_t offset_x = (int32_t)raw_x - g_cal_raw_x[0];
+    int32_t offset_y = (int32_t)raw_y - g_cal_raw_y[0];
+    int64_t along_x;
+    int64_t along_y;
+
+    if((screen_x == NULL) || (screen_y == NULL) || (g_cal_valid == 0U))
+    {
+        return 0U;
+    }
+
+    along_x = (int64_t)offset_x * dy2 - (int64_t)offset_y * dx2;
+    along_y = (int64_t)dx1 * offset_y - (int64_t)dy1 * offset_x;
+    *screen_x = g_cal_target_x[0] +
+        (int32_t)(((int64_t)(g_cal_target_x[1] - g_cal_target_x[0]) * along_x) /
+                  g_cal_det);
+    *screen_y = g_cal_target_y[0] +
+        (int32_t)(((int64_t)(g_cal_target_y[2] - g_cal_target_y[0]) * along_y) /
+                  g_cal_det);
+
+    if(*screen_x < 0) *screen_x = 0;
+    if(*screen_y < 0) *screen_y = 0;
+    if(*screen_x >= LCD_X_LENGTH) *screen_x = LCD_X_LENGTH - 1;
+    if(*screen_y >= LCD_Y_LENGTH) *screen_y = LCD_Y_LENGTH - 1;
+    return 1U;
+}
 
 //static void Delay(__IO uint32_t nCount)	 //简单的延时函数
 //{
@@ -208,8 +353,7 @@ static int I2C_Transfer( struct i2c_msg *msgs,int num)
 			ret = I2C_WriteBytes(msgs[im].addr,  msgs[im].buf, msgs[im].len);	//IIC写入数据
 		}
 	}
-
-	if(ret)
+	if(ret != 0)
 		return -1;
 
 	return im;   													//正常完成的传输结构个数
@@ -352,9 +496,10 @@ static int32_t GTP_I2C_Write(uint8_t client_addr,uint8_t *buf,int32_t len)
   */
 void GTP_IRQ_Disable(void)
 {
-
-    GTP_DEBUG_FUNC();
-
+    g_gtp_irq_pending = 0U;
+    g_gtp_active_mask = 0U;
+    memset(pre_x, 0xFF, sizeof(pre_x));
+    memset(pre_y, 0xFF, sizeof(pre_y));
     I2C_GTP_IRQDisable();
 }
 
@@ -365,9 +510,11 @@ void GTP_IRQ_Disable(void)
   */
 void GTP_IRQ_Enable(void)
 {
-    GTP_DEBUG_FUNC();
-     
-	  I2C_GTP_IRQEnable();    
+    g_gtp_irq_pending = 0U;
+    g_gtp_active_mask = 0U;
+    memset(pre_x, 0xFF, sizeof(pre_x));
+    memset(pre_y, 0xFF, sizeof(pre_y));
+    I2C_GTP_IRQEnable();
 }
 
 
@@ -381,218 +528,6 @@ void GTP_IRQ_Enable(void)
   * @retval 无
   */
 /*用于记录连续触摸时(长按)的上一次触摸位置，负数值表示上一次无触摸按下*/
-static int16_t pre_x[GTP_MAX_TOUCH] ={-1,-1,-1,-1,-1};
-static int16_t pre_y[GTP_MAX_TOUCH] ={-1,-1,-1,-1,-1};
-
-static const int32_t calibration_lcd_x[3] = {80, 720, 80};
-static const int32_t calibration_lcd_y[3] = {80, 80, 400};
-static int32_t calibration_raw_x[3];
-static int32_t calibration_raw_y[3];
-static int64_t calibration_sum_x;
-static int64_t calibration_sum_y;
-static int64_t calibration_det;
-static uint16_t calibration_sample_count;
-static uint8_t calibration_point;
-static uint8_t calibration_pressed;
-static uint8_t calibration_active;
-static uint8_t calibration_valid;
-
-static void GTP_Calibration_DrawTarget(void)
-{
-    char text[32];
-
-    LCD_SetFont(&Font16x32);
-    LCD_SetColors(CL_RED, CL_WHITE);
-    ILI9806G_Clear(0, 0, LCD_X_LENGTH, LCD_Y_LENGTH);
-    sprintf(text, "Touch red cross %u/3", (unsigned int)calibration_point + 1U);
-    ILI9806G_DispString_EN(230, 220, text);
-    ILI9806G_DrawLine((uint16_t)(calibration_lcd_x[calibration_point] - 20),
-                      (uint16_t)calibration_lcd_y[calibration_point],
-                      (uint16_t)(calibration_lcd_x[calibration_point] + 20),
-                      (uint16_t)calibration_lcd_y[calibration_point]);
-    ILI9806G_DrawLine((uint16_t)calibration_lcd_x[calibration_point],
-                      (uint16_t)(calibration_lcd_y[calibration_point] - 20),
-                      (uint16_t)calibration_lcd_x[calibration_point],
-                      (uint16_t)(calibration_lcd_y[calibration_point] + 20));
-}
-
-void GTP_CalibrationStart(void)
-{
-    calibration_point = 0;
-    calibration_pressed = 0;
-    calibration_sample_count = 0;
-    calibration_active = 1;
-    calibration_valid = 0;
-    GTP_Calibration_DrawTarget();
-}
-
-uint8_t GTP_CalibrationIsReady(void)
-{
-    return calibration_valid;
-}
-
-static void GTP_Calibration_RawDown(int32_t raw_x, int32_t raw_y)
-{
-    if(!calibration_active || calibration_point >= 3U)
-    {
-        return;
-    }
-
-    if(!calibration_pressed)
-    {
-        calibration_pressed = 1;
-        calibration_sample_count = 0;
-        calibration_sum_x = 0;
-        calibration_sum_y = 0;
-    }
-
-    if(calibration_sample_count < 64U)
-    {
-        calibration_sum_x += raw_x;
-        calibration_sum_y += raw_y;
-        calibration_sample_count++;
-    }
-}
-
-static void GTP_Calibration_RawUp(void)
-{
-    int32_t raw_dx_x;
-    int32_t raw_dx_y;
-    int32_t raw_dy_x;
-    int32_t raw_dy_y;
-
-    if(!calibration_active || !calibration_pressed ||
-       calibration_sample_count == 0U)
-    {
-        return;
-    }
-
-    calibration_raw_x[calibration_point] =
-        (int32_t)(calibration_sum_x / calibration_sample_count);
-    calibration_raw_y[calibration_point] =
-        (int32_t)(calibration_sum_y / calibration_sample_count);
-    calibration_pressed = 0;
-    calibration_point++;
-
-    if(calibration_point < 3U)
-    {
-        GTP_Calibration_DrawTarget();
-        return;
-    }
-
-    raw_dx_x = calibration_raw_x[1] - calibration_raw_x[0];
-    raw_dx_y = calibration_raw_y[1] - calibration_raw_y[0];
-    raw_dy_x = calibration_raw_x[2] - calibration_raw_x[0];
-    raw_dy_y = calibration_raw_y[2] - calibration_raw_y[0];
-    calibration_det = (int64_t)raw_dx_x * raw_dy_y -
-                      (int64_t)raw_dx_y * raw_dy_x;
-
-    if(calibration_det > -1000 && calibration_det < 1000)
-    {
-        GTP_CalibrationStart();
-        return;
-    }
-
-    calibration_active = 0;
-    calibration_valid = 1;
-    Palette_Init(LCD_SCAN_MODE);
-}
-
-static uint8_t GTP_ApplyCalibration(int32_t raw_x, int32_t raw_y,
-                                    int32_t *lcd_x, int32_t *lcd_y)
-{
-    int32_t raw_dx_x = calibration_raw_x[1] - calibration_raw_x[0];
-    int32_t raw_dx_y = calibration_raw_y[1] - calibration_raw_y[0];
-    int32_t raw_dy_x = calibration_raw_x[2] - calibration_raw_x[0];
-    int32_t raw_dy_y = calibration_raw_y[2] - calibration_raw_y[0];
-    int32_t offset_x = raw_x - calibration_raw_x[0];
-    int32_t offset_y = raw_y - calibration_raw_y[0];
-    int64_t x_numerator;
-    int64_t y_numerator;
-
-    x_numerator = (int64_t)offset_x * raw_dy_y -
-                  (int64_t)offset_y * raw_dy_x;
-    y_numerator = (int64_t)raw_dx_x * offset_y -
-                  (int64_t)raw_dx_y * offset_x;
-
-    *lcd_x = calibration_lcd_x[0] +
-             (int32_t)(((int64_t)(calibration_lcd_x[1] - calibration_lcd_x[0]) *
-                        x_numerator) / calibration_det);
-    *lcd_y = calibration_lcd_y[0] +
-             (int32_t)(((int64_t)(calibration_lcd_y[2] - calibration_lcd_y[0]) *
-                        y_numerator) / calibration_det);
-
-    if(*lcd_x < 0) *lcd_x = 0;
-    if(*lcd_y < 0) *lcd_y = 0;
-    if(*lcd_x >= LCD_X_LENGTH) *lcd_x = LCD_X_LENGTH - 1;
-    if(*lcd_y >= LCD_Y_LENGTH) *lcd_y = LCD_Y_LENGTH - 1;
-    return 1;
-}
-
-/**
-  * @brief  Convert a GT9xx sensor coordinate to the current LCD scan direction.
-  * @note   A three-point affine calibration is preferred because the
-  *         controller's configured range does not match the installed panel.
-  */
-static uint8_t GTP_Map_To_LCD(int32_t input_x, int32_t input_y,
-                              int32_t *lcd_x, int32_t *lcd_y)
-{
-    if(input_x < 0 || input_y < 0)
-    {
-        return 0;
-    }
-
-    if(calibration_valid)
-    {
-        return GTP_ApplyCalibration(input_x, input_y, lcd_x, lcd_y);
-    }
-
-    switch(LCD_SCAN_MODE)
-    {
-        case 0:
-            *lcd_x = input_x;
-            *lcd_y = input_y;
-            break;
-        case 1:
-            *lcd_x = input_y;
-            *lcd_y = input_x;
-            break;
-        case 2:
-            *lcd_x = (int32_t)LCD_X_LENGTH - 1 - input_x;
-            *lcd_y = input_y;
-            break;
-        case 3:
-            *lcd_x = input_y;
-            *lcd_y = (int32_t)LCD_Y_LENGTH - 1 - input_x;
-            break;
-        case 4:
-            *lcd_x = input_x;
-            *lcd_y = (int32_t)LCD_Y_LENGTH - 1 - input_y;
-            break;
-        case 5:
-            *lcd_x = (int32_t)LCD_X_LENGTH - 1 - input_y;
-            *lcd_y = input_x;
-            break;
-        case 6:
-            *lcd_x = (int32_t)LCD_X_LENGTH - 1 - input_x;
-            *lcd_y = (int32_t)LCD_Y_LENGTH - 1 - input_y;
-            break;
-        case 7:
-            *lcd_x = (int32_t)LCD_X_LENGTH - 1 - input_y;
-            *lcd_y = (int32_t)LCD_Y_LENGTH - 1 - input_x;
-            break;
-        default:
-            return 0;
-    }
-
-    if(*lcd_x < 0 || *lcd_y < 0 ||
-       *lcd_x >= LCD_X_LENGTH || *lcd_y >= LCD_Y_LENGTH)
-    {
-        return 0;
-    }
-
-    return 1;
-}
 
 static void GTP_Touch_Down(int32_t id,int32_t x,int32_t y,int32_t w)
 {
@@ -655,156 +590,211 @@ extern int32_t y = 0;
   * @param  无
   * @retval 无
   */
-static void Goodix_TS_Work_Func(void)
+static uint8_t GTP_MapCoordinates(uint16_t raw_x, uint16_t raw_y,
+                                  int32_t *screen_x, int32_t *screen_y)
 {
-    uint8_t  end_cmd[3] = {GTP_READ_COOR_ADDR >> 8, GTP_READ_COOR_ADDR & 0xFF, 0};
-    uint8_t  point_data[2 + 1 + 8 * GTP_MAX_TOUCH + 1]={GTP_READ_COOR_ADDR >> 8, GTP_READ_COOR_ADDR & 0xFF};
-    uint8_t  touch_num = 0;
-    uint8_t  finger = 0;
-    static uint16_t pre_touch = 0;
-    static uint8_t pre_id[GTP_MAX_TOUCH] = {0};
+    int32_t x_pos = raw_x;
+    int32_t y_pos = raw_y;
 
-    uint8_t client_addr=GTP_ADDRESS;
-    uint8_t* coor_data = NULL;
-    int32_t input_x = 0;
-    int32_t input_y = 0;
-    int32_t input_w = 0;
-    uint8_t id = 0;
- 
-    int32_t i  = 0;
-    int32_t ret = -1;
-
-    //GTP_DEBUG_FUNC();
-
-    ret = GTP_I2C_Read(client_addr, point_data, 12);//10字节寄存器加2字节地址
-    if (ret < 0)
+    if((screen_x == NULL) || (screen_y == NULL) ||
+       (raw_x > 4095U) || (raw_y > 4095U))
     {
-        GTP_ERROR("I2C transfer error. errno:%d\n ", ret);
-
-        return;
+        return 0U;
     }
-    
-    finger = point_data[GTP_ADDR_LENGTH];//状态寄存器数据
 
-    if (finger == 0x00)		//没有有效坐标；若此前有触点，则补发释放事件
+    /* Calibration consumes the controller's real installed geometry.  Do not
+     * reject points using the nominal config range before applying it. */
+    if(g_cal_valid != 0U)
     {
-        if(calibration_active)
-        {
-            GTP_Calibration_RawUp();
-            pre_touch = 0;
-        }
-        else if(pre_touch)
-        {
-            for(i = 0; i < pre_touch; i++)
+        return GTP_ApplyCalibration(raw_x, raw_y, screen_x, screen_y);
+    }
+
+    /* Fallback used only before calibration. */
+    switch(LCD_SCAN_MODE)
+    {
+        case 0U:
+            x_pos = (int32_t)LCD_X_LENGTH - 1 - raw_y;
+            y_pos = raw_x;
+            break;
+        case 1U:
+            x_pos = raw_x;
+            y_pos = (int32_t)LCD_Y_LENGTH - 1 - raw_y;
+            break;
+        case 2U:
+            x_pos = raw_y;
+            y_pos = raw_x;
+            break;
+        case 3U:
+            break;
+        case 4U:
+            x_pos = (int32_t)LCD_X_LENGTH - 1 - raw_y;
+            y_pos = (int32_t)LCD_Y_LENGTH - 1 - raw_x;
+            break;
+        case 5U:
+            /* The vendor GT911 profile is native to LCD scan mode 3.
+             * Mode 5 is mode 3 rotated by 180 degrees. */
+            x_pos = (int32_t)LCD_X_LENGTH - 1 - raw_x;
+            y_pos = (int32_t)LCD_Y_LENGTH - 1 - raw_y;
+            /* This NT35510/GT911 assembly exposes the horizontal touch origin
+             * at the panel centre.  Rotate the two 400-pixel halves into the
+             * LCD coordinate order; this is a cyclic half-width shift, not a
+             * mirror operation. */
+            x_pos += (int32_t)LCD_X_LENGTH / 2;
+            if(x_pos >= (int32_t)LCD_X_LENGTH)
             {
-                GTP_Touch_Up(pre_id[i]);
+                x_pos -= (int32_t)LCD_X_LENGTH;
             }
-            pre_touch = 0;
-        }
-        return;
+            break;
+        case 6U:
+            x_pos = raw_y;
+            y_pos = (int32_t)LCD_Y_LENGTH - 1 - raw_x;
+            break;
+        case 7U:
+            x_pos = (int32_t)LCD_X_LENGTH - 1 - raw_x;
+            y_pos = raw_y;
+            break;
+        default:
+            return 0U;
     }
 
-    if((finger & 0x80) == 0)//判断buffer status位
+    if((x_pos < 0) || (y_pos < 0) ||
+       (x_pos >= LCD_X_LENGTH) || (y_pos >= LCD_Y_LENGTH))
     {
-        goto exit_work_func;//坐标未就绪，数据无效
+        return 0U;
     }
 
-    touch_num = finger & 0x0f;//坐标点数
-    if (touch_num > GTP_MAX_TOUCH)
-    {
-        goto exit_work_func;//大于最大支持点数，错误退出
-    }
-
-    if (touch_num > 1)//不止一个点
-    {
-        uint8_t buf[8 * GTP_MAX_TOUCH] = {(GTP_READ_COOR_ADDR + 10) >> 8, (GTP_READ_COOR_ADDR + 10) & 0xff};
-
-        ret = GTP_I2C_Read(client_addr, buf, 2 + 8 * (touch_num - 1));
-        memcpy(&point_data[12], &buf[2], 8 * (touch_num - 1));			//复制其余点数的数据到point_data
-    }
-
-    
-    
-    if (pre_touch>touch_num)				//pre_touch>touch_num,表示有的点释放了
-    {
-        for (i = 0; i < pre_touch; i++)						//一个点一个点处理
-         {
-            uint8_t j;
-           for(j=0; j<touch_num; j++)
-           {
-               coor_data = &point_data[j * 8 + 3];
-               id = coor_data[0] & 0x0F;									//track id
-              if(pre_id[i] == id)
-                break;
-
-              if(j >= touch_num-1)											//遍历当前所有id都找不到pre_id[i]，表示已释放
-              {
-                 GTP_Touch_Up( pre_id[i]);
-              }
-           }
-       }
-    }
-
-
-    if (touch_num)
-    {
-        for (i = 0; i < touch_num; i++)						//一个点一个点处理
-        {
-            coor_data = &point_data[i * 8 + 3];
-
-            id = coor_data[0] & 0x0F;									//track id
-            pre_id[i] = id;
-
-            input_x  = coor_data[1] | (coor_data[2] << 8);	//x坐标
-            input_y  = coor_data[3] | (coor_data[4] << 8);	//y坐标
-            input_w  = coor_data[5] | (coor_data[6] << 8);	//size
-					//printf("X:%d, Y:%d \n", input_x, input_y);
-			if(calibration_active)
-			{
-				if(i == 0)
-				{
-					GTP_Calibration_RawDown(input_x, input_y);
-				}
-				continue;
-			}
-			if(GTP_Map_To_LCD(input_x, input_y, &x, &y))
-			{
-				//printf("X:%d, Y:%d \n", x, y);
-				GTP_Touch_Down(id, x, y, input_w);//数据处理
-			}
-        }
-    }
-    else if (pre_touch)		//touch_ num=0 且pre_touch！=0
-    {
-      if(calibration_active)
-      {
-          GTP_Calibration_RawUp();
-      }
-      else
-      {
-          for(i=0;i<pre_touch;i++)
-          {
-              GTP_Touch_Up(pre_id[i]);
-          }
-      }
-    }
-
-
-    pre_touch = touch_num;
-
-
-exit_work_func:
-    {
-        ret = GTP_I2C_Write(client_addr, end_cmd, 3);
-        if (ret < 0)
-        {
-            GTP_INFO("I2C write end_cmd error!");
-        }
-    }
-
+    *screen_x = x_pos;
+    *screen_y = y_pos;
+    return 1U;
 }
 
+static void Goodix_TS_Work_Func(void)
+{
+    uint8_t end_cmd[3] = {GTP_READ_COOR_ADDR >> 8,
+                          GTP_READ_COOR_ADDR & 0xFF, 0U};
+    uint8_t point_data[2 + 1 + 8 * GTP_MAX_TOUCH + 1] =
+                         {GTP_READ_COOR_ADDR >> 8,
+                          GTP_READ_COOR_ADDR & 0xFF};
+    uint8_t finger;
+    uint8_t touch_num;
+    uint8_t current_mask = 0U;
+    uint8_t i;
+    int32_t ret;
 
+    ret = GTP_I2C_Read(GTP_ADDRESS, point_data, 12);
+    if(ret != 2)
+    {
+        GTP_ERROR("coordinate read failed: %d", ret);
+        return;
+    }
+
+    finger = point_data[GTP_ADDR_LENGTH];
+    if(finger == 0U)
+    {
+        return;
+    }
+    if((finger & 0x80U) == 0U)
+    {
+        goto clear_status;
+    }
+
+    touch_num = finger & 0x0FU;
+    if(touch_num > GTP_MAX_TOUCH)
+    {
+        GTP_ERROR("invalid touch count: %u", touch_num);
+        goto clear_status;
+    }
+
+    if(touch_num > 1U)
+    {
+        uint8_t extra[8 * GTP_MAX_TOUCH] =
+        {
+            (GTP_READ_COOR_ADDR + 10U) >> 8,
+            (GTP_READ_COOR_ADDR + 10U) & 0xFF
+        };
+
+        ret = GTP_I2C_Read(GTP_ADDRESS, extra,
+                           2 + 8 * (touch_num - 1U));
+        if(ret != 2)
+        {
+            GTP_ERROR("extra coordinate read failed: %d", ret);
+            goto clear_status;
+        }
+        memcpy(&point_data[12], &extra[2], 8 * (touch_num - 1U));
+    }
+
+    for(i = 0U; i < touch_num; i++)
+    {
+        uint8_t *coor_data = &point_data[i * 8U + 3U];
+        uint8_t id = coor_data[0] & 0x0FU;
+        uint16_t raw_x;
+        uint16_t raw_y;
+        uint16_t touch_size;
+        int32_t screen_x;
+        int32_t screen_y;
+
+        if(id >= GTP_MAX_TOUCH)
+        {
+            GTP_ERROR("invalid track id: %u", id);
+            continue;
+        }
+
+        raw_x = (uint16_t)coor_data[1] | ((uint16_t)coor_data[2] << 8);
+        raw_y = (uint16_t)coor_data[3] | ((uint16_t)coor_data[4] << 8);
+        touch_size = (uint16_t)coor_data[5] | ((uint16_t)coor_data[6] << 8);
+        current_mask |= (uint8_t)(1U << id);
+
+        if(g_cal_active != 0U)
+        {
+            if(i == 0U)
+            {
+                GTP_CalibrationRawDown(raw_x, raw_y);
+            }
+            continue;
+        }
+
+        if(GTP_MapCoordinates(raw_x, raw_y, &screen_x, &screen_y) == 0U)
+        {
+            GTP_ERROR("coordinate invalid: raw=(%u,%u)", raw_x, raw_y);
+            continue;
+        }
+
+        if(g_gtp_active_mask == 0U)
+        {
+            GTP_INFO("touch raw=(%u,%u) mapped=(%ld,%ld)",
+                     raw_x, raw_y, screen_x, screen_y);
+        }
+        GTP_Touch_Down(id, screen_x, screen_y, touch_size);
+    }
+
+    if(g_cal_active != 0U)
+    {
+        if((g_gtp_active_mask != 0U) && (current_mask == 0U))
+        {
+            GTP_CalibrationRawUp();
+        }
+        g_gtp_active_mask = current_mask;
+        goto clear_status;
+    }
+
+    for(i = 0U; i < GTP_MAX_TOUCH; i++)
+    {
+        uint8_t id_mask = (uint8_t)(1U << i);
+        if(((g_gtp_active_mask & id_mask) != 0U) &&
+           ((current_mask & id_mask) == 0U))
+        {
+            GTP_Touch_Up(i);
+        }
+    }
+    g_gtp_active_mask = current_mask;
+
+clear_status:
+    ret = GTP_I2C_Write(GTP_ADDRESS, end_cmd, sizeof(end_cmd));
+    if(ret != 1)
+    {
+        GTP_ERROR("coordinate status clear failed: %d", ret);
+    }
+}
 /**
   * @brief   给触屏芯片重新复位
   * @param 无
@@ -922,42 +912,48 @@ int8_t GTP_WakeUp_Sleep(void)
 
 static int32_t GTP_Get_Info(void)
 {
-    uint8_t opr_buf[10] = {0};
-    int32_t ret = 0;
+    uint8_t opr_buf[10] = {0U};
+    uint16_t width;
+    uint16_t height;
+    uint8_t module_switch;
+    int32_t ret;
 
-    uint16_t abs_x_max = GTP_MAX_WIDTH;
-    uint16_t abs_y_max = GTP_MAX_HEIGHT;
-    uint8_t int_trigger_type = GTP_INT_TRIGGER;
-        
-    opr_buf[0] = (uint8_t)((GTP_REG_CONFIG_DATA+1) >> 8);
-    opr_buf[1] = (uint8_t)((GTP_REG_CONFIG_DATA+1) & 0xFF);
-    
-    ret = GTP_I2C_Read(GTP_ADDRESS, opr_buf, 10);
-    if (ret < 0)
+    opr_buf[0] = (uint8_t)((GTP_REG_CONFIG_DATA + 1U) >> 8);
+    opr_buf[1] = (uint8_t)((GTP_REG_CONFIG_DATA + 1U) & 0xFFU);
+    ret = GTP_I2C_Read(GTP_ADDRESS, opr_buf, sizeof(opr_buf));
+    if(ret != 2)
     {
         return FAIL;
     }
-    
-	abs_x_max = (opr_buf[3] << 8) + opr_buf[2];
-	abs_y_max = (opr_buf[5] << 8) + opr_buf[4];
-		GTP_DEBUG("RES");   
-		GTP_DEBUG_ARRAY(&opr_buf[0],10);
 
-    opr_buf[0] = (uint8_t)((GTP_REG_CONFIG_DATA+6) >> 8);
-    opr_buf[1] = (uint8_t)((GTP_REG_CONFIG_DATA+6) & 0xFF);
+    width = (uint16_t)opr_buf[2] | ((uint16_t)opr_buf[3] << 8);
+    height = (uint16_t)opr_buf[4] | ((uint16_t)opr_buf[5] << 8);
+    if((width == 0U) || (height == 0U) || (width > 4096U) || (height > 4096U))
+    {
+        GTP_ERROR("invalid factory range: %ux%u", width, height);
+        return FAIL;
+    }
+
+    opr_buf[0] = (uint8_t)((GTP_REG_CONFIG_DATA + 6U) >> 8);
+    opr_buf[1] = (uint8_t)((GTP_REG_CONFIG_DATA + 6U) & 0xFFU);
     ret = GTP_I2C_Read(GTP_ADDRESS, opr_buf, 3);
-    if (ret < 0)
+    if(ret != 2)
     {
         return FAIL;
     }
-    int_trigger_type = opr_buf[2] & 0x03;
-    
-    GTP_INFO("X_MAX = %d, Y_MAX = %d, TRIGGER = 0x%02x",
-            abs_x_max,abs_y_max,int_trigger_type);
-    
-    return SUCCESS;    
-}
 
+    g_gtp_raw_width = width;
+    g_gtp_raw_height = height;
+    module_switch = opr_buf[2];
+    g_gtp_trigger_type = module_switch & 0x03U;
+    I2C_GTP_SetInterruptTrigger(g_gtp_trigger_type);
+
+    GTP_INFO("active range=%ux%u, module=%02X, X2Y=%u, trigger=%u, LCD=%ux%u, scan=%u",
+             g_gtp_raw_width, g_gtp_raw_height, module_switch,
+             (module_switch & X2Y_LOC) ? 1U : 0U, g_gtp_trigger_type,
+             LCD_X_LENGTH, LCD_Y_LENGTH, LCD_SCAN_MODE);
+    return SUCCESS;
+}
 /*******************************************************
 Function:
     Initialize gtp.
@@ -971,6 +967,7 @@ Output:
 {
     int32_t ret = -1;
 
+#if UPDATE_CONFIG
     int32_t i = 0;
     uint16_t check_sum = 0;
     int32_t retry = 0;
@@ -980,8 +977,6 @@ Output:
 	uint8_t* config;
 
     uint8_t cfg_num =0 ;		//需要配置的寄存器个数
-#if UPDATE_CONFIG
-    uint16_t config_write_len = 0;
 #endif
 
     GTP_DEBUG_FUNC();
@@ -1002,21 +997,15 @@ Output:
 		
 		//获取触摸IC的型号
     ret = GTP_Read_Version();
-    if (ret != 2)
+    if(ret != 2)
     {
-        GTP_ERROR("Unable to identify touch controller!");
+        GTP_ERROR("GT911 version read failed: %d", ret);
         return -1;
     }
     
 #if UPDATE_CONFIG
     
-    /* GT9157 的校验和位于配置表之后，额外预留 2 字节。 */
-    config = (uint8_t *)malloc(GTP_CONFIG_MAX_LENGTH + GTP_ADDR_LENGTH + 2);
-    if (config == NULL)
-    {
-        GTP_ERROR("Config buffer malloc failed!");
-        return -1;
-    }
+    config = (uint8_t *)malloc (GTP_CONFIG_MAX_LENGTH + GTP_ADDR_LENGTH);
 
 		config[0] = GTP_REG_CONFIG_DATA >> 8;
 		config[1] =  GTP_REG_CONFIG_DATA & 0xff;
@@ -1048,7 +1037,6 @@ Output:
 		
 
 		cfg_num = cfg_info_len;
-		config_write_len = cfg_num + GTP_ADDR_LENGTH;
 		
 		GTP_DEBUG("cfg_info_len = %d ",cfg_info_len);
 		GTP_DEBUG("cfg_num = %d ",cfg_num);
@@ -1096,7 +1084,6 @@ Output:
             }
             config[ cfg_num+GTP_ADDR_LENGTH] = (~(check_sum & 0xFF)) + 1; 	//checksum
             config[ cfg_num+GTP_ADDR_LENGTH+1] =  1; 						//refresh 配置更新标志
-            config_write_len += 2;
         }
         else if(touchIC == GT5688 || touchIC == GT917S) 
         {
@@ -1117,19 +1104,13 @@ Output:
     //写入配置信息
     for (retry = 0; retry < 5; retry++)
     {
-        ret = GTP_I2C_Write(GTP_ADDRESS, config, config_write_len);
+        ret = GTP_I2C_Write(GTP_ADDRESS, config , cfg_num + GTP_ADDR_LENGTH+2);
         if (ret > 0)
         {
             break;
         }
     }
-    if (ret <= 0)
-    {
-        GTP_ERROR("Config write failed!");
-        free(config);
-        return -1;
-    }
-    Delay_ms(10U);				//延迟等待芯片更新
+    Delay(0xfffff);				//延迟等待芯片更新
 		
 
 		
@@ -1143,13 +1124,7 @@ Output:
 
     	    GTP_DEBUG_FUNC();
 
-	    ret = GTP_I2C_Read(GTP_ADDRESS, buf, config_write_len);
-	    if (ret != 2)
-	    {
-	        GTP_ERROR("Config readback failed!");
-	        free(config);
-	        return -1;
-	    }
+    	    ret = GTP_I2C_Read(GTP_ADDRESS, buf, sizeof(buf));
 			   
 					GTP_DEBUG("read ");
 
@@ -1176,18 +1151,23 @@ Output:
 #endif
 	free(config);
 #endif
-		
-    if (GTP_Get_Info() != SUCCESS)
+
+    /* Keep the panel-specific factory sensor/driver channel map.  The generic
+     * table is not interchangeable between different GT911 glass layouts. */
+	 /* Read back the active geometry and interrupt mode. */
+    if(GTP_Get_Info() != SUCCESS)
     {
-        GTP_ERROR("Unable to read touch controller parameters!");
+        GTP_ERROR("GT911 configuration read failed");
         return -1;
     }
 
-	 /*配置完成后再使能中断，避免软件I2C被触摸中断重入。*/
-	I2C_GTP_IRQEnable();
-		
-		
+    g_gtp_irq_pending = 0U;
+    g_gtp_active_mask = 0U;
+    memset(pre_x, 0xFF, sizeof(pre_x));
+    memset(pre_y, 0xFF, sizeof(pre_y));
 
+    /* Keep EXTI disabled until the drawing page has initialized its buttons. */
+    I2C_GTP_IRQDisable();
     return 0;
 }
 
@@ -1204,65 +1184,27 @@ Output:
 *******************************************************/
 int32_t GTP_Read_Version(void)
 {
-    int32_t ret = -1;
-    uint8_t identified = 0;
-    uint8_t buf[8] = {GTP_REG_VERSION >> 8, GTP_REG_VERSION & 0xff};    //寄存器地址
+    uint8_t buf[8] = {GTP_REG_VERSION >> 8, GTP_REG_VERSION & 0xFFU};
+    int32_t ret = GTP_I2C_Read(GTP_ADDRESS, buf, sizeof(buf));
 
-    GTP_DEBUG_FUNC();
+    if(ret != 2)
+    {
+        GTP_ERROR("GT911 version register read failed: %d", ret);
+        return -1;
+    }
 
-    ret = GTP_I2C_Read(GTP_ADDRESS, buf, sizeof(buf));
-    if (ret < 0)
+    if((buf[2] != '9') || (buf[3] != '1') || (buf[4] != '1'))
     {
-        GTP_ERROR("GTP read version failed");
-        return ret;
+        GTP_ERROR("unexpected touch IC id: %02X %02X %02X %02X",
+                  buf[2], buf[3], buf[4], buf[5]);
+        return -1;
     }
-    if (buf[2] == '5')
-    {
-        GTP_INFO("IC1 Version: %c%c%c%c_%02x%02x", buf[2], buf[3], buf[4], buf[5], buf[7], buf[6]);
-				
-				//GT5688芯片
-				if(buf[2] == '5' && buf[3] == '6' && buf[4] == '8'&& buf[5] == '8')
-				{
-					touchIC = GT5688;
-					identified = 1;
-				}
-    }        
-    else if (buf[5] == 0x00)
-    {
-        GTP_INFO("IC2 Version: %c%c%c_%02x%02x", buf[2], buf[3], buf[4], buf[7], buf[6]);
-				
-				//GT911芯片
-				if(buf[2] == '9' && buf[3] == '1' && buf[4] == '1')
-				{
-					touchIC = GT911;
-					identified = 1;
-				}
-    }
-    else if (buf[5] == '7')
-    {
-        GTP_INFO("IC3 Version: %c%c%c%c_%02x%02x", buf[2], buf[3], buf[4], buf[5], buf[7], buf[6]);
-				
-				//GT9147芯片
-				if(buf[2] == '9' && buf[3] == '1' && buf[4] == '4' && buf[5] == '7')
-				{
-					touchIC = GT9147;
-					identified = 1;
-				}
-		}
-    else
-    {
-        GTP_INFO("IC3 Version: %c%c%c%c_%02x%02x", buf[2], buf[3], buf[4], buf[5], buf[7], buf[6]);
-				
-				//GT9157芯片
-				if(buf[2] == '9' && buf[3] == '1' && buf[4] == '5' && buf[5] == '7')
-				{
-					touchIC = GT9157;
-					identified = 1;
-				}
-		}
-    return identified ? ret : -1;
+
+    touchIC = GT911;
+    GTP_INFO("GT911 Version: %c%c%c_%02x%02x",
+             buf[2], buf[3], buf[4], buf[7], buf[6]);
+    return ret;
 }
-
 /*******************************************************
 Function:
     I2c test Function.
@@ -1290,6 +1232,28 @@ static int8_t GTP_I2C_Test( void)
         GTP_ERROR("GTP i2c test failed time %d.",retry);
     }
     return ret;
+}
+
+void GTP_NotifyInterrupt(void)
+{
+    g_gtp_irq_count++;
+    g_gtp_irq_pending = 1U;
+}
+
+void GTP_Service(void)
+{
+    if(g_gtp_irq_pending != 0U)
+    {
+        g_gtp_irq_pending = 0U;
+        if(g_gtp_irq_count <= 8U)
+        {
+            printf("<<-GTP-IRQ->> count=%lu INT=%u\r\n",
+                   g_gtp_irq_count,
+                   (unsigned int)GPIO_ReadInputDataBit(GTP_INT_GPIO_PORT,
+                                                       GTP_INT_GPIO_PIN));
+        }
+        GTP_TouchProcess();
+    }
 }
 
 //检测到触摸中断时调用，

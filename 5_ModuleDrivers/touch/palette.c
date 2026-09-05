@@ -240,15 +240,13 @@ void Touch_Button_Down(uint16_t x,uint16_t y)
   for(i=0;i<BUTTON_NUM;i++)
   {
     /* 触摸到了按钮 */
-    if(x>=button[i].start_x && x<button[i].end_x &&
-       y>=button[i].start_y && y<button[i].end_y)
+    if(x<=button[i].end_x && y<=button[i].end_y && y>=button[i].start_y && x>=button[i].start_x )
     {
       if(button[i].touch_flag == 0)     /*原本的状态为没有按下，则更新状态*/
       {
       button[i].touch_flag = 1;         /* 记录按下标志 */
+      
       button[i].draw_btn(&button[i]);  /*重绘按钮*/
-      /* 命令在首次按下时执行，不再依赖触摸控制器的释放帧。 */
-      button[i].btn_command(&button[i]);
       }        
       
     }
@@ -271,19 +269,21 @@ void Touch_Button_Down(uint16_t x,uint16_t y)
 */
 void Touch_Button_Up(uint16_t x,uint16_t y)
 {
-   uint8_t i;
-
-   (void)x;
-   (void)y;
-
+   uint8_t i; 
    for(i=0;i<BUTTON_NUM;i++)
    {
-     if(button[i].touch_flag)
-     {
-       button[i].touch_flag = 0;
-       button[i].draw_btn(&button[i]);
-     }
-   }
+     /* 触笔在按钮区域释放 */
+      if((x<button[i].end_x && x>button[i].start_x && y<button[i].end_y && y>button[i].start_y))
+      {        
+        button[i].touch_flag = 0;       /*释放触摸标志*/
+        
+        button[i].draw_btn(&button[i]); /*重绘按钮*/        
+      
+        button[i].btn_command(&button[i]);  /*执行按键的功能命令*/
+        
+        break;
+      }
+    }  
 
 }
 
@@ -303,7 +303,57 @@ void Draw_Trail(int16_t pre_x,int16_t pre_y,int16_t x,int16_t y,Brush_Style* bru
   
 	
   /*触摸位置在画板区域*/
-  if(x>PALETTE_START_X && pre_x>PALETTE_START_X )
+  if((x <= PALETTE_START_X) || (x >= PALETTE_END_X) ||
+     (y < PALETTE_START_Y) || (y >= PALETTE_END_Y))
+  {
+    return;
+  }
+
+  /* A short tap must leave a visible point; never pass negative history
+   * coordinates into the unsigned line-drawing functions. */
+  if((pre_x < 0) || (pre_y < 0))
+  {
+    switch(brush->shape)
+    {
+      case LINE_SINGLE_PIXCEL:
+        ILI9806G_SetPointPixel((uint16_t)x, (uint16_t)y);
+        break;
+      case LINE_2_PIXCEL:
+        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 1U, 1U);
+        break;
+      case LINE_4_PIXCEL:
+        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 2U, 1U);
+        break;
+      case LINE_6_PIXCEL:
+      case LINE_WITH_CIRCLE:
+        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 3U, 1U);
+        break;
+      case LINE_8_PIXCEL:
+        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 4U, 1U);
+        break;
+      case LINE_16_PIXCEL:
+        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 8U, 1U);
+        break;
+      case LINE_20_PIXCEL:
+        ILI9806G_DrawCircle((uint16_t)x, (uint16_t)y, 10U, 1U);
+        break;
+      case RUBBER:
+        if((x >= (PALETTE_START_X + 20)) &&
+           (x < (PALETTE_END_X - 20)) &&
+           (y >= (PALETTE_START_Y + 20)) &&
+           (y < (PALETTE_END_Y - 20)))
+        {
+          LCD_SetColors(CL_WHITE, CL_WHITE);
+          ILI9806G_DrawRectangle((uint16_t)(x - 20), (uint16_t)(y - 20),
+                                 40U, 40U, 1U);
+        }
+        break;
+      default:
+        break;
+    }
+    return;
+  }
+  if(pre_x > PALETTE_START_X)
   {
     switch(brush->shape)  /*根据画刷参数描绘不同的轨迹*/
     {

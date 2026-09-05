@@ -1,6 +1,6 @@
 /**
   ******************************************************************************
-  * @file    FMC_SDRAM/stm32f4xx_it.c 
+  * @file    FMC_SDRAM/stm32f4xx_it.c
   * @author  MCD Application Team
   * @version V1.0.1
   * @date    11-November-2013
@@ -18,8 +18,8 @@
   *
   *        http://www.st.com/software_license_agreement_liberty_v2
   *
-  * Unless required by applicable law or agreed to in writing, software 
-  * distributed under the License is distributed on an "AS IS" BASIS, 
+  * Unless required by applicable law or agreed to in writing, software
+  * distributed under the License is distributed on an "AS IS" BASIS,
   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
   * See the License for the specific language governing permissions and
   * limitations under the License.
@@ -42,12 +42,13 @@
 #include "bsp_gpio_led.h"
 #include "multi_button.h"
 #include "inv_mpu.h"
-#include "inv_mpu_dmp_motion_driver.h" 
+#include "inv_mpu_dmp_motion_driver.h"
 #include "bsp_mpu6050.h"
 #include "bsp_fsmc_lcd.h"
 #include <string.h>
 #include "common.h"
 #include "bsp_i2c_touch.h"
+#include "gt9xx.h"
 #include "platform_nrf.h"
 #include "bsp_adc1_independent_dual.h"
 #include "bsp_adc3_independent_dual.h"
@@ -67,13 +68,13 @@ extern uint8_t finish_1hz,finish_2hz,finish_5hz,finish_10hz,finish_20hz,finish_3
 extern volatile uint8_t finish_button_10ms;
 
 volatile uint8_t ADC_Value1_High, ADC_Value1_Low;
-volatile uint8_t ADC_Value2_High, ADC_Value2_Low;  
+volatile uint8_t ADC_Value2_High, ADC_Value2_Low;
 volatile uint8_t ADC_Value3_High, ADC_Value3_Low;
-volatile uint8_t ADC_Value4_High, ADC_Value4_Low; 
+volatile uint8_t ADC_Value4_High, ADC_Value4_Low;
 volatile uint8_t ADC_Value5_High, ADC_Value5_Low;
-volatile uint8_t ADC_Value6_High, ADC_Value6_Low; 
+volatile uint8_t ADC_Value6_High, ADC_Value6_Low;
 volatile uint8_t ADC_Value7_High, ADC_Value7_Low;
-volatile uint8_t ADC_Value8_High, ADC_Value8_Low; 
+volatile uint8_t ADC_Value8_High, ADC_Value8_Low;
 volatile uint8_t ADC_Value9_High, ADC_Value9_Low;
 volatile uint8_t ADC_Value10_High,ADC_Value10_Low;
 
@@ -206,11 +207,20 @@ void EXPAND_USART_IRQHandler(void)
   }
 }
 
-void MPU_IRQHandler(void)
+void EXTI9_5_IRQHandler(void)
 {
-  if (EXTI_GetITStatus(MPU_INT_EXTI_LINE) != RESET) //
+  if (EXTI_GetITStatus(MPU_INT_EXTI_LINE) != RESET)
   {
-    EXTI_ClearITPendingBit(MPU_INT_EXTI_LINE); //
+    EXTI_ClearITPendingBit(MPU_INT_EXTI_LINE);
+  }
+}
+
+void EXTI15_10_IRQHandler(void)
+{
+  if (EXTI_GetITStatus(GTP_INT_EXTI_LINE) != RESET)
+  {
+    GTP_NotifyInterrupt();
+    EXTI_ClearITPendingBit(GTP_INT_EXTI_LINE);
   }
 }
 
@@ -272,7 +282,7 @@ void GENERAL_TIM3_IRQHandler(void)
 {
   if (TIM_GetITStatus(GENERAL_TIM3, TIM_IT_Update) != RESET)
   {
-    
+
   }
   TIM_ClearITPendingBit(GENERAL_TIM3, TIM_IT_Update);
 }
@@ -324,7 +334,7 @@ void GENERAL_TIM5_IRQHandler(void)
     if(tim5_count  == 100)
     {
       tim5_count = 0;
-      finish_1hz = 1; 
+      finish_1hz = 1;
     }
 
     TIM_ClearITPendingBit(GENERAL_TIM5, TIM_IT_Update); // 清除TIMx的中断待处理位:TIM 中断源
@@ -356,7 +366,7 @@ void GPS_DMA_IRQHANDLER(void)
     if(DMA_GetITStatus(GPS_USART_DMA_STREAM,GPS_DMA_IT_HT) )         /* DMA 半传输完成 */
     {
       GPS_HalfTransferEnd = 1;                //设置半传输完成标志位
-      DMA_ClearITPendingBit (GPS_USART_DMA_STREAM,GPS_DMA_IT_HT); 
+      DMA_ClearITPendingBit (GPS_USART_DMA_STREAM,GPS_DMA_IT_HT);
     }
 
     else if(DMA_GetITStatus(GPS_USART_DMA_STREAM,GPS_DMA_IT_TC))     /* DMA 传输完成 */
@@ -366,22 +376,12 @@ void GPS_DMA_IRQHANDLER(void)
     }
 }
 
-//触摸
-void GTP_IRQHandler(void)
-{
-	if(EXTI_GetITStatus(GTP_INT_EXTI_LINE) != RESET) //确保是否产生了EXTI Line中断
-	{
-		GTP_TouchProcess();    
-		EXTI_ClearITPendingBit(GTP_INT_EXTI_LINE);   //清除中断标志位
-	}  
-}
+/**
+  * @}
+  */
 
 /**
   * @}
-  */ 
-
-/**
-  * @}
-  */ 
+  */
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

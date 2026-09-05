@@ -23,7 +23,7 @@
   #define NULL        0
 #endif
 
-#define UPDATE_CONFIG    1    // 1 ：更新配置    0 ：不更新配置
+#define UPDATE_CONFIG    0    // 1 ：更新配置    0 ：不更新配置
 
 /*flags的可取值，注释掉的在本工程没有用到*/
 //#define I2C_M_TEN		0x0010	/* 表示这是个10位地址 */
@@ -150,7 +150,7 @@ typedef enum
 
 //***************************PART1:ON/OFF define*******************************
 
-#define GTP_DEBUG_ON         	0
+#define GTP_DEBUG_ON         	1
 #define GTP_DEBUG_ARRAY_ON    0
 #define GTP_DEBUG_FUNC_ON   	0
 // Log define
@@ -199,7 +199,10 @@ void GTP_IRQ_Disable(void);
 void GTP_IRQ_Enable(void);
 int32_t GTP_Init_Panel(void);
 int8_t GTP_Send_Command(uint8_t command);
+void GTP_TouchProcess(void);
 void GTP_CalibrationStart(void);
 uint8_t GTP_CalibrationIsReady(void);
+void GTP_NotifyInterrupt(void);
+void GTP_Service(void);
 
 #endif /* _GOODIX_GT9XX_H_ */

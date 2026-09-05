@@ -2,11 +2,33 @@
 #include "gt9xx.h"
 #include "bsp_usart_debug.h"
 
-#define I2C_TOUCH_ACK_RETRIES 50U
-
 static void Delay(__IO uint32_t nCount)	 //简单的延时函数
 {
 	for(; nCount != 0; nCount--);
+}
+
+static uint8_t g_gtp_int_trigger = GTP_INT_TRIGGER;
+
+static EXTITrigger_TypeDef I2C_GTP_GetExtiTrigger(void)
+{
+	/* GT9xx: 0=rising, 1=falling, 2=low level, 3=high level.
+	 * STM32 EXTI is edge based, so level modes use the corresponding entry edge. */
+	switch(g_gtp_int_trigger & 0x03U)
+	{
+		case 1U:
+		case 2U:
+			return EXTI_Trigger_Falling;
+
+		case 0U:
+		case 3U:
+		default:
+			return EXTI_Trigger_Rising;
+	}
+}
+
+void I2C_GTP_SetInterruptTrigger(uint8_t trigger_type)
+{
+	g_gtp_int_trigger = trigger_type & 0x03U;
 }
 
 /**
@@ -30,16 +52,14 @@ void I2C_GTP_IRQEnable(void)
   SYSCFG_EXTILineConfig(GTP_INT_EXTI_PORTSOURCE, GTP_INT_EXTI_PINSOURCE);
 
   /* 选择 EXTI 中断源 */
-  EXTI_ClearITPendingBit(GTP_INT_EXTI_LINE);
   EXTI_InitStructure.EXTI_Line = GTP_INT_EXTI_LINE;
   EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;
-  EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising;  
+  EXTI_InitStructure.EXTI_Trigger = I2C_GTP_GetExtiTrigger();  
   EXTI_InitStructure.EXTI_LineCmd = ENABLE;
+  EXTI_ClearITPendingBit(GTP_INT_EXTI_LINE);
   EXTI_Init(&EXTI_InitStructure);  
   
   /* 配置中断优先级 */
-  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_1);
-  
 	/*使能中断*/
   NVIC_InitStructure.NVIC_IRQChannel = GTP_INT_EXTI_IRQ;
   NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
@@ -57,7 +77,6 @@ void I2C_GTP_IRQEnable(void)
 void I2C_GTP_IRQDisable(void)
 {
   EXTI_InitTypeDef EXTI_InitStructure;
-  NVIC_InitTypeDef NVIC_InitStructure;
   GPIO_InitTypeDef GPIO_InitStructure;
   /*配置 INT 为浮空输入 */   
   GPIO_InitStructure.GPIO_Pin = GTP_INT_GPIO_PIN;
@@ -72,19 +91,13 @@ void I2C_GTP_IRQDisable(void)
   /* 选择 EXTI 中断源 */
   EXTI_InitStructure.EXTI_Line = GTP_INT_EXTI_LINE;
   EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;
-  EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising;
+  EXTI_InitStructure.EXTI_Trigger = I2C_GTP_GetExtiTrigger();
   EXTI_InitStructure.EXTI_LineCmd = DISABLE;
   EXTI_Init(&EXTI_InitStructure);
+  EXTI_ClearITPendingBit(GTP_INT_EXTI_LINE);
 
-  /* 配置中断优先级 */
-  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_1);
-
-  /* 关闭中断 */
-  NVIC_InitStructure.NVIC_IRQChannel = GTP_INT_EXTI_IRQ;
-  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
-  NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;
-  NVIC_InitStructure.NVIC_IRQChannelCmd = DISABLE;
-  NVIC_Init(&NVIC_InitStructure);
+  /* Disabling the GT911 EXTI line is sufficient; keep unrelated NVIC
+   * channels untouched. */
 
 }
 
@@ -153,6 +166,9 @@ void I2C_ResetChip(void)
 	  GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
 	  GPIO_InitStructure.GPIO_PuPd  = GPIO_PuPd_DOWN;       //设置为下拉，方便初始化
 	  GPIO_Init(GTP_INT_GPIO_PORT, &GPIO_InitStructure);
+	  /* Select GT911 7-bit address 0x5D (8-bit write address 0xBA).
+	   * Do not rely on the GPIO output latch's power-on value here. */
+	  GPIO_ResetBits(GTP_INT_GPIO_PORT, GTP_INT_GPIO_PIN);
 
 	  /*初始化GT5688,rst为高电平，int为低电平，则gt5688的设备地址被配置为0xBA*/
 
@@ -179,11 +195,14 @@ void I2C_ResetChip(void)
   */
 void I2C_Touch_Init(void)
 {
-  I2C_GPIO_Config(); 
-
-  /* 初始化期间禁止触摸中断，避免中断处理与配置过程同时访问软件I2C。 */
+  printf("<<-GTP-PIN->> SCL=PC4 SDA=PC5 RST=%s INT=%s/%s addr7=0x5D\r\n",
+         GTP_RST_PIN_NAME, GTP_INT_PIN_NAME, GTP_INT_EXTI_NAME);
+  I2C_GPIO_Config();
   I2C_GTP_IRQDisable();
   I2C_ResetChip();
+  printf("<<-GTP-PIN->> reset released: RST=%u INT=%u\r\n",
+         (unsigned int)GPIO_ReadInputDataBit(GTP_RST_GPIO_PORT, GTP_RST_GPIO_PIN),
+         (unsigned int)GPIO_ReadInputDataBit(GTP_INT_GPIO_PORT, GTP_INT_GPIO_PIN));
 }
 /*
 *********************************************************************************************************
@@ -195,17 +214,13 @@ void I2C_Touch_Init(void)
 */
 static void i2c_Delay(void)
 {
-	uint8_t i;
+	volatile uint8_t i;
 
-	/*　
-	 	下面的时间是通过逻辑分析仪测试得到的。
-    工作条件：CPU主频180MHz ，MDK编译环境，1级优化
-      
-		循环次数为50时，SCL频率 = 333KHz 
-		循环次数为30时，SCL频率 = 533KHz，  
-	 	循环次数为20时，SCL频率 = 727KHz， 
-  */
-	for (i = 0; i < 10*2; i++);
+	/* 60 explicit cycles keep the software bus safely below the GT911 400 kHz limit. */
+	for (i = 0U; i < 60U; i++)
+	{
+		__NOP();
+	}
 }
 
 /*
@@ -392,45 +407,39 @@ void i2c_NAck(void)
   */
 uint32_t I2C_ReadBytes(uint8_t ClientAddr,uint8_t* pBuffer, uint16_t NumByteToRead)
 {
-	
-	/* 第1步：发起I2C总线启动信号 */
-	i2c_Start();
-	
-	/* 第2步：发起控制字节，高7bit是地址，bit0是读写控制位，0表示写，1表示读 */
-	i2c_SendByte(ClientAddr | I2C_DIR_RD);	/* 此处是读指令 */
-	
-	/* 第3步：等待ACK */
-	if (i2c_WaitAck() != 0)
+	if((pBuffer == NULL) || (NumByteToRead == 0U))
 	{
-		goto cmd_fail;	/* 器件无应答 */
+		return 1U;
 	}
 
-	while(NumByteToRead)
-  {
-    *pBuffer = i2c_ReadByte();
+	i2c_Start();
+	i2c_SendByte(ClientAddr | I2C_DIR_RD);
+	if(i2c_WaitAck() != 0U)
+	{
+		goto cmd_fail;
+	}
 
-    /* 读指针自增，计数器自减 */
-    pBuffer++;
-    NumByteToRead--;
+	while(NumByteToRead > 0U)
+	{
+		*pBuffer++ = i2c_ReadByte();
+		NumByteToRead--;
 
-    if(NumByteToRead != 0U)
-    {
-      i2c_Ack();	/* 中间字节读完后，CPU产生ACK信号 */
-    }
-    else
-    {
-      i2c_NAck();	/* 最后1个字节读完后，CPU产生NACK信号 */
-    }
-  }
+		if(NumByteToRead == 0U)
+		{
+			i2c_NAck();
+		}
+		else
+		{
+			i2c_Ack();
+		}
+	}
 
-	/* 发送I2C总线停止信号 */
 	i2c_Stop();
-	return 0;	/* 执行成功 */
+	return 0U;
 
-cmd_fail: /* 命令执行失败后，切记发送停止信号，避免影响I2C总线上其他设备 */
-	/* 发送I2C总线停止信号 */
+cmd_fail:
 	i2c_Stop();
-	return 1;
+	return 1U;
 }
 
 /**
@@ -451,7 +460,7 @@ uint32_t I2C_WriteBytes(uint8_t ClientAddr,uint8_t* pBuffer,  uint8_t NumByteToW
   /* 通过检查器件应答的方式，判断内部写操作是否完成, 一般小于 10ms 			
     CLK频率为200KHz时，查询次数为30次左右
   */
-  for (m = 0; m < I2C_TOUCH_ACK_RETRIES; m++)
+  for (m = 0; m < 1000; m++)
   {				
     /* 第1步：发起I2C总线启动信号 */
     i2c_Start();
@@ -465,7 +474,7 @@ uint32_t I2C_WriteBytes(uint8_t ClientAddr,uint8_t* pBuffer,  uint8_t NumByteToW
       break;
     }
   }
-  if (m == I2C_TOUCH_ACK_RETRIES)
+  if (m  == 1000)
   {
     goto cmd_fail;	/* EEPROM器件写超时 */
   }	

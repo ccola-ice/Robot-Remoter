@@ -182,19 +182,19 @@ void RTC_TimeAndDate_Show(void)
     {
 		    #ifdef RTC_PRINT		
         // 打印日期
-        printf("The Date :  Y:20%0.2d - M:%0.2d - D:%0.2d - W:%0.2d\r\n", 
-        RTC_DateStructure.RTC_Year,
-        RTC_DateStructure.RTC_Month, 
-        RTC_DateStructure.RTC_Date,
-        RTC_DateStructure.RTC_WeekDay);
+        //printf("The Date :  Y:20%0.2d - M:%0.2d - D:%0.2d - W:%0.2d\r\n", 
+        // RTC_DateStructure.RTC_Year,
+        // RTC_DateStructure.RTC_Month,
+        // RTC_DateStructure.RTC_Date,
+        // RTC_DateStructure.RTC_WeekDay);
 		    #endif
 
         #ifdef RTC_PRINT
         // 打印时间
-        printf("The Time :  %0.2d:%0.2d:%0.2d \r\n\r\n", 
-        RTC_TimeStructure.RTC_Hours, 
-        RTC_TimeStructure.RTC_Minutes, 
-        RTC_TimeStructure.RTC_Seconds);
+        //printf("The Time :  %0.2d:%0.2d:%0.2d \r\n\r\n", 
+        // RTC_TimeStructure.RTC_Hours,
+        // RTC_TimeStructure.RTC_Minutes,
+        // RTC_TimeStructure.RTC_Seconds);
         #endif
 
         // //液晶显示日期

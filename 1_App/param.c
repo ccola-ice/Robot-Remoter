@@ -4,6 +4,10 @@
 
 #define   PARAM_DATA_SIZE  sizeof(param)
 #define   PARAM_FLASH_LEGACY_ADDR 0UL
+/* Firmware builds before the partition fix stored parameters at physical
+ * sector 2560, which is inside drive 1:.  Read it once for migration only;
+ * never erase or write this address again. */
+#define   PARAM_FLASH_OVERLAP_ADDR (2560UL * 4096UL)
 
 volatile  param_Config    param;
 
@@ -50,16 +54,30 @@ unsigned char set_default_param(void)
 
 unsigned char write_default_param(void)
 {
-	uint8_t legacy_loaded = 0U;
+	uint8_t migration_required = 0U;
 
 	FLASH_Read_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);			//从FLASH中读取参数结构体
 	if((param.writeFlag != FM_FLAG) && (param.writeFlag != FM_PREVIOUS_FLAG))
 	{
-		/* Read old firmware data once, but never erase/write the FatFs sector. */
-		FLASH_Read_Data((uint8_t *)&param, PARAM_FLASH_LEGACY_ADDR, PARAM_DATA_SIZE);
+		/* Recover settings written by the faulty overlapping layout. */
+		FLASH_Read_Data((uint8_t *)&param, PARAM_FLASH_OVERLAP_ADDR,
+					PARAM_DATA_SIZE);
 		if((param.writeFlag == FM_FLAG) || (param.writeFlag == FM_PREVIOUS_FLAG))
 		{
-			legacy_loaded = 1U;
+			migration_required = 1U;
+			printf("recover params from old overlapping sector\r\n");
+		}
+		else
+		{
+			/* Very old builds used sector zero.  It is also read-only here. */
+			FLASH_Read_Data((uint8_t *)&param, PARAM_FLASH_LEGACY_ADDR,
+						PARAM_DATA_SIZE);
+			if((param.writeFlag == FM_FLAG) ||
+			   (param.writeFlag == FM_PREVIOUS_FLAG))
+			{
+				migration_required = 1U;
+				printf("recover params from legacy sector\r\n");
+			}
 		}
 	}
 	
@@ -71,24 +89,23 @@ unsigned char write_default_param(void)
 		param.NRF_DataRate = 2;
 		param.version = FM_VERSION;
 		param.version_time = FM_TIME;
-		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR);
-		FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);
-		printf("migrate params to NRF settings version\r\n");
+		migration_required = 1U;
 	}
-	else if((param.writeFlag == FM_FLAG) && (legacy_loaded != 0U))
+	else if(param.writeFlag != FM_FLAG)	//判断是否为最新版本
+	{
+		set_default_param();		//设置默认参数
+		migration_required = 1U;
+		printf("update default params\r\n");
+	}
+
+	if(migration_required != 0U)
 	{
 		param.version = FM_VERSION;
 		param.version_time = FM_TIME;
 		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR);
-		FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);
-		printf("migrate params away from FatFs sector\r\n");
-	}
-	else if(param.writeFlag!=FM_FLAG)	//判断是否为最新版本
-	{
-		set_default_param();		//设置默认参数
-		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR);
 		FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);	//写入FLASH
-		printf("update default params\r\n");
+		printf("params stored in reserved sector %lu\r\n",
+			   (unsigned long)PARAM_FLASH_SAVE_SECTOR);
 	}
 
 	/* 指针只在运行期使用，不依赖Flash中保存的旧地址。 */

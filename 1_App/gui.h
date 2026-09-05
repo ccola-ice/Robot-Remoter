@@ -17,6 +17,8 @@ typedef struct
     uint8_t is_directory;
 } GuiFileEntry;
 
+uint8_t gui_file_name_can_render(const char *name);
+
 typedef struct
 {
     char label[GUI_PARAM_LABEL_LENGTH];

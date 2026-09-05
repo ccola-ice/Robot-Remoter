@@ -29,6 +29,7 @@
 #define GTP_RST_GPIO_PORT                GPIOG
 #define GTP_RST_GPIO_CLK                 RCC_AHB1Periph_GPIOG
 #define GTP_RST_GPIO_PIN                 GPIO_Pin_8
+#define GTP_RST_PIN_NAME                 "PG8"
 /*中断引脚*/
 #define GTP_INT_GPIO_PORT                GPIOB
 #define GTP_INT_GPIO_CLK                 RCC_AHB1Periph_GPIOB
@@ -38,7 +39,8 @@
 #define GTP_INT_EXTI_LINE                EXTI_Line12
 #define GTP_INT_EXTI_IRQ                 EXTI15_10_IRQn
 #define GTP_IRQHandler                   EXTI15_10_IRQHandler
-
+#define GTP_INT_PIN_NAME                 "PB12"
+#define GTP_INT_EXTI_NAME                "EXTI12"
 
 //软件IIC使用的宏
 #define I2C_SCL_1()  GPIO_SetBits(GTP_I2C_SCL_GPIO_PORT, GTP_I2C_SCL_PIN)		/* SCL = 1 */
@@ -56,5 +58,6 @@ uint32_t I2C_ReadBytes(uint8_t ClientAddr,uint8_t* pBuffer, uint16_t NumByteToRe
 void I2C_ResetChip(void);
 void I2C_GTP_IRQDisable(void);
 void I2C_GTP_IRQEnable(void);
+void I2C_GTP_SetInterruptTrigger(uint8_t trigger_type);
 
 #endif /* __I2C_TOUCH_H */

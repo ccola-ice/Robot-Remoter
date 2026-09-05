@@ -12,6 +12,7 @@
 #include "palette.h"
 #include "gt9xx.h"
 #include "bsp_i2c_touch.h"
+#include "ff.h"
 #include <string.h>
 
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
@@ -369,7 +370,7 @@ void system_basic_information(void)
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 	}
 	
 	code_ro_bytes = (uint32_t)(uintptr_t)&Image$$ER_IROM1$$Length;
@@ -466,7 +467,7 @@ void main_menu(uint8_t selected_item)
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 		first_draw = 1U;
 		last_selected_item = 0xffU;
 	}
@@ -551,7 +552,7 @@ void digital_channel_monitor_page(const uint8_t *raw_values,
 	{
 		display_flag = 0U;
 		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 		first_draw = 1U;
 		for(channel = 0U; channel < 6U; channel++)
 		{
@@ -648,17 +649,152 @@ void digital_channel_monitor_page(const uint8_t *raw_values,
 	LCD_SetTextColor(BLACK);
 }
 
+static uint8_t gui_file_decode_utf8(const uint8_t *source,
+									uint32_t *codepoint,
+									uint8_t *source_advance)
+{
+	uint8_t byte0 = source[0];
+	uint8_t byte1 = source[1];
+	uint8_t byte2;
+	uint8_t byte3;
+
+	if((byte0 >= 0xc2U) && (byte0 <= 0xdfU) &&
+	   ((byte1 & 0xc0U) == 0x80U))
+	{
+		*codepoint = ((uint32_t)(byte0 & 0x1fU) << 6) |
+					 (uint32_t)(byte1 & 0x3fU);
+		*source_advance = 2U;
+		return 1U;
+	}
+
+	if((byte0 >= 0xe0U) && (byte0 <= 0xefU) &&
+	   ((byte1 & 0xc0U) == 0x80U))
+	{
+		byte2 = source[2];
+		if(((byte2 & 0xc0U) == 0x80U) &&
+		   !((byte0 == 0xe0U) && (byte1 < 0xa0U)) &&
+		   !((byte0 == 0xedU) && (byte1 >= 0xa0U)))
+		{
+			*codepoint = ((uint32_t)(byte0 & 0x0fU) << 12) |
+						 ((uint32_t)(byte1 & 0x3fU) << 6) |
+						 (uint32_t)(byte2 & 0x3fU);
+			*source_advance = 3U;
+			return 1U;
+		}
+	}
+
+	if((byte0 >= 0xf0U) && (byte0 <= 0xf4U) &&
+	   ((byte1 & 0xc0U) == 0x80U))
+	{
+		byte2 = source[2];
+		if((byte2 & 0xc0U) == 0x80U)
+		{
+			byte3 = source[3];
+			if(((byte3 & 0xc0U) == 0x80U) &&
+			   !((byte0 == 0xf0U) && (byte1 < 0x90U)) &&
+			   !((byte0 == 0xf4U) && (byte1 > 0x8fU)))
+			{
+				*codepoint = ((uint32_t)(byte0 & 0x07U) << 18) |
+							 ((uint32_t)(byte1 & 0x3fU) << 12) |
+							 ((uint32_t)(byte2 & 0x3fU) << 6) |
+							 (uint32_t)(byte3 & 0x3fU);
+				*source_advance = 4U;
+				return 1U;
+			}
+		}
+	}
+
+	return 0U;
+}
+
+static uint8_t gui_file_source_is_utf8(const char *source)
+{
+	uint16_t index = 0U;
+	uint8_t source_advance;
+	uint8_t has_multibyte = 0U;
+	uint32_t codepoint;
+
+	while(source[index] != '\0')
+	{
+		if((uint8_t)source[index] < 0x80U)
+		{
+			index++;
+			continue;
+		}
+		if(gui_file_decode_utf8((const uint8_t *)&source[index],
+								&codepoint, &source_advance) == 0U)
+		{
+			return 0U;
+		}
+		has_multibyte = 1U;
+		index += source_advance;
+	}
+
+	return has_multibyte;
+}
+
+uint8_t gui_file_name_can_render(const char *name)
+{
+	uint16_t index = 0U;
+	uint16_t oem_code;
+	uint32_t codepoint;
+	uint8_t first_byte;
+	uint8_t second_byte;
+	uint8_t source_advance;
+	uint8_t utf8_source = gui_file_source_is_utf8(name);
+
+	while(name[index] != '\0')
+	{
+		first_byte = (uint8_t)name[index];
+		if((first_byte >= 32U) && (first_byte <= 126U))
+		{
+			index++;
+			continue;
+		}
+
+		if(utf8_source != 0U)
+		{
+			if((gui_file_decode_utf8((const uint8_t *)&name[index],
+								  &codepoint, &source_advance) == 0U) ||
+			   (codepoint > 0xffffUL))
+			{
+				return 0U;
+			}
+			oem_code = ff_convert((WCHAR)codepoint, 0U);
+			first_byte = (uint8_t)(oem_code >> 8);
+			second_byte = (uint8_t)oem_code;
+			index += source_advance;
+		}
+		else
+		{
+			second_byte = (uint8_t)name[index + 1U];
+			index += 2U;
+		}
+
+		if((first_byte < 0xa1U) || (first_byte > 0xf7U) ||
+		   (second_byte < 0xa1U) || (second_byte > 0xfeU))
+		{
+			return 0U;
+		}
+	}
+
+	return 1U;
+}
+
 static void gui_file_display_text(char *destination, uint16_t destination_size,
 								  const char *source, uint16_t maximum_width)
 {
 	uint16_t source_index = 0U;
 	uint16_t destination_index = 0U;
 	uint16_t used_width = 0U;
+	uint16_t oem_code;
+	uint32_t codepoint;
 	uint16_t character_width;
 	uint8_t first_byte;
 	uint8_t second_byte;
 	uint8_t source_advance;
 	uint8_t output_bytes;
+	uint8_t utf8_source = gui_file_source_is_utf8(source);
 
 	while(source[source_index] != '\0')
 	{
@@ -671,6 +807,37 @@ static void gui_file_display_text(char *destination, uint16_t destination_size,
 		if((first_byte >= 32U) && (first_byte <= 126U))
 		{
 			destination[destination_index] = (char)first_byte;
+		}
+		else if(utf8_source != 0U)
+		{
+			if(gui_file_decode_utf8((const uint8_t *)&source[source_index],
+								&codepoint, &source_advance) != 0U)
+			{
+				if(codepoint <= 0xffffUL)
+				{
+					oem_code = ff_convert((WCHAR)codepoint, 0U);
+					first_byte = (uint8_t)(oem_code >> 8);
+					second_byte = (uint8_t)oem_code;
+				}
+				if((codepoint <= 0xffffUL) &&
+				   (first_byte >= 0xa1U) && (first_byte <= 0xf7U) &&
+				   (second_byte >= 0xa1U) && (second_byte <= 0xfeU))
+				{
+					destination[destination_index] = (char)first_byte;
+					destination[destination_index + 1U] = (char)second_byte;
+					output_bytes = 2U;
+					character_width = 32U;
+				}
+				else
+				{
+					destination[destination_index] = '?';
+				}
+			}
+			else
+			{
+				destination[destination_index] = '?';
+				source_advance = 1U;
+			}
 		}
 		else if((first_byte >= 0xa1U) && (first_byte <= 0xf7U) &&
 				(second_byte >= 0xa1U) && (second_byte <= 0xfeU))
@@ -746,7 +913,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 		first_draw = 1U;
 		last_revision = 0xffffU;
 		last_selected_item = 0xffU;
@@ -891,7 +1058,7 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 		first_draw = 1U;
 		last_selected_item = 0xffU;
 		last_first_visible = 0xffU;
@@ -1068,7 +1235,7 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 	}
 
 	if(power_index > 3U)
@@ -1241,7 +1408,7 @@ void system_data_read_and_set(void)
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 		first_draw = 1U;
 		snapshot_valid = 0U;
 	}
@@ -1444,7 +1611,7 @@ void channel_monitor_page(void)
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 		first_draw = 1U;
 	}
 
@@ -1494,7 +1661,7 @@ void imu6050_information(void)
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 		first_draw = 1U;
 	}
 
@@ -1540,16 +1707,9 @@ void Draw_Board(void)
 	if(display_flag == 1)
 	{
 		display_flag = 0;
-		I2C_GTP_IRQDisable();
+		GTP_IRQ_Disable();
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-		if(GTP_CalibrationIsReady())
-		{
-			Palette_Init(LCD_SCAN_MODE);
-		}
-		else
-		{
-			GTP_CalibrationStart();
-		}
-		I2C_GTP_IRQEnable();
+		Palette_Init(LCD_SCAN_MODE);
+		GTP_IRQ_Enable();
 	}	
 }

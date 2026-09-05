@@ -1,14 +1,15 @@
 #ifndef  __PARAM_H_
 #define  __PARAM_H_
 #include "stm32f4xx.h"
+#include "spi_flash_layout.h"
 
 #define chNum 8
 
 #define ON  1
 #define OFF 0
 
-/* FatFs uses SPI Flash sectors 0..2559; keep parameters in the reserved area. */
-#define PARAM_FLASH_SAVE_ADDR 		(2560UL * 4096UL)
+#define PARAM_FLASH_SAVE_SECTOR SPI_FLASH_PARAM_SECTOR
+#define PARAM_FLASH_SAVE_ADDR   SPI_FLASH_PARAM_ADDR
 
 #define FM_FLAG 	0x0003
 #define FM_PREVIOUS_FLAG 0x0002

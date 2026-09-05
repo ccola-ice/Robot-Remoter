@@ -13,6 +13,7 @@
 #include "bsp_i2c_eeprom.h"
 #include "bsp_i2c_mpu6050.h"
 #include "bsp_i2c_touch.h"
+#include "gt9xx.h"
 #include "bsp_mpu6050.h"
 #include "bsp_mpu6050_exti.h"
 
@@ -225,10 +226,13 @@ void setup(void)
 
 int hardware_test(void)
 {
-	eeprom_test();
-	gui_boot_update(87U, 2U, "EEPROM test completed", 0U);
-	flash_test();
-	gui_boot_update(90U, 2U, "SPI Flash test completed", 0U);
+	/*
+	 * Persistent-memory test routines erase/write EEPROM, raw SPI sectors,
+	 * FatFs files and the SD card. They are manufacturing tests and must not
+	 * run during every normal boot.
+	 */
+	printf("[BOOT] destructive EEPROM/SPI/FatFs/SD tests skipped\r\n");
+	gui_boot_update(90U, 2U, "Persistent storage preserved", 0U);
 	if(sram_read_write_test() == 1)
 	{
 		printf("sram 测试成功\r\n");
@@ -238,11 +242,7 @@ int hardware_test(void)
 	{
 		gui_boot_update(92U, 2U, "External SRAM test failed", 1U);
 	}
-	fatfs_flash_test();
-	fatfs_flash_test2();
-	gui_boot_update(95U, 2U, "Flash filesystem tested", 0U);
-	fatfs_sdcard_test();
-	gui_boot_update(97U, 2U, "SD filesystem tested", 0U);
+	gui_boot_update(97U, 2U, "Storage volumes preserved", 0U);
 	
 	//扩展串口4测试
 	USART_printf(EXPAND_USART,"THIS IS UART4\r\n");
@@ -275,6 +275,7 @@ int main(void)
 
     while(1)
     {
+        GTP_Service();
 		if(finish_1hz == 1)
 		{
 			if(imu_dmp_ready != 0U)

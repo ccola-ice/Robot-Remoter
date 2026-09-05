@@ -9,6 +9,7 @@
 
 #include "diskio.h"		/* FatFs lower layer API */
 #include "bsp_spi_flash.h"
+#include "spi_flash_layout.h"
 #include "bsp_sdio_sd.h"
 #include "string.h"
 
@@ -161,7 +162,7 @@ DRESULT disk_read (
 			//SPI_FLASH 读取分支
 			//把要读取的扇区号转换成地址
 			//扇区偏移6MB，外部Flash文件系统空间放在SPI Flash后面10MB空间
-			sector+=1536;
+			sector += SPI_FLASH_FATFS_FIRST_SECTOR;
 		
 			FLASH_Read_Data(buff,sector*FLASH_SECTOR_SIZE, count*FLASH_SECTOR_SIZE);
 
@@ -243,7 +244,7 @@ DRESULT disk_write (
 		case SPI_FLASH :
 			//SPI_FLASH 写入分支
 			//扇区偏移6MB，外部Flash文件系统空间放在SPI Flash后面10MB空间
-			sector+=1536;
+			sector += SPI_FLASH_FATFS_FIRST_SECTOR;
 		
 			while(count--)
 			{
@@ -317,7 +318,7 @@ DRESULT disk_ioctl (
 			{
 				//存储介质有多少个sector，文件系统通过该值获得存储介质的容量
 				case GET_SECTOR_COUNT:
-					*(DWORD *)buff = (16*1024*1024/FLASH_SECTOR_SIZE)-1536;//4096-1536
+					*(DWORD *)buff = SPI_FLASH_FATFS_SECTOR_COUNT;
 					stat = RES_OK;
 					break;
 				
