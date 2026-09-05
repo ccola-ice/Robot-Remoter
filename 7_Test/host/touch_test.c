@@ -181,15 +181,15 @@ static void test_frames(void)
 
     point(0U, 3U, 350U, 100U); point(1U, 0U, 300U, 200U); report(2U);
     point(0U, 0U, 310U, 200U); point(1U, 3U, 360U, 100U); report(2U);
-    assert(pre_x[0] == 310 && pre_x[3] == 360 && g_gtp_active_mask == 9U);
+    assert(pre_x[0] == 310 && pre_x[3] == -1 && g_gtp_active_mask == 1U);
     point(0U, 3U, 370U, 100U); report(1U);
-    assert(pre_x[0] == -1 && pre_x[3] == 370);
+    assert(pre_x[0] == -1 && g_gtp_active_mask == 0U && g_gtp_single.blocked);
     assert(pixels[150U * 800U + 330U] == CL_WHITE); /* no cross-finger line */
 
     report(0U);
     for(i = 0U; i < GTP_MAX_TOUCH; i++) point(i, 4U - i, 400U + 20U * i, 250U);
     report(5U);
-    assert(g_gtp_active_mask == 31U && pre_x[0] == 480 && pre_x[4] == 400);
+    assert(g_gtp_active_mask == 1U && pre_x[0] == 480 && pre_x[4] == -1);
     before = draw_calls;
     fail_points = 1U; report(5U); fail_points = 0U;
     assert(g_gtp_active_mask == 0U && draw_calls == before);
@@ -230,7 +230,8 @@ static void test_buttons(void)
     reset_board();
     button[0].btn_command = count_command;
     command_calls = 0U;
-    point(0U, 1U, 10U, 10U); point(1U, 0U, 300U, 200U); report(2U);
+    point(0U, 1U, 10U, 10U); report(1U);
+    point(1U, 0U, 300U, 200U); report(2U);
     point(0U, 1U, 10U, 10U); report(1U); /* drawing finger up */
     assert(command_calls == 0U && button[0].touch_flag == 1U);
     report(0U);
@@ -426,10 +427,10 @@ static void test_field_calibration(void)
     assert(GTP_MapCoordinates(0U, 240U, &x, &y) && abs(x - (int32_t)i) <= 2);
 
     /* A centre contact being split into two IDs must no longer reject a fifth
-     * calibration point. Keep both records for diagnosis, without merging IDs. */
+     * calibration point. Keep both raw records for diagnosis, but only one drawing pointer. */
     point(0U, 0U, 779U, 247U); report(1U);
     point(1U, 1U, 64U, 245U); report(2U);
-    assert(g_gtp_active_mask == 3U && g_cal_active == 0U);
+    assert(g_gtp_active_mask == 1U && g_cal_active == 0U);
     report(0U);
     assert(GTP_CalibrationIsReady() && g_gtp_active_mask == 0U);
     GTP_IRQ_Disable();
@@ -445,201 +446,167 @@ static void seam_board(void)
     assert(GTP_CalibrationIsReady() && g_cal_wrap_axis == 1U);
 }
 
-static void test_seam_join(void)
+static void timed_report(unsigned ms, uint8_t count)
 {
-    /* Exact raw X/Y/size triples from the five supplied single-finger taps. */
-    static const uint16_t samples[5][6] = {
-        {64,263,19,786,272,33}, {64,244,11,778,254,40},
-        {64,249,12,776,259,45}, {64,264,13,776,275,45},
-        {64,268,18,781,278,46}
-    };
-    static const int32_t mapped[5][4] = {
-        {363,214,442,204}, {363,232,450,221}, {363,227,452,216},
-        {363,213,452,201}, {362,210,447,199}
-    };
-    static const int32_t fused[5][2] = {
-        {413,208}, {431,223}, {433,218}, {432,204}, {423,202}
-    };
-    unsigned i, x, y, before;
-    int32_t ax, ay, bx, by, expected_x, expected_y;
-    seam_board();
-    for(i = 0U; i < 5U; i++)
-    {
-        const uint16_t *p = samples[i];
-        uint16_t total = p[2] + p[5];
-        GTP_MapCoordinates(p[0], p[1], &ax, &ay);
-        GTP_MapCoordinates(p[3], p[4], &bx, &by);
-        expected_x = (ax * p[2] + bx * p[5] + total / 2U) / total;
-        expected_y = (ay * p[2] + by * p[5] + total / 2U) / total;
-        sized_point(0U, 0U, p[0], p[1], p[2]);
-        sized_point(1U, 1U, p[3], p[4], p[5]);
-        before = g_gtp_join_count;
-        advance(100U); report(2U);
-        assert(g_gtp_join_count == before + 1U && g_gtp_active_mask == 1U);
-        assert(pre_x[0] == expected_x && pre_y[0] == expected_y);
-        assert(pre_x[1] == -1 && g_gtp_hw_to_id[0] == 0 && g_gtp_hw_to_id[1] == 0);
-        assert(pixels[expected_y * 800U + expected_x] == CL_BLACK);
-        report(0U);
-        assert(g_gtp_active_mask == 0U && g_gtp_hw_to_id[0] == -1 && g_gtp_hw_to_id[1] == -1);
-    }
-    /* Also reproduce the supplied MAP coordinates exactly: their current
-     * calibration differs slightly from the synthetic board used above. */
-    for(i = 0U; i < 5U; i++)
-    {
-        uint8_t buffer[18] = {0x81U,0x4FU}, ids[2] = {0U,1U}, continuing;
-        int32_t mx[2] = {mapped[i][0], mapped[i][2]};
-        int32_t my[2] = {mapped[i][1], mapped[i][3]};
-        const uint16_t *p = samples[i];
-        sized_point(0U, 0U, p[0], p[1], p[2]);
-        sized_point(1U, 1U, p[3], p[4], p[5]);
-        memcpy(buffer + 2U, registers + 0x814FU, 16U);
-        assert(GTP_PrepareContacts(buffer, 2U, ids, mx, my, &continuing, 0U) == 1U);
-        assert(continuing == 0U && mx[0] == fused[i][0] && my[0] == fused[i][1]);
-        GTP_CancelContacts();
-    }
-    /* A real stroke crosses 1 -> 2 -> 1 hardware records in each direction.
-     * The other hardware ID survives, but every canvas pixel stays connected. */
-    for(i = 0U; i < 2U; i++)
-    {
-        reset_board(); Palette_Init(5U);
-        for(x = 0U; x < 2U; x++)
-        {
-            if(i == 0U) sized_point(0U, 0U, 80U - x * 16U, 239U, 20U);
-            else sized_point(0U, 1U, 752U + x * 28U, 239U, 40U);
-            report(1U);
-        }
-        sized_point(0U, 1U, 780U, 239U, 40U); /* reverse register ordering */
-        sized_point(1U, 0U, 64U, 239U, 20U); report(2U);
-        assert(g_gtp_active_mask == (i == 0U ? 1U : 2U));
-        if(i == 0U) sized_point(0U, 1U, 780U, 239U, 40U);
-        else sized_point(0U, 0U, 64U, 239U, 20U);
-        report(1U);
-        if(i == 0U) sized_point(0U, 1U, 752U, 239U, 40U);
-        else sized_point(0U, 0U, 80U, 239U, 20U);
-        report(1U); report(0U);
-        for(x = 335U; x <= 419U; x++) assert(pixels[240U * 800U + x] == CL_BLACK);
-    }
-    /* An unrelated finger may coexist with one joined contact. New hardware
-     * IDs must receive a free logical slot when the old number is aliased. */
-    reset_board(); Palette_Init(5U);
-    sized_point(0U, 0U, 64U, 239U, 20U);
-    sized_point(1U, 1U, 780U, 239U, 40U);
-    sized_point(2U, 3U, 550U, 100U, 30U); report(3U);
-    assert(g_gtp_active_mask == 9U && g_gtp_hw_to_id[3] == 3);
-    sized_point(0U, 1U, 750U, 239U, 40U); report(1U);
-    assert(g_gtp_active_mask == 1U && g_gtp_hw_to_id[1] == 0);
-    sized_point(1U, 0U, 550U, 100U, 30U); report(2U);
-    assert(g_gtp_active_mask == 3U && g_gtp_hw_to_id[1] == 0 && g_gtp_hw_to_id[0] == 1);
-    report(0U);
-
-    /* Two previously independent fingers are never fused when they later
-     * converge on the seam; vertical separation also rules out a candidate. */
-    sized_point(0U, 0U, 120U, 239U, 20U);
-    sized_point(1U, 1U, 680U, 239U, 40U); report(2U);
-    before = g_gtp_join_count;
-    sized_point(0U, 0U, 64U, 239U, 20U);
-    sized_point(1U, 1U, 780U, 239U, 40U); report(2U);
-    assert(g_gtp_active_mask == 3U && g_gtp_join_count == before);
-    report(0U);
-    sized_point(0U, 0U, 64U, 200U, 20U);
-    sized_point(1U, 1U, 780U, 260U, 40U); report(2U);
-    assert(g_gtp_active_mask == 3U && g_gtp_join_count == before);
-    report(0U);
-    /* More than one possible partner: do not guess which pair is split. */
-    sized_point(0U, 0U, 64U, 239U, 20U);
-    sized_point(1U, 1U, 780U, 239U, 40U);
-    sized_point(2U, 2U, 776U, 245U, 30U); report(3U);
-    assert(g_gtp_active_mask == 7U && g_gtp_join_count == before);
-    report(0U);
-
-    /* A joined contact separates: only one fragment keeps its old trail. */
-    sized_point(0U, 0U, 64U, 239U, 20U);
-    sized_point(1U, 1U, 780U, 239U, 40U); report(2U);
-    sized_point(0U, 0U, 64U, 180U, 20U);
-    sized_point(1U, 1U, 780U, 239U, 40U); report(2U);
-    assert(g_gtp_active_mask == 3U && g_gtp_hw_to_id[0] != g_gtp_hw_to_id[1]);
-    report(0U);
-
-    /* Frame cancellation discards all aliases; a later tap is a new stroke. */
-    sized_point(0U, 0U, 64U, 239U, 20U);
-    sized_point(1U, 1U, 780U, 239U, 40U); report(2U);
-    fail_ack = 1U; report(2U); fail_ack = 0U;
-    assert(g_gtp_active_mask == 0U);
-    for(i = 0U; i < 5U; i++) assert(g_gtp_hw_to_id[i] == -1);
-    report(2U); advance(200U);
-    assert(g_gtp_active_mask == 0U && g_gtp_hw_to_id[1] == -1);
-    report(0U);
-
-    /* Release a logical slot before reusing it for a new, unrelated hardware ID. */
-    reset_board(); Palette_Init(5U);
-    sized_point(0U, 0U, 64U, 239U, 20U);
-    sized_point(1U, 1U, 780U, 239U, 40U); report(2U);
-    sized_point(0U, 1U, 780U, 239U, 40U); report(1U);
-    sized_point(0U, 0U, 500U, 80U, 30U); report(1U);
-    assert(pre_x[0] == 699 && pre_y[0] == 399);
-    for(y = 290U; y < 350U; y++)
-        for(x = 470U; x < 640U; x++) assert(pixels[y * 800U + x] == CL_WHITE);
-    report(0U);
-    GTP_IRQ_Disable();
-    puts("PASS: five field split taps, bidirectional seam strokes, ID handoff, independent fingers, alias cancellation");
+    unsigned i;
+    for(i = 0U; i < ms; i += 10U) GTP_Tick10ms();
+    report(count);
 }
-static void test_seam_entry(void)
-{
-    unsigned direction, x, y;
-    int32_t start_x, start_y, end_x, end_y;
-    seam_board();
-    for(direction = 0U; direction < 2U; direction++)
-    {
-        unsigned anchor = direction == 0U ? 0U : 1U;
-        reset_board(); Palette_Init(5U);
-        /* The extra lead-in frame models the unlogged birth between 100 ms
-         * traces. In SEAM-4 it registers a second independent ID too early. */
-        if(direction == 0U) sized_point(0U, 0U, 117U, 332U, 26U);
-        else sized_point(0U, 1U, 731U, 336U, 11U);
-        report(1U);
-        sized_point(0U, 0U, 98U, 332U, 26U);
-        sized_point(1U, 1U, 798U, 336U, 11U); report(2U);
-        /* These two raw records are the user's printed crossing frame. */
-        sized_point(0U, 0U, 78U, 332U, 26U);
-        sized_point(1U, 1U, 798U, 336U, 11U); report(2U);
-        assert(g_gtp_active_mask == (1U << anchor));
-        assert(g_gtp_hw_to_id[0] == (int8_t)anchor && g_gtp_hw_to_id[1] == (int8_t)anchor);
-        if(direction == 0U) sized_point(0U, 1U, 795U, 336U, 11U);
-        else sized_point(0U, 0U, 78U, 332U, 26U);
-        report(1U);
-        assert(g_gtp_active_mask == (1U << anchor));
-        report(0U);
-    }
-    /* At a constant Y, validate every pixel across the former white strip. */
-    reset_board(); Palette_Init(5U);
-    GTP_MapCoordinates(117U, 332U, &start_x, &start_y);
-    GTP_MapCoordinates(795U, 332U, &end_x, &end_y);
-    sized_point(0U, 0U, 117U, 332U, 26U); report(1U);
-    sized_point(0U, 0U, 98U, 332U, 26U);
-    sized_point(1U, 1U, 798U, 332U, 11U); report(2U);
-    sized_point(0U, 0U, 78U, 332U, 26U); report(2U);
-    sized_point(0U, 1U, 795U, 332U, 11U); report(1U); report(0U);
-    assert(start_y == end_y);
-    for(x = start_x; x <= (unsigned)end_x; x++)
-        assert(pixels[start_y * 800U + x] == CL_BLACK);
 
-    /* An initially weak fragment must not become permanently independent. */
-    reset_board(); Palette_Init(5U);
-    sized_point(0U, 1U, 780U, 239U, 40U); report(1U);
-    sized_point(1U, 0U, 64U, 239U, 1U); report(2U);
-    sized_point(1U, 0U, 64U, 239U, 20U); report(2U);
-    assert(g_gtp_active_mask == 2U && g_gtp_hw_to_id[0] == 1);
+static void test_single_field_path(void)
+{
+    unsigned before, i, x, y;
+    static const uint16_t vertical[][3] = {
+        {81,454,454}, {81,411,395}, {82,270,263}, {82,182,176},
+        {82,113,105}, {81,68,58}, {83,37,37}
+    };
+    seam_board(); reset_board(); Palette_Init(5U);
+    /* Actual raw coordinates from the rising-screen-Y diagonal. Timing is
+     * modeled; the field trace did not contain every intermediate frame. */
+    sized_point(0U, 0U, 142U, 419U, 27U); timed_report(10U, 1U);
+    before = draw_calls;
+    sized_point(0U, 0U, 94U, 378U, 27U); timed_report(20U, 1U);
+    assert(draw_calls == before); /* Do not ink an unreliable seam fragment. */
+    sized_point(0U, 0U, 86U, 367U, 27U);
+    sized_point(1U, 1U, 798U, 352U, 12U); timed_report(10U, 2U);
+    sized_point(0U, 0U, 65U, 334U, 27U); timed_report(20U, 2U);
+    sized_point(0U, 1U, 797U, 350U, 12U); timed_report(10U, 1U);
+    assert(draw_calls == before && g_gtp_active_mask == 1U);
+    sized_point(0U, 1U, 717U, 283U, 12U); timed_report(20U, 1U);
+    assert(g_gtp_active_mask == 1U && pixels[139U * 800U + 355U] == CL_WHITE);
+    for(x = 257U; x <= 482U; x++)
+    {
+        unsigned found = 0U;
+        for(y = 60U; y <= 196U; y++) found |= pixels[y * 800U + x] == CL_BLACK;
+        assert(found);
+    }
     report(0U);
 
-    /* A true release stays a release. Do not connect separate taps merely
-     * because they occur on opposite sides of the seam. */
     reset_board(); Palette_Init(5U);
-    sized_point(0U, 0U, 64U, 239U, 20U); report(1U); report(0U);
-    sized_point(0U, 1U, 780U, 239U, 40U); report(1U); report(0U);
-    for(y = 238U; y <= 242U; y++)
-        for(x = 350U; x < 405U; x++) assert(pixels[y * 800U + x] == CL_WHITE);
+    sized_point(0U, 0U, 81U, 454U, 28U); timed_report(10U, 1U);
+    for(i = 0U; i < sizeof(vertical) / sizeof(vertical[0]); i++)
+    {
+        sized_point(0U, 1U, 798U, vertical[i][2], 7U); /* shuffled slots */
+        sized_point(1U, 0U, vertical[i][0], vertical[i][1], 28U); timed_report(20U, 2U);
+        assert(g_gtp_active_mask == 1U);
+    }
+    sized_point(0U, 0U, 83U, 12U, 28U); timed_report(10U, 1U); report(0U);
+    for(y = 25U; y <= 467U; y++)
+    {
+        unsigned found = 0U;
+        for(x = 313U; x <= 323U; x++) found |= pixels[y * 800U + x] == CL_BLACK;
+        assert(found);
+        for(x = 380U; x <= 450U; x++) assert(pixels[y * 800U + x] == CL_WHITE);
+    }
     GTP_IRQ_Disable();
-    puts("PASS: early fragment birth, delayed seam fusion, original stroke owner, weak fragment, separate taps");
+    puts("PASS: single field vertical stroke, stationary ghost, deferred diagonal bridge without backtracking");
+}
+
+static void single_pair(uint16_t lx, uint16_t ly, uint16_t hx, uint16_t hy, unsigned flip)
+{
+    sized_point(0U, 1U, hx, flip ? 479U - hy : hy, 19U);
+    sized_point(1U, 0U, lx, flip ? 479U - ly : ly, 20U);
+    timed_report(20U, 2U);
+}
+
+static void test_single_lifecycle(void)
+{
+    unsigned reverse, flip, x, y, kind;
+    seam_board();
+    /* Reverse both the stroke and its Y direction. The frozen intermediate
+     * coordinates must contribute no kink or second branch to the bridge. */
+    for(reverse = 0U; reverse < 2U; reverse++)
+        for(flip = 0U; flip < 2U; flip++)
+        {
+            int32_t ax, ay, bx, by;
+            reset_board(); Palette_Init(5U); brush.shape = LINE_SINGLE_PIXCEL;
+            GTP_MapCoordinates(176U, flip ? 436U : 43U, &ax, &ay);
+            GTP_MapCoordinates(693U, flip ? 236U : 243U, &bx, &by);
+            if(!reverse)
+            {
+                sized_point(0U, 0U, 176U, flip ? 436U : 43U, 20U); timed_report(10U, 1U);
+                single_pair(93U, 134U, 793U, 155U, flip);
+                single_pair(74U, 160U, 790U, 165U, flip);
+                sized_point(0U, 1U, 772U, flip ? 290U : 189U, 19U); timed_report(20U, 1U);
+                sized_point(0U, 1U, 693U, flip ? 236U : 243U, 19U); timed_report(20U, 1U);
+            }
+            else
+            {
+                sized_point(0U, 1U, 693U, flip ? 236U : 243U, 19U); timed_report(10U, 1U);
+                sized_point(0U, 1U, 772U, flip ? 290U : 189U, 19U); timed_report(20U, 1U);
+                single_pair(74U, 160U, 790U, 165U, flip);
+                single_pair(93U, 134U, 793U, 155U, flip);
+                sized_point(0U, 0U, 176U, flip ? 436U : 43U, 20U); timed_report(20U, 1U);
+            }
+            assert(g_gtp_active_mask == 1U);
+            report(0U);
+            for(x = ax; x <= (unsigned)bx; x++)
+            {
+                unsigned found = 0U;
+                for(y = 0U; y < 480U; y++) if(pixels[y * 800U + x] == CL_BLACK)
+                {
+                    found = 1U;
+                    assert(abs(((int)y - ay) * (bx - ax) - ((int)x - ax) * (by - ay)) <=
+                           abs(bx - ax) + abs(by - ay));
+                }
+                assert(found);
+            }
+        }
+
+    /* No overlap frame at high speed: reliable endpoints still join. */
+    reset_board(); Palette_Init(5U);
+    sized_point(0U, 0U, 210U, 239U, 30U); timed_report(10U, 1U);
+    sized_point(0U, 0U, 150U, 239U, 30U); timed_report(10U, 1U);
+    sized_point(0U, 1U, 650U, 239U, 30U); timed_report(20U, 1U);
+    assert(g_gtp_active_mask == 1U);
+    for(x = 249U; x <= 549U; x++) assert(pixels[240U * 800U + x] == CL_BLACK);
+    report(0U);
+
+    /* If the old fragment freezes, a known fragment reaching the far side
+     * can finish the bridge even when both hardware IDs remain present. */
+    reset_board(); Palette_Init(5U);
+    sized_point(0U, 0U, 160U, 239U, 30U); timed_report(10U, 1U);
+    single_pair(81U, 239U, 798U, 239U, 0U);
+    single_pair(81U, 239U, 700U, 239U, 0U);
+    assert(g_gtp_single.hw == 1U && !g_gtp_single.bridge && pre_x[0] == 499);
+    report(0U);
+    reset_board(); Palette_Init(5U);
+    sized_point(0U, 0U, 81U, 239U, 30U); timed_report(10U, 1U);
+    single_pair(81U, 239U, 798U, 239U, 0U);
+    single_pair(81U, 239U, 700U, 239U, 0U);
+    assert(g_gtp_single.hw == 1U && pre_x[0] == 499);
+    report(0U);
+
+    /* Cancelled pending ink cannot leak into another gesture. */
+    for(kind = 0U; kind < 4U; kind++)
+    {
+        reset_board(); Palette_Init(5U);
+        sized_point(0U, 0U, 160U, 239U, 30U); timed_report(10U, 1U);
+        sized_point(0U, 0U, 81U, 239U, 30U); timed_report(10U, 1U);
+        assert(g_gtp_single.bridge);
+        if(kind == 0U) report(0U);
+        if(kind == 1U) { fail_ack = 1U; report(1U); fail_ack = 0U; }
+        if(kind == 2U) advance(200U);
+        if(kind == 3U) { GTP_IRQ_Disable(); GTP_IRQ_Enable(); }
+        sized_point(0U, 1U, 650U, 239U, 30U); timed_report(10U, 1U);
+        assert(pixels[240U * 800U + 400U] == CL_WHITE);
+        report(0U);
+    }
+
+    /* A vertical stroke in the band stays at one position on ID handoff;
+     * leaving the band must restore calibrated absolute coordinates. */
+    reset_board(); Palette_Init(5U);
+    sized_point(0U, 0U, 81U, 400U, 28U); timed_report(10U, 1U);
+    single_pair(81U, 380U, 798U, 380U, 0U);
+    sized_point(0U, 1U, 798U, 370U, 7U); timed_report(20U, 1U);
+    assert(pre_x[0] == 318);
+    sized_point(0U, 1U, 798U, 340U, 7U); timed_report(20U, 1U);
+    assert(pre_x[0] == 318);
+    sized_point(0U, 1U, 700U, 300U, 7U); timed_report(20U, 1U);
+    assert(pre_x[0] == 499 && pre_y[0] == 179);
+    report(0U);
+    GTP_IRQ_Disable();
+    puts("PASS: four diagonal bridges, fast handoff, frozen primary, pending cancellation, vertical handoff");
 }
 
 int main(void)
@@ -649,13 +616,13 @@ int main(void)
     registers[0x804AU] = 0xE0U; registers[0x804BU] = 1U;
     registers[0x804DU] = 1U;
     assert(GTP_Init_Panel() == 0);
-    test_geometry(); test_frames(); test_buttons(); test_brushes(); test_calibration(); test_field_calibration(); test_seam_join(); test_seam_entry();
+    test_geometry(); test_frames(); test_buttons(); test_brushes(); test_calibration(); test_field_calibration(); test_single_field_path(); test_single_lifecycle();
     bus_addr = 0x28U;
     assert(GTP_Init_Panel() == 0 && g_gtp_address == 0x28U);
     fail_read = 1U;
     assert(GTP_Init_Panel() != 0);
     GTP_IRQ_Enable();
     assert(g_gtp_enabled == 0U);
-    puts("PASS: geometry, frame handshake, multi-touch IDs, failures, timeout, buttons, brush bounds, measured calibration, seam continuity, address probe");
+    puts("PASS: geometry, frame handshake, single pointer, complete-frame validation, failures, timeout, buttons, brush bounds, measured calibration, seam continuity, address probe");
     return 0;
 }

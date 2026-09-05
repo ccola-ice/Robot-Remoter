@@ -165,14 +165,18 @@ static uint8_t g_gtp_enabled;
 static uint8_t g_gtp_address = GTP_ADDRESS;
 static uint8_t g_gtp_button_mask;
 static int8_t g_gtp_button_owner = -1;
-/* Several hardware IDs may describe one logical contact at this glass seam.
- * Keep that contact stable when either hardware fragment disappears. */
-static int8_t g_gtp_hw_to_id[GTP_MAX_TOUCH] = {-1, -1, -1, -1, -1};
-static uint32_t g_gtp_join_count;
-/* A second fragment may be born before the strict fusion geometry is met.
- * Remember that origin while the two hardware records remain nearby. */
-static uint8_t g_gtp_seam_birth_mask;
-static uint8_t g_gtp_seam_anchor_hw;
+/* The product uses one drawing pointer. Additional hardware records may
+ * be seam fragments; they never create a second stroke or toolbar owner. */
+typedef struct
+{
+    uint8_t engaged, blocked, hw, aliases, bridge, inside_start, entry_hw;
+    uint16_t raw_x, start_raw_x;
+    int16_t last_x, last_y, dx, dy, fallback_x, fallback_y, offset_x, offset_y;
+    uint32_t motion_ms, bridge_ms;
+} GTP_SinglePointer;
+static GTP_SinglePointer g_gtp_single;
+static uint8_t g_gtp_previous_hw_mask;
+static uint32_t g_gtp_handoff_count, g_gtp_bridge_count;
 #define GTP_RELEASE_TIMEOUT_MS 200U
 static uint8_t g_gtp_active_mask = 0U;
 static uint16_t g_gtp_raw_width = GTP_MAX_WIDTH;
@@ -635,8 +639,8 @@ static void GTP_CancelContacts(void)
     if(g_gtp_button_owner >= 0) Touch_Button_Cancel();
     g_gtp_button_owner = -1;
     g_gtp_button_mask = 0U;
-    memset(g_gtp_hw_to_id, 0xFF, sizeof(g_gtp_hw_to_id));
-    g_gtp_seam_birth_mask = 0U;
+    memset(&g_gtp_single, 0, sizeof(g_gtp_single));
+    g_gtp_previous_hw_mask = 0U;
     g_gtp_active_mask = 0U;
     g_cal_pressed = 0U;
     g_cal_samples = 0U;
@@ -671,7 +675,7 @@ void GTP_IRQ_Enable(void)
     g_gtp_enabled = 1U;
     g_gtp_health_ms = g_gtp_ticks_ms;
     g_gtp_trace_ms = g_gtp_ticks_ms - 100U;
-    GTP_INFO("PAGE enabled: poll=10ms, RAW/MAP trace=100ms, health=2s");
+    GTP_INFO("PAGE enabled: single pointer, poll=10ms, RAW/MAP=100ms+ID-change, health=2s");
     I2C_GTP_IRQEnable();
     g_gtp_irq_pending = 1U;
 }
@@ -800,205 +804,199 @@ static uint8_t GTP_MapCoordinates(uint16_t raw_x, uint16_t raw_y,
 
 
 
-/* Board-specific geometry at the raw X wrap. The broad window only records
- * a fragment's origin; the strict window still decides whether to fuse it. */
-static uint8_t GTP_SeamGeometry(const uint8_t *a, const uint8_t *b,
-                               int32_t ax, int32_t ay, int32_t bx, int32_t by,
-                               uint8_t broad)
+/* The field reports become unreliable near raw X=0: the other fragment
+ * may remain frozen while the original moves. Never average those positions.
+ * A crossing from outside this band is drawn only once a reliable exit is
+ * available. A stroke beginning in the band follows its original fragment. */
+static uint8_t GTP_SingleSeamEnabled(void)
 {
-    uint16_t x1, y1, x2, y2, size1, size2, low, high;
-    int8_t old1 = g_gtp_hw_to_id[a[0]], old2 = g_gtp_hw_to_id[b[0]];
-    if(!GTP_CalibrationIsReady() || g_cal_wrap_axis != 1U ||
-       g_cal_wrap_period != 800U || g_gtp_raw_height != 480U) return 0U;
-    if(!Palette_IsCanvasPoint(ax, ay) || !Palette_IsCanvasPoint(bx, by)) return 0U;
-    if((old1 >= 0 && (g_gtp_button_mask & (1U << old1))) ||
-       (old2 >= 0 && (g_gtp_button_mask & (1U << old2)))) return 0U;
-    x1 = (uint16_t)a[1] | ((uint16_t)a[2] << 8);
-    y1 = (uint16_t)a[3] | ((uint16_t)a[4] << 8);
-    x2 = (uint16_t)b[1] | ((uint16_t)b[2] << 8);
-    y2 = (uint16_t)b[3] | ((uint16_t)b[4] << 8);
-    size1 = (uint16_t)a[5] | ((uint16_t)a[6] << 8);
-    size2 = (uint16_t)b[5] | ((uint16_t)b[6] << 8);
-    low = x1 < x2 ? x1 : x2; high = x1 > x2 ? x1 : x2;
-    if(abs((int)y1 - y2) > 24 || abs(ay - by) > 32 ||
-       size1 > 128U || size2 > 128U || high >= 800U) return 0U;
-    if(broad)
-    {
-        return low >= 32U && low <= 160U && high >= 720U &&
-               low + 800U - high <= 176U && size1 + size2 >= 4U &&
-               abs(ax - bx) >= 48 && abs(ax - bx) <= 192;
-    }
-    return low >= 48U && low <= 80U && high >= 752U &&
-           low + 800U - high <= 112U && size1 >= 4U && size2 >= 4U &&
-           abs(ax - bx) >= 48 && abs(ax - bx) <= 128;
+    return GTP_CalibrationIsReady() && g_cal_wrap_axis == 1U &&
+           g_cal_wrap_period == 800U && g_gtp_raw_height == 480U;
 }
 
-static void GTP_ObserveSeamOrigin(const uint8_t *points, uint8_t count,
-                                 const int32_t *x, const int32_t *y)
+static uint8_t GTP_SingleInBand(uint16_t raw_x)
 {
-    uint8_t i, j, candidates = 0U, a_slot = 0U, b_slot = 0U;
-    for(i = 0U; i < count; i++)
-        for(j = i + 1U; j < count; j++)
-            if(GTP_SeamGeometry(&points[2U + 8U * i], &points[2U + 8U * j],
-                                x[i], y[i], x[j], y[j], 1U))
-            { candidates++; a_slot = i; b_slot = j; }
-    if(candidates == 1U)
+    return GTP_SingleSeamEnabled() && (raw_x <= 128U || raw_x >= 752U);
+}
+
+static uint8_t GTP_SingleAcross(uint16_t a, uint16_t b, uint16_t limit)
+{
+    uint16_t low = a < b ? a : b, high = a > b ? a : b;
+    return GTP_SingleSeamEnabled() && low <= 320U && high >= 544U &&
+           high < 800U && low + 800U - high <= limit;
+}
+
+static uint8_t GTP_SingleCanTransfer(uint8_t hw, uint16_t raw_x,
+                                   int32_t x, int32_t y, uint32_t gap)
+{
+    int32_t dx = x - g_gtp_single.last_x, dy = y - g_gtp_single.last_y;
+    int32_t vx = g_gtp_single.dx, vy = g_gtp_single.dy;
+    if(gap > 80U || g_gtp_button_mask ||
+       !Palette_IsCanvasPoint(g_gtp_single.last_x, g_gtp_single.last_y) ||
+       !Palette_IsCanvasPoint(x, y) ||
+       !GTP_SingleAcross(g_gtp_single.raw_x, raw_x, 320U) ||
+       dx * dx + dy * dy > 400L * 400L) return 0U;
+    if(g_gtp_single.aliases & (1U << hw)) return 1U;
+    return (uint32_t)(g_gtp_last_frame_ms - g_gtp_single.motion_ms) <= 80U &&
+           abs(vx) >= 2 && dx * vx > 0 && dx * vx + dy * vy > 0 &&
+           abs(dx * vy - dy * vx) <= 32 * (abs(vx) + abs(vy)) + 128 * abs(vy);
+}
+
+static void GTP_SingleHold(uint8_t hw)
+{
+    g_gtp_single.bridge = 1U;
+    g_gtp_single.entry_hw = hw;
+    g_gtp_single.bridge_ms = g_gtp_last_frame_ms;
+    g_gtp_single.fallback_x = pre_x[0];
+    g_gtp_single.fallback_y = pre_y[0];
+    GTP_INFO("BRIDGE hold hw=%u from=(%d,%d)", hw, pre_x[0], pre_y[0]);
+}
+
+static void GTP_ProcessSingleFrame(const uint8_t *points, uint8_t count,
+                                   const uint8_t *ids, const int32_t *x, const int32_t *y,
+                                   uint8_t trace, uint32_t gap)
+{
+    uint16_t raw[GTP_MAX_TOUCH];
+    uint8_t i, slot = 0xFFU, mask = 0U, switched = 0U;
+    int32_t pen_x, pen_y;
+    if(count == 0U)
     {
-        const uint8_t *a = &points[2U + 8U * a_slot];
-        const uint8_t *b = &points[2U + 8U * b_slot];
-        uint8_t members = (uint8_t)((1U << a[0]) | (1U << b[0]));
-        int8_t old1 = g_gtp_hw_to_id[a[0]], old2 = g_gtp_hw_to_id[b[0]];
-        if(g_gtp_seam_birth_mask == members) return;
-        /* Do not reinterpret two established independent fingers as fragments.
-         * A remembered birth is the evidence that permits later fusion. */
-        if(old1 < 0 || old2 < 0 || old1 == old2)
+        /* A real release finishes only the incoming fragment's known end,
+         * never a stale coordinate from the far-side fragment. */
+        if(g_gtp_single.bridge && g_gtp_active_mask)
+            GTP_Touch_Down(0, g_gtp_single.fallback_x, g_gtp_single.fallback_y, 0);
+        if(g_gtp_active_mask) GTP_Touch_Up(0);
+        GTP_CancelContacts();
+        return;
+    }
+    if(g_gtp_single.blocked) return; /* Wait for all fingers to lift. */
+    for(i = 0U; i < count; i++)
+    {
+        const uint8_t *p = &points[2U + 8U * i];
+        raw[i] = (uint16_t)p[1] | ((uint16_t)p[2] << 8);
+        mask |= (uint8_t)(1U << ids[i]);
+        if(g_gtp_single.engaged && ids[i] == g_gtp_single.hw) slot = i;
+    }
+    g_gtp_single.aliases &= mask;
+    if(!g_gtp_single.engaged)
+    {
+        slot = 0U;
+        for(i = 1U; i < count; i++) if(ids[i] < ids[slot]) slot = i;
+        g_gtp_single.engaged = 1U;
+        g_gtp_single.hw = ids[slot];
+        g_gtp_single.inside_start = GTP_SingleInBand(raw[slot]);
+        g_gtp_single.start_raw_x = raw[slot];
+    }
+    else if(slot == 0xFFU)
+    {
+        uint8_t candidates = 0U;
+        for(i = 0U; i < count; i++)
+            if(GTP_SingleCanTransfer(ids[i], raw[i], x[i], y[i], gap))
+            { slot = i; candidates++; }
+        if(candidates != 1U)
         {
-            g_gtp_seam_birth_mask = members;
-            if(old1 >= 0) g_gtp_seam_anchor_hw = a[0];
-            else if(old2 >= 0) g_gtp_seam_anchor_hw = b[0];
-            else
-            {
-                uint16_t wa = (uint16_t)a[5] | ((uint16_t)a[6] << 8);
-                uint16_t wb = (uint16_t)b[5] | ((uint16_t)b[6] << 8);
-                g_gtp_seam_anchor_hw = wa >= wb ? a[0] : b[0];
-            }
-            GTP_INFO("SEAM birth hw=%02X anchor-hw=%u", members, g_gtp_seam_anchor_hw);
+            /* An ignored real finger cannot take over a released drawing
+             * finger or toolbar press. A valid toolbar release still works. */
+            if(g_gtp_button_mask) GTP_Touch_Up(0);
+            GTP_CancelContacts();
+            g_gtp_single.blocked = 1U;
+            GTP_INFO("PEN blocked: primary gone, candidates=%u", candidates);
             return;
         }
+        switched = 1U;
     }
-    /* Liftoff, a third possible partner, or independent vertical motion ends
-     * this evidence. Never bridge separate taps using a grace period. */
-    g_gtp_seam_birth_mask = 0U;
-}
-
-static uint8_t GTP_IsSeamPair(const uint8_t *a, const uint8_t *b,
-                             int32_t ax, int32_t ay, int32_t bx, int32_t by)
-{
-    int8_t old1 = g_gtp_hw_to_id[a[0]], old2 = g_gtp_hw_to_id[b[0]];
-    uint8_t members = (uint8_t)((1U << a[0]) | (1U << b[0]));
-    if(!GTP_SeamGeometry(a, b, ax, ay, bx, by, 0U)) return 0U;
-    if(old1 >= 0 && old2 >= 0 && old1 != old2 && g_gtp_seam_birth_mask != members)
-        return 0U;
-    return 1U;
-}
-
-static uint8_t GTP_PrepareContacts(const uint8_t *points, uint8_t count,
-                                  uint8_t *ids, int32_t *x, int32_t *y,
-                                  uint8_t *continuing_mask, uint8_t trace)
-{
-    uint8_t members[GTP_MAX_TOUCH], owners[GTP_MAX_TOUCH];
-    uint8_t i, j, hw, logical, used = 0U, pairs = 0U;
-    uint8_t pair_a = 0U, pair_b = 0U, joined_members = 0U;
-    uint8_t first_join = 0U;
-    int8_t join_owner = -1;
-    GTP_ObserveSeamOrigin(points, count, x, y);
+    /* Remember only plausible seam fragments while the original is present.
+     * The primary is retained even if its size is smaller or slots reorder. */
     for(i = 0U; i < count; i++)
+        if(i != slot && GTP_SingleAcross(raw[slot], raw[i], 192U) &&
+           abs(x[i] - x[slot]) <= 200 && abs(y[i] - y[slot]) <= 96 &&
+           Palette_IsCanvasPoint(x[slot], y[slot]) && Palette_IsCanvasPoint(x[i], y[i]))
+            g_gtp_single.aliases |= (uint8_t)(1U << ids[i]);
+    /* An identified fragment reaching reliable coordinates can finish a
+     * pending crossing even while the old fragment remains frozen. */
+    if(g_gtp_active_mask && (g_gtp_single.bridge || g_gtp_single.inside_start) &&
+       GTP_SingleInBand(raw[slot]))
     {
-        members[i] = (uint8_t)(1U << ids[i]);
-        for(j = i + 1U; j < count; j++)
-        {
-            if(GTP_IsSeamPair(&points[2U + 8U * i], &points[2U + 8U * j],
-                             x[i], y[i], x[j], y[j]))
-            {
-                pair_a = i; pair_b = j; pairs++;
-            }
-            else if(trace && GTP_SeamGeometry(&points[2U + 8U * i], &points[2U + 8U * j],
-                                              x[i], y[i], x[j], y[j], 0U))
-            {
-                GTP_INFO("SEAM separate hw=%02X owners=%d/%d birth=%02X",
-                         (1U << ids[i]) | (1U << ids[j]),
-                         g_gtp_hw_to_id[ids[i]], g_gtp_hw_to_id[ids[j]], g_gtp_seam_birth_mask);
-            }
-        }
-    }
-    /* Multiple candidate pairs are ambiguous. Keep the raw contacts separate. */
-    if(pairs == 1U)
-    {
-        const uint8_t *a = &points[2U + 8U * pair_a];
-        const uint8_t *b = &points[2U + 8U * pair_b];
-        uint16_t wa = (uint16_t)a[5] | ((uint16_t)a[6] << 8);
-        uint16_t wb = (uint16_t)b[5] | ((uint16_t)b[6] << 8);
-        uint16_t total = wa + wb;
-        /* Use mapped positions: their centre is continuous at raw 799/0.
-         * A direct arithmetic mean of raw 64 and 786 would select the wrong half.
-         * Size weighting is an estimate of the unsplit position, not pressure. */
-        x[pair_a] = (x[pair_a] * wa + x[pair_b] * wb + total / 2U) / total;
-        y[pair_a] = (y[pair_a] * wa + y[pair_b] * wb + total / 2U) / total;
-        members[pair_a] |= members[pair_b];
-        joined_members = members[pair_a];
-        first_join = g_gtp_hw_to_id[a[0]] < 0 || g_gtp_hw_to_id[b[0]] < 0 ||
-                     g_gtp_hw_to_id[a[0]] != g_gtp_hw_to_id[b[0]];
-        if(g_gtp_seam_birth_mask == joined_members)
-            join_owner = g_gtp_hw_to_id[g_gtp_seam_anchor_hw];
-        g_gtp_join_count++;
-        for(i = pair_b; i + 1U < count; i++)
-        {
-            ids[i] = ids[i + 1U]; members[i] = members[i + 1U];
-            x[i] = x[i + 1U]; y[i] = y[i + 1U];
-        }
-        count--;
-    }
-    memset(owners, 0xFF, sizeof(owners));
-    /* Keep the original stroke when a provisional second record is fused
-     * later, even if that provisional record received a smaller logical ID. */
-    if(join_owner >= 0 && (g_gtp_active_mask & (1U << join_owner)))
-    {
-        owners[pair_a] = (uint8_t)join_owner;
-        used |= (uint8_t)(1U << join_owner);
-    }
-    /* Reserve each continuing logical ID once. If a previously joined pair
-     * separates, the closest fragment keeps the old stroke; the other starts
-     * a new one. No two independent records may share the same logical ID. */
-    for(logical = 0U; logical < GTP_MAX_TOUCH; logical++)
-    {
-        int32_t best_distance = 0x7FFFFFFFL;
-        uint8_t best = 0xFFU;
-        if((g_gtp_active_mask & (1U << logical)) == 0U || (used & (1U << logical))) continue;
+        uint8_t candidate = 0U, candidates = 0U;
         for(i = 0U; i < count; i++)
+            if(i != slot && (g_gtp_single.aliases & (1U << ids[i])) &&
+               !GTP_SingleInBand(raw[i]) && GTP_SingleCanTransfer(ids[i], raw[i], x[i], y[i], gap))
+            { candidate = i; candidates++; }
+        if(candidates == 1U)
         {
-            if(owners[i] != 0xFFU) continue;
-            for(hw = 0U; hw < GTP_MAX_TOUCH; hw++)
-            {
-                if((members[i] & (1U << hw)) && g_gtp_hw_to_id[hw] == logical)
-                {
-                    int32_t dx = x[i] - pre_x[logical], dy = y[i] - pre_y[logical];
-                    int32_t distance = dx * dx + dy * dy;
-                    if(distance < best_distance) { best = i; best_distance = distance; }
-                    break;
-                }
-            }
-        }
-        if(best != 0xFFU)
-        {
-            owners[best] = logical;
-            used |= (uint8_t)(1U << logical);
+            if(!g_gtp_single.bridge) GTP_SingleHold(g_gtp_single.hw);
+            g_gtp_single.inside_start = 0U;
+            slot = candidate; switched = 1U;
         }
     }
-    *continuing_mask = used;
-    for(i = 0U; i < count; i++)
+    if(switched)
     {
-        if(owners[i] == 0xFFU)
+        /* A vertical stroke begun inside the band keeps its position if the
+         * primary vanishes. Use subsequent relative motion, not a second line. */
+        if(g_gtp_single.inside_start && !g_gtp_single.bridge && GTP_SingleInBand(raw[slot]))
         {
-            logical = ids[i]; /* Preserve the hardware ID in the ordinary case. */
-            if(used & (1U << logical))
-                for(logical = 0U; logical < GTP_MAX_TOUCH; logical++)
-                    if((used & (1U << logical)) == 0U) break;
-            owners[i] = logical;
-            used |= (uint8_t)(1U << logical);
+            g_gtp_single.offset_x = pre_x[0] - x[slot];
+            g_gtp_single.offset_y = pre_y[0] - y[slot];
+            g_gtp_single.start_raw_x = raw[slot];
+        }
+        GTP_INFO("HANDOFF hw=%u->%u id=0 dt=%lu", g_gtp_single.hw, ids[slot], (unsigned long)gap);
+        g_gtp_handoff_count++;
+        g_gtp_single.hw = ids[slot];
+    }
+    /* Relative alignment is local to a stroke inside the corrupt band.
+     * Rejoin an absolute point on exit; never retain the offset elsewhere. */
+    if((g_gtp_single.offset_x || g_gtp_single.offset_y) &&
+       !GTP_SingleInBand(raw[slot]) && !g_gtp_single.bridge && g_gtp_active_mask)
+        GTP_SingleHold(g_gtp_single.hw);
+    pen_x = x[slot] + g_gtp_single.offset_x;
+    pen_y = y[slot] + g_gtp_single.offset_y;
+    if((g_gtp_single.offset_x || g_gtp_single.offset_y) && Palette_IsCanvasPoint(x[slot], y[slot]))
+    {
+        if(pen_x < PALETTE_START_X) pen_x = PALETTE_START_X;
+        if(pen_x >= PALETTE_END_X) pen_x = PALETTE_END_X - 1;
+        if(pen_y < PALETTE_START_Y) pen_y = PALETTE_START_Y;
+        if(pen_y >= PALETTE_END_Y) pen_y = PALETTE_END_Y - 1;
+    }
+    if(g_gtp_single.inside_start && abs((int)raw[slot] - g_gtp_single.start_raw_x) >= 16)
+        g_gtp_single.inside_start = 0U;
+    if(g_gtp_active_mask && !g_gtp_button_mask && Palette_IsCanvasPoint(pre_x[0], pre_y[0]) &&
+       Palette_IsCanvasPoint(pen_x, pen_y) && !g_gtp_single.inside_start &&
+       !g_gtp_single.bridge && GTP_SingleInBand(raw[slot])) GTP_SingleHold(g_gtp_single.hw);
+    if(g_gtp_single.bridge)
+    {
+        if(GTP_SingleInBand(raw[slot]))
+        {
+            if(g_gtp_single.hw == g_gtp_single.entry_hw && Palette_IsCanvasPoint(pen_x, pen_y))
+            { g_gtp_single.fallback_x = pen_x; g_gtp_single.fallback_y = pen_y; }
+        }
+        else
+        {
+            GTP_INFO("BRIDGE draw from=(%d,%d) to=(%ld,%ld) wait=%lu",
+                     pre_x[0], pre_y[0], x[slot], y[slot],
+                     (unsigned long)(g_gtp_last_frame_ms - g_gtp_single.bridge_ms));
+            g_gtp_single.bridge = 0U;
+            g_gtp_single.offset_x = g_gtp_single.offset_y = 0;
+            pen_x = x[slot]; pen_y = y[slot];
+            g_gtp_bridge_count++;
         }
     }
-    memset(g_gtp_hw_to_id, 0xFF, sizeof(g_gtp_hw_to_id));
-    for(i = 0U; i < count; i++)
+    if(!g_gtp_single.bridge)
     {
-        ids[i] = owners[i];
-        for(hw = 0U; hw < GTP_MAX_TOUCH; hw++)
-            if(members[i] & (1U << hw)) g_gtp_hw_to_id[hw] = (int8_t)ids[i];
-        if((trace || first_join) && joined_members && members[i] == joined_members)
-            GTP_INFO("JOIN hw=%02X id=%u xy=(%ld,%ld)", members[i], ids[i], x[i], y[i]);
-        else if(trace && members[i] != (1U << ids[i]))
-            GTP_INFO("TRACK hw=%02X id=%u xy=(%ld,%ld)", members[i], ids[i], x[i], y[i]);
+        GTP_Touch_Down(0, pen_x, pen_y, 0);
+        g_gtp_active_mask = 1U;
+        if(trace || switched) GTP_INFO("PEN hw=%u id=0 xy=(%ld,%ld)", ids[slot], pen_x, pen_y);
     }
-    return count;
+    if(!switched && g_gtp_previous_hw_mask & (1U << ids[slot]))
+    {
+        int32_t dx = x[slot] - g_gtp_single.last_x, dy = y[slot] - g_gtp_single.last_y;
+        if(abs(dx) >= 2)
+        {
+            g_gtp_single.dx = dx; g_gtp_single.dy = dy;
+            g_gtp_single.motion_ms = g_gtp_last_frame_ms;
+        }
+    }
+    g_gtp_single.last_x = x[slot]; g_gtp_single.last_y = y[slot];
+    g_gtp_single.raw_x = raw[slot];
 }
 
 static void Goodix_TS_Work_Func(void)
@@ -1008,8 +1006,9 @@ static void Goodix_TS_Work_Func(void)
     uint8_t clear[3] = {0x81U, 0x4EU, 0U};
     int32_t screen_x[GTP_MAX_TOUCH], screen_y[GTP_MAX_TOUCH];
     uint8_t ids[GTP_MAX_TOUCH];
-    uint8_t count, mask = 0U, i, continuing_mask;
+    uint8_t count, mask = 0U, i;
     uint8_t trace;
+    uint32_t frame_ms, frame_gap;
     const char *bad_reason = "count";
     g_gtp_poll_count++;
 
@@ -1064,18 +1063,24 @@ static void Goodix_TS_Work_Func(void)
         GTP_CancelContacts();
         return;
     }
-    g_gtp_last_frame_ms = g_gtp_ticks_ms;
+    frame_ms = g_gtp_ticks_ms;
+    frame_gap = frame_ms - g_gtp_last_frame_ms;
+    g_gtp_last_frame_ms = frame_ms;
+    /* Always capture the actual ID transition. A 100 ms trace alone can hide
+     * the first fragment and the reason a later pair lacks origin evidence. */
+    if(g_cal_active == 0U && count != 0U && mask != g_gtp_previous_hw_mask) trace = 1U;
     if(trace)
     {
         g_gtp_trace_ms = g_gtp_ticks_ms;
         for(i = 0U; i < count; i++)
         {
             uint8_t *p = &points[2U + 8U * i];
-            GTP_INFO("RAW status=%02X n=%u slot=%u id=%u xy=(%u,%u) size=%u cal=%u",
+            GTP_INFO("RAW status=%02X n=%u slot=%u id=%u xy=(%u,%u) size=%u cal=%u ms=%lu dt=%lu",
                      status[2], count, i, ids[i],
                      (uint16_t)p[1] | ((uint16_t)p[2] << 8),
                      (uint16_t)p[3] | ((uint16_t)p[4] << 8),
-                     (uint16_t)p[5] | ((uint16_t)p[6] << 8), g_cal_active);
+                     (uint16_t)p[5] | ((uint16_t)p[6] << 8), g_cal_active,
+                     (unsigned long)frame_ms, (unsigned long)frame_gap);
             if(g_cal_active == 0U)
                 GTP_INFO("MAP id=%u xy=(%ld,%ld)", ids[i], screen_x[i], screen_y[i]);
         }
@@ -1094,20 +1099,8 @@ static void Goodix_TS_Work_Func(void)
         g_gtp_active_mask = mask;
         return;
     }
-    count = GTP_PrepareContacts(points, count, ids, screen_x, screen_y, &continuing_mask, trace);
-    /* Release disappeared logical contacts before reusing their slots. A new
-     * hardware ID must not inherit an unrelated previous stroke or button. */
-    for(i = 0U; i < GTP_MAX_TOUCH; i++)
-        if((g_gtp_active_mask & (1U << i)) && !(continuing_mask & (1U << i)))
-            GTP_Touch_Up(i);
-    g_gtp_active_mask &= continuing_mask;
-    mask = 0U;
-    for(i = 0U; i < count; i++)
-    {
-        GTP_Touch_Down(ids[i], screen_x[i], screen_y[i], 0);
-        mask |= (uint8_t)(1U << ids[i]);
-    }
-    g_gtp_active_mask = mask;
+    GTP_ProcessSingleFrame(points, count, ids, screen_x, screen_y, trace, frame_gap);
+    g_gtp_previous_hw_mask = mask;
     return;
 
 invalid_frame:
@@ -1314,7 +1307,7 @@ Output:
 
 		
 	
-    GTP_INFO("touch build: FIELD-SEAM-5 " __DATE__ " " __TIME__);
+    GTP_INFO("touch build: FIELD-SINGLE-8 " __DATE__ " " __TIME__);
     g_gtp_initialized = 0U;
     g_gtp_enabled = 0U;
     g_gtp_address = GTP_ADDRESS;
@@ -1594,11 +1587,12 @@ void GTP_Service(void)
     if((uint32_t)(now - g_gtp_health_ms) >= 2000U)
     {
         g_gtp_health_ms = now;
-        GTP_INFO("RUN ms=%lu irq=%lu poll=%lu ready=%lu bad=%lu io=%lu join=%lu status=%02X cal=%u",
+        GTP_INFO("RUN ms=%lu irq=%lu poll=%lu ready=%lu bad=%lu io=%lu bridge=%lu handoff=%lu status=%02X cal=%u",
                  (unsigned long)now, (unsigned long)g_gtp_irq_count,
                  (unsigned long)g_gtp_poll_count, (unsigned long)g_gtp_frame_count,
                  (unsigned long)g_gtp_bad_count, (unsigned long)g_gtp_io_count,
-                 (unsigned long)g_gtp_join_count, g_gtp_last_status, g_cal_active);
+                 (unsigned long)g_gtp_bridge_count, (unsigned long)g_gtp_handoff_count,
+                 g_gtp_last_status, g_cal_active);
     }
     /* Timeout is cancellation, not a release: never execute a toolbar command
      * after a lost frame or bus failure. Check before accepting a new stroke. */
