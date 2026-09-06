@@ -1,4 +1,9 @@
 #include "bsp_spi_flash.h"
+#include "spi_flash_layout.h"
+#include "bsp_SysTick.h"
+#include <string.h>
+
+static uint8_t flash_io_error;
 
 volatile uint32_t flash_count_wait = FLASH_TIME_OUT;
 
@@ -211,7 +216,7 @@ void FLASH_Erase_Sectors(uint32_t SectorAddr)
     
     /* 写使能 */
     Flash_Write_Enable();
-	Flash_Wait_For_Standby();
+	if(Flash_Wait_For_Standby(3000U) != 0U) return;
     
     /* 擦除扇区 */
     //拉低CS信号，开始通信
@@ -229,7 +234,7 @@ void FLASH_Erase_Sectors(uint32_t SectorAddr)
     FLASH_SPI_CS_HIGH;
     
     //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-    Flash_Wait_For_Standby();    
+    if(Flash_Wait_For_Standby(3000U) != 0U) return;    
 }
 
  /**
@@ -253,7 +258,7 @@ void FLASH_Erase_Bulk(void)
 	FLASH_SPI_CS_HIGH;
 
 	//等待擦除完毕
-	Flash_Wait_For_Standby();
+	if(Flash_Wait_For_Standby(300000U) != 0U) return;
 }
 
 
@@ -334,7 +339,7 @@ void FLASH_Write_Page_v1(uint32_t addr,uint8_t * data,uint16_t size)
     FLASH_SPI_CS_HIGH;
     
     //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-    Flash_Wait_For_Standby();   
+    if(Flash_Wait_For_Standby(3000U) != 0U) return;   
 }
 
 
@@ -380,7 +385,7 @@ void FLASH_Write_Page_v2(uint32_t addr,uint8_t * data,uint16_t size)
         FLASH_SPI_CS_HIGH;
         
         //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-        Flash_Wait_For_Standby();
+        if(Flash_Wait_For_Standby(3000U) != 0U) return;
     }      
 }
 
@@ -423,7 +428,7 @@ void FLASH_Write_Page_v3(uint8_t * data,uint32_t WriteAddr,uint16_t size)
             
             /*这里还要加入一次等待写入时序完成，等待上一次256个数据写入的内部时序完成*/
             //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-            Flash_Wait_For_Standby();
+            if(Flash_Wait_For_Standby(3000U) != 0U) return;
             
             /* 写使能 */
             Flash_Write_Enable();
@@ -450,7 +455,7 @@ void FLASH_Write_Page_v3(uint8_t * data,uint32_t WriteAddr,uint16_t size)
     //拉高CS信号，停止通信
     FLASH_SPI_CS_HIGH;
     //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-    Flash_Wait_For_Standby();     
+    if(Flash_Wait_For_Standby(3000U) != 0U) return;     
 }
 
  /**
@@ -597,44 +602,72 @@ static void Flash_Write_Enable(void)
   * @param  无
   * @retval 无
   */
-static void Flash_Wait_For_Standby(void)
+static uint8_t Flash_Wait_For_Standby(uint32_t timeout_ms)
 {
-    uint8_t Flash_status = 0;
-    
-    //拉低CS信号，开始通信
-    FLASH_SPI_CS_LOW;
-    
-    //发送指令代码W25X_ReadStatusReg
-    FLASH_Send_Byte(W25X_ReadStatusReg);
-    
-    //接收返回数据，返回的就是状态寄存器的值
-    Flash_status = FLASH_Receive_Byte();
-    
-    flash_count_wait =  FLASH_TIME_OUT;
-    /*检测FLASH的状态寄存器的最低位(BUSY位)，如果BUSY位为1则处于忙碌状态，否则为空闲状态*/
-    while(1)
-    {
-        Flash_status = FLASH_Receive_Byte();
-        if((Flash_status & WIP_Flag) == 0)
-        {
-            break;
-        }
-        flash_count_wait -- ;
-        if(flash_count_wait == 0)
-        {
-            FLASH_Error_CallBack(3);
-            break;
-        }
-    }                              
-    
-    //拉高CS信号，停止通信
-    FLASH_SPI_CS_HIGH;
+    uint8_t status;
+    while(timeout_ms-- != 0U) {
+        FLASH_SPI_CS_LOW;
+        FLASH_Send_Byte(W25X_ReadStatusReg);
+        status = FLASH_Receive_Byte();
+        FLASH_SPI_CS_HIGH;
+        if(flash_io_error != 0U) return 1U;
+        if((status & WIP_Flag) == 0U) return 0U;
+        Delay_ms(1U);
+    }
+    FLASH_Error_CallBack(3U);
+    return 1U;
 }
-
 
 //code：错误编码
 static uint8_t FLASH_Error_CallBack(uint8_t code)
 {
+    flash_io_error = code;
     printf("\r\nSPI error occurred , code = %d",code);
     return code;
+}
+
+/* Read-only boot probe. No WREN, erase, program or status-register write. */
+uint8_t FLASH_BootProbe(uint32_t *jedec_id)
+{
+    static const uint32_t addresses[] = {
+        0UL, SPI_FLASH_PARAM_ADDR, SPI_FLASH_LAYOUT_TOTAL_SIZE - 32UL
+    };
+    uint8_t first[32], second[32];
+    uint8_t i, status = 0xffU;
+    uint16_t tries;
+    uint32_t id, repeat;
+
+    flash_io_error = 0U;
+    if(jedec_id != 0) *jedec_id = 0UL;
+    FLASH_Wakeup();
+    Delay_us(30U);
+
+    /* A warm MCU reset may occur while the flash is finishing a prior write. */
+    for(tries = 0U; tries < 500U; tries++) {
+        FLASH_SPI_CS_LOW;
+        FLASH_Send_Byte(W25X_ReadStatusReg);
+        status = FLASH_Receive_Byte();
+        FLASH_SPI_CS_HIGH;
+        if(flash_io_error != 0U) return 1U;
+        if((status & WIP_Flag) == 0U) break;
+        Delay_ms(1U);
+    }
+    if((status & WIP_Flag) != 0U) return 3U;
+    id = FLASH_Read_FlashID();
+    repeat = FLASH_Read_FlashID();
+    if(jedec_id != 0) *jedec_id = id;
+    if(flash_io_error != 0U) return 1U;
+    if(id != FLASH_ID || repeat != id) return 2U;
+    for(i = 0U; i < sizeof(addresses) / sizeof(addresses[0]); i++) {
+        FLASH_Read_Data(first, addresses[i], sizeof(first));
+        FLASH_Read_Data(second, addresses[i], sizeof(second));
+        if(flash_io_error != 0U) return 1U;
+        if(memcmp(first, second, sizeof(first)) != 0) return 4U;
+    }
+    return 0U; /* An erased (all-FF) data area is valid, not a hardware fault. */
+}
+
+uint8_t FLASH_GetIoError(void)
+{
+    return flash_io_error;
 }

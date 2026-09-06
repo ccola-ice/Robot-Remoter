@@ -155,125 +155,90 @@ uint8_t EEPROM_Byte_Write(uint8_t addr ,uint8_t data)
 //addr:要读取的EEPROM单元格地址
 //*data:读取到的数据指针，读取到的数据存储在这个指针所指向的地方(即地址).
 //return :0表示正常，非0为失败
-uint8_t EEPROM_Random_Read(uint8_t addr , uint8_t *data)
+/* RM0090 master single-byte reception: ACK off before ADDR clear, then STOP.
+ * All waits are bounded; a missing EEPROM must not stop the boot checklist. */
+static uint8_t EEPROM_WaitReadFlag(uint32_t flag, FlagStatus wanted)
 {
-    //产生起始信号
-    I2C_GenerateSTART(EEPROM_I2C,ENABLE);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV5事件，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_MODE_SELECT) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(5);
-        }
-    }
-    
-    //向I2C1总线广播EEPROM设备地址，并设置写方向
-    I2C_Send7bitAddress(EEPROM_I2C,EEPROM_I2C_ADDR,I2C_Direction_Transmitter);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV6事件，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(6);
-        }
-    }
-    
-    //发送要读取的EEPROM存储单元格地址
-    I2C_SendData(EEPROM_I2C,addr);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV8_2事件，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_BYTE_TRANSMITTED) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(7);
-        }
-    }
-    
-    //--------------------------------------------------------------------------------
-    //产生第2次起始信号
-    I2C_GenerateSTART(EEPROM_I2C,ENABLE);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV5事件，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_MODE_SELECT) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(8);
-        }
-    }
-    
-    /***************注意这里该是读方向了，具体见AT24C02手册时序************/
-    //向I2C1总线广播EEPROM设备地址，并设置读方向
-    I2C_Send7bitAddress(EEPROM_I2C,EEPROM_I2C_ADDR,I2C_Direction_Receiver);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV6事件(与前面的EV6事件不同)，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_RECEIVER_MODE_SELECTED) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(9);
-        }
-    }
-    
-    
-    //STM32做出非应答信号:No ACK，表示不想再接收EEPROM的数据了
-    
-    /*这里做出非应答信号应该放在接收数据前面，这是因为，接收数据函数是将数据从I2C外设的DR寄存器中读出，
-     *如果I2C_AcknowledgeConfig放在I2C_ReceiveData函数之后，相当于多接收了一个数据。
-     *具体过程是因为：由于我们在I2C_Init中将STM32默认配置了自动ACK(I2C_Ack_Enable)，并且STM32的速度很快，所以当我们把设备地址(第2次)发送出去并设为读方向后，
-     *               于是EEPROM向STM32传输一字节数据，然而这个字节数据还没有存储到STM32 I2C外设的DR寄存器,STM32就已经自动应答了ACK，
-     *               STM32读取DR寄存器的数据保存到data里，但是由于STM32自动应答了ACK，EEPROM会继续向STM32传输一字节数据，然后STM32发出非应答信号No ACK,
-     *               此时，EEPROM后面停止向STM32传输数据，但是第2个字节数据已经发送到STM32了。于是导致数据紊乱。
-     *所以，正确做法是将I2C_AcknowledgeConfig放在I2C_ReceiveData函数之前，那么当我们把设备地址(第2次)发送出去并设为读方向后，于是EEPROM向STM32传输一字节数据，
-     *               然后立刻做出非应答信号 No ACK,那么STM32就不会再自动应答了，然后等待EV7事件(DR寄存器已经接收到一个字节数据了，DR非空)，然后才读取数据。
-     */
-    I2C_AcknowledgeConfig(EEPROM_I2C,DISABLE);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV7事件，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_BYTE_RECEIVED) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(10);
-        }
-    }
-    
-    //接收EEPROM传回的数据
-    *data = I2C_ReceiveData(EEPROM_I2C); 
-    
-    //产生结束信号
-    I2C_GenerateSTOP(EEPROM_I2C,ENABLE);
-
-    return 0;
+    uint32_t remaining = EEPROM_TIME_OUT;
+    do {
+        if((EEPROM_I2C->SR1 & (I2C_SR1_AF | I2C_SR1_BERR |
+                              I2C_SR1_ARLO | I2C_SR1_OVR)) != 0U) return 1U;
+        if(I2C_GetFlagStatus(EEPROM_I2C, flag) == wanted) return 0U;
+    } while(--remaining != 0U);
+    return 1U;
 }
+
+uint8_t EEPROM_Random_Read(uint8_t addr, uint8_t *data)
+{
+    uint32_t saved_primask;
+    volatile uint32_t discard;
+    uint8_t error = 1U;
+    if(data == 0) return 1U;
+    I2C_AcknowledgeConfig(EEPROM_I2C, ENABLE);
+    I2C_NACKPositionConfig(EEPROM_I2C, I2C_NACKPosition_Current);
+    if(EEPROM_WaitReadFlag(I2C_FLAG_BUSY, RESET)) goto fail;
+    I2C_GenerateSTART(EEPROM_I2C, ENABLE);
+    error = 2U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_SB, SET)) goto fail;
+    I2C_Send7bitAddress(EEPROM_I2C, EEPROM_I2C_ADDR & 0xfeU,
+                       I2C_Direction_Transmitter);
+    error = 3U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_ADDR, SET)) goto fail;
+    discard = EEPROM_I2C->SR1;
+    discard = EEPROM_I2C->SR2;
+    I2C_SendData(EEPROM_I2C, addr); /* Address pointer only, no EEPROM data write. */
+    error = 4U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_BTF, SET)) goto fail;
+    I2C_GenerateSTART(EEPROM_I2C, ENABLE);
+    error = 5U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_SB, SET)) goto fail;
+    I2C_Send7bitAddress(EEPROM_I2C, EEPROM_I2C_ADDR & 0xfeU,
+                       I2C_Direction_Receiver);
+    error = 6U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_ADDR, SET)) goto fail;
+
+    saved_primask = __get_PRIMASK();
+    __disable_irq();
+    I2C_AcknowledgeConfig(EEPROM_I2C, DISABLE);
+    discard = EEPROM_I2C->SR1;
+    discard = EEPROM_I2C->SR2;
+    I2C_GenerateSTOP(EEPROM_I2C, ENABLE);
+    __set_PRIMASK(saved_primask);
+    (void)discard;
+
+    error = 7U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_RXNE, SET)) goto fail;
+    *data = I2C_ReceiveData(EEPROM_I2C);
+    error = 8U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_BUSY, RESET)) goto fail;
+    I2C_AcknowledgeConfig(EEPROM_I2C, ENABLE);
+    return 0U;
+
+fail:
+    I2C_GenerateSTOP(EEPROM_I2C, ENABLE);
+    I2C_AcknowledgeConfig(EEPROM_I2C, ENABLE);
+    /* Reset the peripheral state after NACK/error/timeout, with no retry loop. */
+    I2C_DeInit(EEPROM_I2C);
+    EEPROM_I2C_Init();
+    return error;
+}
+
+uint8_t EEPROM_BootProbe(void)
+{
+    uint16_t address;
+    uint8_t first, second, error;
+    /* The driver uses 8-bit word addresses. Probe the first 256 bytes only;
+     * this verifies ACK/read stability, not capacity or write endurance. */
+    for(address = 0U; address < 256U; address++) {
+        error = EEPROM_Random_Read((uint8_t)address, &first);
+        if(error != 0U) return error;
+        error = EEPROM_Random_Read((uint8_t)address, &second);
+        if(error != 0U) return error;
+        if(first != second) return 9U;
+    }
+    return 0U;
+}
+
 
 
 //addr:要写入的存储单元首地址

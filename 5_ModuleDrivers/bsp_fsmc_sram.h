@@ -7,10 +7,8 @@
 //对IS61LV25616/IS62WV25616,地址线范围为A0~A17 
 //对IS61LV51216/IS62WV51216,地址线范围为A0~A18
 //#define Bank1_SRAM4_ADDR    ((uint32_t)(0x6C000000))		
-//#define INER_SRAM_ADDR 		0x20000200
 #define IS62WV51216_SIZE 	0x100000  //512*16/2bits = 0x100000  ，1M字节
 #define SRAM_BASE_ADDR  	((uint32_t)(0x6C000000))
-#define INER_SRAM_ADDR  	0x20001000
 
 #define FSMC_GPIO_AF             GPIO_AF_FSMC
 

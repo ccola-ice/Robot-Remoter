@@ -43,10 +43,6 @@ static uint8_t display_flag = 0;	//ΩÁ√Ê«–ªª±Í÷æ£¨√ø¥Œ÷ª”–µ⁄“ª¥Œ«–ªªΩÁ√Ê ±≤≈«Â∆¡£
 static uint8_t clock_force_redraw = 1U;
 static uint8_t clock_last_seconds = 0xffU;
 static uint16_t boot_progress_width;
-static uint8_t boot_last_stage;
-static const uint16_t boot_stage_x[4] = {120U, 260U, 400U, 540U};
-static const uint8_t boot_stage_text_x[4] = {44U, 36U, 32U, 40U};
-static const char *boot_stage_label[4] = {"CORE", "DEVICE", "SERVICE", "READY"};
 
 void gui_prepare_page(void)
 {
@@ -91,118 +87,133 @@ void gui_clock_overlay(void)
 	LCD_SetTextColor(BLACK);
 }
 
+static const BootReport *boot_last_report;
+
+static uint16_t gui_boot_color(BootState state)
+{
+    if(state == BOOT_PASS) return GREEN;
+    if(state == BOOT_FAIL) return RED;
+    if(state == BOOT_NOT_TESTED) return YELLOW;
+    if(state == BOOT_RUNNING) return BLUE2;
+    return GREY;
+}
+
+/* In-ROM 16px glyphs: not tested (U+672A U+6D4B U+8BD5).
+ * Diagnostics remain readable if the external Chinese-font Flash fails. */
+static void gui_boot_not_tested_label(uint16_t x, uint16_t y)
+{
+    static const uint16_t glyphs[3][16] = {
+    {0x0100U, 0x0100U, 0x0100U, 0x3ff8U, 0x0100U, 0x0100U, 0x0100U, 0xfffeU, 0x0380U, 0x0540U, 0x0920U, 0x1110U, 0x2108U, 0xc106U, 0x0100U, 0x0100U},
+    {0x0004U, 0x27c4U, 0x1444U, 0x1454U, 0x8554U, 0x4554U, 0x4554U, 0x1554U, 0x1554U, 0x2554U, 0xe554U, 0x2104U, 0x2284U, 0x2244U, 0x2414U, 0x0808U},
+    {0x0028U, 0x2024U, 0x1024U, 0x1020U, 0x07feU, 0x0020U, 0xf020U, 0x17e0U, 0x1120U, 0x1110U, 0x1110U, 0x1510U, 0x19caU, 0x170aU, 0x0206U, 0x0002U}
+    };
+    uint8_t glyph, row, column;
+    LCD_SetTextColor(YELLOW);
+    for(glyph = 0U; glyph < 3U; glyph++)
+        for(row = 0U; row < 16U; row++)
+            for(column = 0U; column < 16U; column++)
+                if(glyphs[glyph][row] & (0x8000U >> column))
+                    ILI9806G_SetPointPixel(x + glyph * 16U + column, y + row);
+}
+
+static void gui_boot_row(const BootReport *report, uint8_t item)
+{
+    uint16_t rows = (BOOT_ITEM_COUNT + 1U) / 2U;
+    uint16_t x = item < rows ? 20U : 410U;
+    uint16_t y = 62U + (item % rows) * 21U;
+    BootState state = report->items[item].state;
+    char text[48];
+    LCD_SetFont(&Font8x16);
+    LCD_SetBackColor(BLACK);
+    LCD_SetTextColor(gui_boot_color(state));
+    sprintf(text, "%-23.23s %-10.10s", boot_item_names[item], boot_state_name(state));
+    ILI9806G_DispString_EN(x, y, text);
+    if(state == BOOT_NOT_TESTED) gui_boot_not_tested_label(x + 280U, y);
+}
+
 void gui_boot_begin(void)
 {
-	uint8_t i;
-
-	boot_progress_width = 0U;
-	boot_last_stage = 0xffU;
-	LCD_SetBackColor(BLACK);
-	LCD_SetTextColor(BLACK);
-	ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
-
-	LCD_SetFont(&Font8x16);
-	LCD_SetBackColor(BLACK);
-	LCD_SetTextColor(BLUE2);
-	ILI9806G_DispString_EN(20U, 16U, "REMOTER / EMBEDDED CONTROL PLATFORM");
-	ILI9806G_DispString_EN(608U, 16U, "REAL BOOT STATUS");
-
-	LCD_SetTextColor(BLUE2);
-	ILI9806G_DrawRectangle(72U, 64U, 656U, 192U, 0U);
-	ILI9806G_DrawLine(104U, 232U, 696U, 232U);
-
-	LCD_SetFont(&Font24x48);
-	LCD_SetTextColor(WHITE);
-	ILI9806G_DispString_EN(316U, 88U, "REMOTER");
-	LCD_SetFont(&Font16x32);
-	LCD_SetTextColor(BLUE2);
-	ILI9806G_DispString_EN(240U, 152U, "ROBOT CONTROL SYSTEM");
-	LCD_SetFont(&Font8x16);
-	LCD_SetTextColor(GREY);
-	ILI9806G_DispString_EN(272U, 208U, "STM32F407 / NRF24L01 / MPU6050");
-
-	LCD_SetTextColor(WHITE);
-	ILI9806G_DrawRectangle(120U, 304U, 560U, 24U, 1U);
-	LCD_SetTextColor(BLUE2);
-	ILI9806G_DrawRectangle(120U, 304U, 560U, 24U, 0U);
-
-	for(i = 0U; i < 4U; i++)
-	{
-		LCD_SetTextColor(BLUE2);
-		ILI9806G_DrawRectangle(boot_stage_x[i], 392U, 120U, 32U, 0U);
-		LCD_SetBackColor(BLACK);
-		ILI9806G_DispString_EN(boot_stage_x[i] + boot_stage_text_x[i], 400U,
-							(char *)boot_stage_label[i]);
-	}
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetTextColor(WHITE);
-	ILI9806G_DispString_EN(616U, 344U, "  0%");
+    BootReport initial;
+    uint8_t item;
+    boot_report_reset(&initial);
+    boot_progress_width = 0U;
+    boot_last_report = 0;
+    LCD_SetBackColor(BLACK);
+    LCD_SetTextColor(BLACK);
+    ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
+    LCD_SetFont(&Font16x32);
+    LCD_SetTextColor(WHITE);
+    ILI9806G_DispString_EN(20U, 6U, "REMOTER / POWER-ON CHECKS");
+    LCD_SetFont(&Font8x16);
+    LCD_SetTextColor(GREY);
+    ILI9806G_DispString_EN(20U, 40U, "PASS = stated check passed; NOT TESTED = no hardware verdict");
+    for(item = 0U; item < BOOT_ITEM_COUNT; item++) gui_boot_row(&initial, item);
+    LCD_SetTextColor(BLUE2);
+    ILI9806G_DrawRectangle(20U, 362U, 760U, 20U, 0U);
+    LCD_SetTextColor(WHITE);
+    sprintf(displayBuffer, "Completed 0/%u    0%%   (completion, not pass rate)",
+            (unsigned)BOOT_ITEM_COUNT);
+    ILI9806G_DispString_EN(20U, 388U, displayBuffer);
 }
 
-void gui_boot_update(uint8_t percent, uint8_t stage,
-					 const char *status_text, uint8_t warning)
+void gui_boot_update(const BootReport *report, uint8_t item)
 {
-	uint16_t next_width;
-
-	if(percent > 100U)
-	{
-		percent = 100U;
-	}
-	if(stage > 3U)
-	{
-		stage = 3U;
-	}
-
-	next_width = (uint16_t)((556UL * percent) / 100UL);
-	if(next_width > boot_progress_width)
-	{
-		LCD_SetTextColor(BLUE2);
-		ILI9806G_DrawRectangle(122U + boot_progress_width, 306U,
-							  next_width - boot_progress_width, 20U, 1U);
-		boot_progress_width = next_width;
-	}
-
-	if(stage != boot_last_stage)
-	{
-		LCD_SetFont(&Font8x16);
-		LCD_SetTextColor(BLUE2);
-		ILI9806G_DrawRectangle(boot_stage_x[stage], 392U, 120U, 32U, 1U);
-		LCD_SetBackColor(BLUE2);
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DispString_EN(boot_stage_x[stage] + boot_stage_text_x[stage],
-							400U, (char *)boot_stage_label[stage]);
-		boot_last_stage = stage;
-	}
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetBackColor(BLACK);
-	LCD_SetTextColor(BLACK);
-	ILI9806G_DrawRectangle(120U, 344U, 440U, 32U, 1U);
-	LCD_SetTextColor((warning != 0U) ? YELLOW : WHITE);
-	ILI9806G_DispString_EN(120U, 344U, (char *)status_text);
-	LCD_SetTextColor(WHITE);
-	sprintf(displayBuffer, "%3u%%", (uint16_t)percent);
-	ILI9806G_DispString_EN(616U, 344U, displayBuffer);
-
-	/* Briefly hold each completed real milestone so it remains readable. */
-	Delay_ms(80U);
+    uint16_t next_width;
+    char text[96];
+    uint8_t percent = boot_report_percent(report);
+    gui_boot_row(report, item);
+    next_width = (uint16_t)(756UL * percent / 100UL);
+    LCD_SetTextColor(report->failed ? RED : BLUE2);
+    if(report->failed || next_width > boot_progress_width) {
+        ILI9806G_DrawRectangle(22U, 364U, next_width, 16U, 1U);
+        boot_progress_width = next_width;
+    }
+    LCD_SetFont(&Font8x16);
+    LCD_SetBackColor(BLACK);
+    LCD_SetTextColor(WHITE);
+    sprintf(text, "Completed %2u/%u  %3u%% | PASS %2u  FAIL %2u  NOT TESTED %2u | %lu ms   ",
+            report->completed, (unsigned)BOOT_ITEM_COUNT, percent,
+            report->passed, report->failed, report->not_tested,
+            (unsigned long)report->elapsed_ms);
+    ILI9806G_DispString_EN(20U, 388U, text);
+    LCD_SetTextColor(gui_boot_color(report->items[item].state));
+    sprintf(text, "%-90.90s", report->items[item].state == BOOT_RUNNING ?
+            boot_item_names[item] : report->items[item].detail);
+    ILI9806G_DispString_EN(20U, 411U, text);
+    /* No timed animation or per-stage delay. Hardware work drives updates. */
 }
 
-void gui_boot_finish(void)
+void gui_boot_finish(const BootReport *report)
 {
-	gui_boot_update(100U, 3U, "System ready", 0U);
-	LCD_SetFont(&Font8x16);
-	LCD_SetTextColor(GREEN);
-	ILI9806G_DrawRectangle(boot_stage_x[3], 392U, 120U, 32U, 1U);
-	LCD_SetBackColor(GREEN);
-	LCD_SetTextColor(BLACK);
-	ILI9806G_DispString_EN(boot_stage_x[3] + boot_stage_text_x[3], 400U,
-						"READY");
-	LCD_SetBackColor(BLACK);
-	LCD_SetTextColor(GREY);
-	ILI9806G_DispString_EN(288U, 456U, "CONTROL IS NOW ONLINE");
-	Delay_ms(600U);
+    BootOutcome outcome = boot_report_outcome(report);
+    const char *summary;
+    boot_last_report = report;
+    LCD_SetFont(&Font8x16);
+    LCD_SetBackColor(BLACK);
+    if(outcome == BOOT_FAILED || outcome == BOOT_INCOMPLETE) {
+        LCD_SetTextColor(RED);
+        summary = "CHECKS FAILED / INCOMPLETE - review results; press and release OK to continue";
+    } else if(outcome == BOOT_PARTIAL) {
+        LCD_SetTextColor(YELLOW);
+        summary = "CHECKS COMPLETE - untested items remain; this is NOT an all-hardware pass";
+    } else {
+        LCD_SetTextColor(GREEN);
+        summary = "ALL LISTED CHECKS PASSED";
+    }
+    ILI9806G_DispString_EN(20U, 446U, (char *)summary);
+}
+
+static void gui_boot_menu_badge(void)
+{
+    char text[96];
+    if(boot_last_report == 0) return;
+    LCD_SetFont(&Font8x16);
+    LCD_SetBackColor(WHITE);
+    LCD_SetTextColor(boot_last_report->failed ? RED : BLUE);
+    sprintf(text, "Boot: PASS %u / FAIL %u / NOT TESTED %u - details in startup serial log",
+            boot_last_report->passed, boot_last_report->failed,
+            boot_last_report->not_tested);
+    ILI9806G_DispString_EN(8U, 456U, text);
 }
 
 static void gui_draw_progress_bar(uint16_t x, uint16_t y, uint16_t width,
@@ -528,6 +539,7 @@ void main_menu(uint8_t selected_item)
 	sprintf(displayBuffer, "Selected: %u / 9 ",
 			(uint16_t)(selected_item + 1U));
 	ILI9806G_DispString_EN(4U, 416U, displayBuffer);
+	if(first_draw != 0U) gui_boot_menu_badge();
 	last_selected_item = selected_item;
 }
 

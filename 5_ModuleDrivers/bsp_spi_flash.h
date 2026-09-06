@@ -76,6 +76,8 @@
 static void FLASH_SPI_GPIO_Config(void);
 static void FLASH_SPI_MODE_Config(void);
 void FLASH_SPI_Init(void);
+uint8_t FLASH_BootProbe(uint32_t *jedec_id);
+uint8_t FLASH_GetIoError(void);
 
 static uint8_t FLASH_Send_Byte(uint8_t byte);
 static uint8_t FLASH_Receive_Byte(void);
@@ -93,7 +95,7 @@ void FLASH_PowerDown(void);
 void FLASH_Wakeup(void);
 										  
 static void Flash_Write_Enable(void);
-static void Flash_Wait_For_Standby(void);
+static uint8_t Flash_Wait_For_Standby(uint32_t timeout_ms);
 static uint8_t FLASH_Error_CallBack(uint8_t code);
 
 

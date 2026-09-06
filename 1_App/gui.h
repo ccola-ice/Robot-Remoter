@@ -2,6 +2,7 @@
 #define __GUI_H_
 
 #include <stdint.h>
+#include "boot_status.h"
 
 #define GUI_FILE_NAME_LENGTH 128U
 #define GUI_PARAM_VISIBLE_ROWS 6U
@@ -31,10 +32,9 @@ void gui_clock_overlay(void);
 
 void gui_boot_begin(void);
 
-void gui_boot_update(uint8_t percent, uint8_t stage,
-                     const char *status_text, uint8_t warning);
+void gui_boot_update(const BootReport *report, uint8_t item);
 
-void gui_boot_finish(void);
+void gui_boot_finish(const BootReport *report);
 
 void system_basic_information(void);
 

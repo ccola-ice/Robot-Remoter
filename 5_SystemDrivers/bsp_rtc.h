@@ -24,12 +24,12 @@
 #define RTC_BKP_DATA                0X32F3
  
                                   
-void RTC_CLK_Config(void);
+uint8_t RTC_CLK_Config(void);
 void RTC_TimeAndDate_Set(void);
 void RTC_TimeAndDate_Show(void);
 uint8_t RTC_SynchronizeCalendar(uint16_t year, uint8_t month, uint8_t day,
                                 uint8_t hour, uint8_t minute, uint8_t second);
 
-void RTC_Config(void);
+uint8_t RTC_Config(void);
 
 #endif

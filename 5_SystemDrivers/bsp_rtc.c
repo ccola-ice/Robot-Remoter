@@ -1,4 +1,5 @@
 #include "bsp_rtc.h"
+#include "bsp_SysTick.h"
 #include "bsp_usart_debug.h"
 #include "bsp_fsmc_lcd.h"
 
@@ -223,9 +224,10 @@ void RTC_TimeAndDate_Show(void)
   * @param  无
   * @retval 无
   */
-void RTC_CLK_Config(void)
+uint8_t RTC_CLK_Config(void)
 {  
 	  RTC_InitTypeDef RTC_InitStructure;
+    uint16_t startup_ms = 0U;
 	
 	  /*使能 PWR 时钟*/
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
@@ -241,6 +243,8 @@ void RTC_CLK_Config(void)
   /* 等待LSI稳定 */  
   while(RCC_GetFlagStatus(RCC_FLAG_LSIRDY) == RESET)
   {
+    if(startup_ms++ >= 100U) return 1U;
+    Delay_ms(1U);
   }
   /* 选择LSI做为RTC的时钟源 */
   RCC_RTCCLKConfig(RCC_RTCCLKSource_LSI);
@@ -252,6 +256,8 @@ void RTC_CLK_Config(void)
    /* 等待LSE稳定 */   
   while(RCC_GetFlagStatus(RCC_FLAG_LSERDY) == RESET)
   {
+    if(startup_ms++ >= 3000U) return 1U;
+    Delay_ms(1U);
   }
   /* 选择LSE做为RTC的时钟源 */
   RCC_RTCCLKConfig(RCC_RTCCLKSource_LSE);    
@@ -262,7 +268,7 @@ void RTC_CLK_Config(void)
   RCC_RTCCLKCmd(ENABLE);
 
   /* 等待 RTC APB 寄存器同步 */
-  RTC_WaitForSynchro();
+  if(RTC_WaitForSynchro() == ERROR) return 2U;
    
 /*=====================初始化同步/异步预分频器的值======================*/
 	/* 驱动日历的时钟ck_spare = LSE/[(255+1)*(127+1)] = 1HZ */
@@ -273,10 +279,8 @@ void RTC_CLK_Config(void)
 	RTC_InitStructure.RTC_SynchPrediv = SYNCHPREDIV;	
 	RTC_InitStructure.RTC_HourFormat = RTC_HourFormat_24; 
 	/* 用RTC_InitStructure的内容初始化RTC寄存器 */
-	if (RTC_Init(&RTC_InitStructure) == ERROR)
-	{
-		printf("\n\r RTC 时钟初始化失败 \r\n");
-	}	
+	if (RTC_Init(&RTC_InitStructure) == ERROR) return 3U;
+    return 0U;
 }
 
 /**
@@ -352,7 +356,7 @@ void RTC_CLK_Config_Backup(void)
 }
 
 //RTC功能
-void RTC_Config(void)         
+uint8_t RTC_Config(void)         
 {
     /*
 	 * 当我们配置过RTC时间之后就往备份寄存器0写入一个数据做标记
@@ -362,7 +366,7 @@ void RTC_Config(void)
 	 */
    
     /* RTC配置：选择时钟源，设置RTC_CLK的分频系数 */
-    RTC_CLK_Config();
+    if(RTC_CLK_Config() != 0U) return 1U;
 
     if (RTC_ReadBackupRegister(RTC_BKP_DRX) != RTC_BKP_DATA)
     {
@@ -389,8 +393,9 @@ void RTC_Config(void)
         /* PWR_CR:DBF置1，使能RTC、RTC备份寄存器和备份SRAM的访问 */
         PWR_BackupAccessCmd(ENABLE);
         /* 等待 RTC APB 寄存器同步 */
-        RTC_WaitForSynchro();   
+        if(RTC_WaitForSynchro() == ERROR) return 2U;   
     } 
+    return RTC_ReadBackupRegister(RTC_BKP_DRX) == RTC_BKP_DATA ? 0U : 3U;
 }
 
 

@@ -55,6 +55,7 @@ unsigned char set_default_param(void)
 unsigned char write_default_param(void)
 {
 	uint8_t migration_required = 0U;
+	param_Config verify_param;
 
 	FLASH_Read_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);			//从FLASH中读取参数结构体
 	if((param.writeFlag != FM_FLAG) && (param.writeFlag != FM_PREVIOUS_FLAG))
@@ -104,6 +105,9 @@ unsigned char write_default_param(void)
 		param.version_time = FM_TIME;
 		FLASH_Erase_Sectors(PARAM_FLASH_SAVE_ADDR);
 		FLASH_Write_Data((uint8_t *)&param, PARAM_FLASH_SAVE_ADDR, PARAM_DATA_SIZE);	//写入FLASH
+		FLASH_Read_Data((uint8_t *)&verify_param, PARAM_FLASH_SAVE_ADDR, sizeof(verify_param));
+		if(FLASH_GetIoError() != 0U ||
+		   memcmp((const void *)&param, &verify_param, sizeof(param)) != 0) return 1U;
 		printf("params stored in reserved sector %lu\r\n",
 			   (unsigned long)PARAM_FLASH_SAVE_SECTOR);
 	}
@@ -112,7 +116,7 @@ unsigned char write_default_param(void)
 	param.version = FM_VERSION;
 	param.version_time = FM_TIME;
 
-	return  0;
+	return FLASH_GetIoError() != 0U ? 1U : 0U;
 }
 
 //向flash中的参数结构体写入新的数据

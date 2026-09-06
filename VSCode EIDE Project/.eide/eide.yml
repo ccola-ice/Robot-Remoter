@@ -14,6 +14,7 @@ virtualFolder:
         - path: ../1_App/gui.c
         - path: ../1_App/menu.c
         - path: ../1_App/param.c
+        - path: ../1_App/boot_status.c
       folders: []
     - name: Test
       files:

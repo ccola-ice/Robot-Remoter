@@ -55,6 +55,7 @@
 static void EEPROM_I2C_GPIO_Config(void);
 static void EEPROM_I2C_MODE_Config(void);
 void EEPROM_I2C_Init(void);
+uint8_t EEPROM_BootProbe(void);
 
 uint8_t EEPROM_Byte_Write(uint8_t addr ,uint8_t data);
 uint8_t EEPROM_Random_Read(uint8_t addr , uint8_t *data);
