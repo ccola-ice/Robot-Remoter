@@ -844,43 +844,18 @@ static void menu_browser_set_status(const char *text)
     browser_status[sizeof(browser_status) - 1U] = '\0';
 }
 
-static void menu_browser_trace_spi_name(const char *name_type,
-                                        const char *name)
-{
-    uint16_t index = 0U;
-    const uint16_t trace_limit = 32U;
-
-    printf("[FILE] SPI %s bytes:", name_type);
-    while((name[index] != '\0') && (index < trace_limit))
-    {
-        printf(" %02X", (uint16_t)(uint8_t)name[index]);
-        index++;
-    }
-    if(index == 0U)
-    {
-        printf(" <empty>");
-    }
-    else if(name[index] != '\0')
-    {
-        printf(" ...");
-    }
-    printf("\r\n");
-}
-
 static void menu_browser_load_drives(void)
 {
     memset(browser_entries, 0, sizeof(browser_entries));
     strcpy(browser_path, "Available volumes");
     strcpy(browser_entries[0].name, "SD Card [0:]");
-    strcpy(browser_entries[1].name, "SPI Flash [1:]");
     browser_entries[0].is_directory = 1U;
-    browser_entries[1].is_directory = 1U;
-    browser_item_count = 2U;
+    browser_item_count = 1U;
     browser_selected_item = 0U;
     browser_first_visible = 0U;
     browser_virtual_root = 1U;
     browser_revision++;
-    menu_browser_set_status("Select a volume and press OK");
+    menu_browser_set_status("Press OK to browse the SD card");
 }
 
 static uint8_t menu_browser_load_directory(void)
@@ -932,16 +907,6 @@ static uint8_t menu_browser_load_directory(void)
         {
             printf("[FILE] LFN is outside the installed GB2312 font; "
                    "using SFN for display/open\r\n");
-            if((browser_path[0] == '1') && (browser_path[1] == ':'))
-            {
-                menu_browser_trace_spi_name("unsupported LFN", long_name);
-            }
-        }
-        if((browser_path[0] == '1') && (browser_path[1] == ':') &&
-           ((browser_item_count < 8U) || (long_name_renderable == 0U)))
-        {
-            menu_browser_trace_spi_name((source_name == long_name) ?
-                                        "LFN" : "SFN", source_name);
         }
         if((strcmp(source_name, ".") == 0) || (strcmp(source_name, "..") == 0))
         {
@@ -981,11 +946,6 @@ static uint8_t menu_browser_load_directory(void)
     {
         sprintf(browser_status, "Read failed - FatFs error %u", (uint16_t)result);
     }
-    else if((browser_path[0] == '1') && (space_result == FR_OK) &&
-            (free_clusters == 0UL))
-    {
-        menu_browser_set_status("SPI Flash full/corrupt - format required");
-    }
     else if(browser_item_count >= BROWSER_MAX_ENTRIES)
     {
         menu_browser_set_status("Showing the first 64 entries");
@@ -1023,7 +983,7 @@ static void menu_browser_enter_selected(void)
 
     if(browser_virtual_root != 0U)
     {
-        strcpy(browser_path, (browser_selected_item == 0U) ? "0:" : "1:");
+        strcpy(browser_path, "0:");
         menu_browser_load_directory();
         page_dirty = 1U;
         page_changed = 1U;

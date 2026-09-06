@@ -448,7 +448,7 @@ void main_menu(uint8_t selected_item)
 		"Position / satellites",
 		"Touch drawing tools",
 		"Radio setup / status",
-		"Browse SD card and SPI Flash",
+		"Browse SD card files",
 		"View / edit / save settings"
 	};
 	uint8_t i;
@@ -930,7 +930,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
 		LCD_SetBackColor(BLUE);
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DispString_EN(20U, 0U, "FILE BROWSER");
-		ILI9806G_DispString_EN(20U, 32U, "SD Card / SPI Flash  Read-only mode");
+		ILI9806G_DispString_EN(20U, 32U, "SD Card  Read-only mode");
 	}
 
 	if(content_changed != 0U)

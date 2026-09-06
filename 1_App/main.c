@@ -197,15 +197,7 @@ void setup(void)
 		printf("\r\nSD卡文件系统挂载失败，检查SD卡格式！(%d)\r\n",res);
 		while(1);
 	}
-	gui_boot_update(68U, 2U, "SD filesystem mounted", 0U);
-	res = f_mount(&fs_flash,"1:",1);//挂载flash文件系统
-	if(res!=FR_OK)
-	{
-		gui_boot_update(68U, 2U, "Flash filesystem failed", 1U);
-		printf("\r\n外部Flash文件系统挂载失败！(%d)\r\n",res);
-		while(1);
-	}
-	gui_boot_update(74U, 2U, "Flash filesystem mounted", 0U);
+	gui_boot_update(74U, 2U, "SD filesystem mounted", 0U);
 	if(nrf24l01_check() != 0)
 	{
 		gui_boot_update(80U, 2U, "NRF24L01 not detected", 1U);
