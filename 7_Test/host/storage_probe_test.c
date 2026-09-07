@@ -28,6 +28,7 @@ static I2c eeprom_i2c;
 static uint8_t nvram[256], address, receiving, ack, pointer_sent;
 static unsigned read_calls, pointer_calls, flag_calls, nack, unstable, fault_flag;
 static uint32_t primask;
+static unsigned allow_writes, payload_calls;
 static void I2C_AcknowledgeConfig(I2c *bus, uint8_t value) {(void)bus; ack=value;}
 static void I2C_NACKPositionConfig(I2c *bus, uint8_t value) {(void)bus;(void)value;}
 static FlagStatus I2C_GetFlagStatus(I2c *bus, uint32_t flag)
@@ -48,7 +49,13 @@ static void I2C_Send7bitAddress(I2c *bus, uint8_t addr, uint8_t direction)
 static void I2C_SendData(I2c *bus, uint8_t data)
 {
     (void)bus;
-    assert(!receiving && !pointer_sent); /* Only a word-address byte, never data. */
+    assert(!receiving);
+    if(pointer_sent) {
+        assert(allow_writes); /* Read-only probes must NEVER send an EEPROM payload. */
+        nvram[address] = data;
+        payload_calls++;
+        return;
+    }
     pointer_sent=1U;
     pointer_calls++;
     address=data;
@@ -108,6 +115,7 @@ static void eeprom_reset(void)
     receiving=pointer_sent=0U;
     ack=1U;
     read_calls=pointer_calls=flag_calls=nack=unstable=fault_flag=0U;
+    allow_writes=payload_calls=0U;
     primask=0U;
 }
 static void flash_reset(void)
@@ -123,6 +131,15 @@ int main(void)
     unsigned i;
     uint32_t id;
     for(i=0;i<256;i++) nvram[i]=(uint8_t)(i*17U);
+    eeprom_reset(); flash_reset(); allow_writes=1U;
+    assert(EEPROM_Byte_Write(0x80U, 0x96U) == 0U);
+    assert(nvram[0x80U] == 0x96U && payload_calls == 1U);
+    for(i=I2C_FLAG_BUSY; i<=I2C_FLAG_BTF; i++) {
+        eeprom_reset(); allow_writes=1U; fault_flag=i;
+        assert(EEPROM_Byte_Write(0x80U, 0x55U) != 0U && payload_calls == 0U);
+    }
+    eeprom_reset(); allow_writes=1U; nack=1U;
+    assert(EEPROM_Byte_Write(0x80U, 0x55U) != 0U && payload_calls == 0U);
     memcpy(before,nvram,sizeof(before));
     eeprom_reset();
     assert(EEPROM_BootProbe() == 0U && pointer_calls == 512U);

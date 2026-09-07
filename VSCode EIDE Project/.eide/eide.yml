@@ -15,6 +15,10 @@ virtualFolder:
         - path: ../1_App/menu.c
         - path: ../1_App/param.c
         - path: ../1_App/boot_status.c
+        - path: ../1_App/hardware_tests.c
+        - path: ../1_App/diagnostics.c
+        - path: ../1_App/eeprom_menu.c
+        - path: ../1_App/radio_diagnostic.c
       folders: []
     - name: Test
       files:

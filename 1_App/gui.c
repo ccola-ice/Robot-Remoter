@@ -133,9 +133,7 @@ static void gui_boot_row(const BootReport *report, uint8_t item)
 
 void gui_boot_begin(void)
 {
-    BootReport initial;
-    uint8_t item;
-    boot_report_reset(&initial);
+    uint8_t frame, dot;
     boot_progress_width = 0U;
     boot_last_report = 0;
     LCD_SetBackColor(BLACK);
@@ -143,17 +141,23 @@ void gui_boot_begin(void)
     ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
     LCD_SetFont(&Font16x32);
     LCD_SetTextColor(WHITE);
-    ILI9806G_DispString_EN(20U, 6U, "REMOTER / POWER-ON CHECKS");
+    ILI9806G_DispString_EN(344U, 104U, "REMOTER");
     LCD_SetFont(&Font8x16);
-    LCD_SetTextColor(GREY);
-    ILI9806G_DispString_EN(20U, 40U, "PASS = stated check passed; NOT TESTED = no hardware verdict");
-    for(item = 0U; item < BOOT_ITEM_COUNT; item++) gui_boot_row(&initial, item);
+    LCD_SetTextColor(BLUE2);
+    ILI9806G_DispString_EN(292U, 151U, "ROBOT REMOTE CONTROL SYSTEM");
+    ILI9806G_DrawRectangle(280U, 92U, 240U, 88U, 0U);
+    LCD_SetTextColor(WHITE);
+    ILI9806G_DispString_EN(284U, 284U, "Starting hardware checks... 0%");
+    /* Decorative intro only. The progress value stays zero until checks finish. */
+    for(frame = 0U; frame < 12U; frame++) {
+        for(dot = 0U; dot < 6U; dot++) {
+            LCD_SetTextColor(dot == frame % 6U ? BLUE2 : GREY);
+            ILI9806G_DrawRectangle(334U + dot * 24U, 220U, 12U, 12U, 1U);
+        }
+        Delay_ms(25U);
+    }
     LCD_SetTextColor(BLUE2);
     ILI9806G_DrawRectangle(20U, 362U, 760U, 20U, 0U);
-    LCD_SetTextColor(WHITE);
-    sprintf(displayBuffer, "Completed 0/%u    0%%   (completion, not pass rate)",
-            (unsigned)BOOT_ITEM_COUNT);
-    ILI9806G_DispString_EN(20U, 388U, displayBuffer);
 }
 
 void gui_boot_update(const BootReport *report, uint8_t item)
@@ -161,10 +165,14 @@ void gui_boot_update(const BootReport *report, uint8_t item)
     uint16_t next_width;
     char text[96];
     uint8_t percent = boot_report_percent(report);
-    gui_boot_row(report, item);
+    LCD_SetFont(&Font16x32);
+    LCD_SetBackColor(BLACK);
+    LCD_SetTextColor(gui_boot_color(report->items[item].state));
+    sprintf(text, "%-42.42s", boot_item_names[item]);
+    ILI9806G_DispString_EN(64U, 278U, text);
     next_width = (uint16_t)(756UL * percent / 100UL);
     LCD_SetTextColor(report->failed ? RED : BLUE2);
-    if(report->failed || next_width > boot_progress_width) {
+    if(next_width != 0U && (report->failed || next_width > boot_progress_width)) {
         ILI9806G_DrawRectangle(22U, 364U, next_width, 16U, 1U);
         boot_progress_width = next_width;
     }
@@ -180,13 +188,28 @@ void gui_boot_update(const BootReport *report, uint8_t item)
     sprintf(text, "%-90.90s", report->items[item].state == BOOT_RUNNING ?
             boot_item_names[item] : report->items[item].detail);
     ILI9806G_DispString_EN(20U, 411U, text);
-    /* No timed animation or per-stage delay. Hardware work drives updates. */
+    /* Hardware completion alone drives the progress bar. */
 }
 
 void gui_boot_finish(const BootReport *report)
 {
     BootOutcome outcome = boot_report_outcome(report);
     const char *summary;
+    uint8_t item;
+    LCD_SetBackColor(BLACK);
+    LCD_SetTextColor(BLACK);
+    ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
+    LCD_SetFont(&Font16x32);
+    LCD_SetTextColor(WHITE);
+    ILI9806G_DispString_EN(20U, 6U, "REMOTER / TEST RESULTS");
+    for(item = 0U; item < BOOT_ITEM_COUNT; item++) gui_boot_row(report, item);
+    LCD_SetFont(&Font8x16);
+    LCD_SetTextColor(WHITE);
+    sprintf(displayBuffer, "Completed %u/%u (%u%%)  PASS %u  FAIL %u  NOT TESTED %u",
+            report->completed, (unsigned)BOOT_ITEM_COUNT, boot_report_percent(report),
+            report->passed, report->failed, report->not_tested);
+    ILI9806G_DispString_EN(20U, 370U, displayBuffer);
+    ILI9806G_DispString_EN(20U, 398U, "Open Hardware Tests for operator / fixture / storage write tests.");
     boot_last_report = report;
     LCD_SetFont(&Font8x16);
     LCD_SetBackColor(BLACK);
@@ -438,7 +461,7 @@ void system_basic_information(void)
 void main_menu(uint8_t selected_item)
 {
 	static uint8_t last_selected_item = 0xffU;
-	static const char *menu_text[9] =
+	static const char *menu_text[11] =
 	{
 		"System Information",
 		"Channel Monitor",
@@ -448,9 +471,11 @@ void main_menu(uint8_t selected_item)
 		"Touch Draw Board",
 		"NRF Wireless",
 		"File Browser",
-		"Parameter Settings"
+		"Parameter Settings",
+        "Hardware Tests",
+        "EEPROM"
 	};
-	static const char *menu_hint[9] =
+	static const char *menu_hint[11] =
 	{
 		"Memory / firmware",
 		"10 analog channels",
@@ -460,7 +485,9 @@ void main_menu(uint8_t selected_item)
 		"Touch drawing tools",
 		"Radio setup / status",
 		"Browse SD card files",
-		"View / edit / save settings"
+		"View / edit / save settings",
+        "Run manual and storage tests",
+        "Read / edit AT24C08 safe window"
 	};
 	uint8_t i;
 	uint16_t card_x;
@@ -469,12 +496,12 @@ void main_menu(uint8_t selected_item)
 	uint16_t card_height;
 	uint8_t first_draw = 0U;
 
-	if(selected_item >= 9U)
+	if(selected_item >= 11U)
 	{
 		selected_item = 0U;
 	}
 
-	if(display_flag == 1)
+	if(display_flag == 1 || last_selected_item / 10U != selected_item / 10U)
 	{
 		display_flag = 0;
 		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
@@ -494,10 +521,10 @@ void main_menu(uint8_t selected_item)
 		ILI9806G_DispString_EN(20U, 32U, "LEFT/RIGHT: Select     OK: Enter");
 	}
 
-	for(i = 0; i < 9U; i++)
+	for(i = (selected_item / 10U) * 10U; i < 11U && i < (selected_item / 10U + 1U) * 10U; i++)
 	{
 		card_x = ((i & 1U) == 0U) ? 4U : 404U;
-		card_y = 72U + (uint16_t)(i / 2U) * 66U;
+		card_y = 72U + (uint16_t)((i % 10U) / 2U) * 66U;
 		card_width = 392U;
 		card_height = 60U;
 
@@ -536,8 +563,8 @@ void main_menu(uint8_t selected_item)
 		ILI9806G_DrawRectangle(4U, 416U, 792U, 32U, 1U);
 	}
 	LCD_SetTextColor(BLUE);
-	sprintf(displayBuffer, "Selected: %u / 9 ",
-			(uint16_t)(selected_item + 1U));
+	sprintf(displayBuffer, "Selected: %2u / 11    Page %u/2",
+			(uint16_t)(selected_item + 1U), (uint16_t)(selected_item / 10U + 1U));
 	ILI9806G_DispString_EN(4U, 416U, displayBuffer);
 	if(first_draw != 0U) gui_boot_menu_badge();
 	last_selected_item = selected_item;

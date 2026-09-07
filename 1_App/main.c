@@ -1,3 +1,4 @@
+#include "hardware_tests.h"
 #include "bsp_Systick.h"
 #include "bsp_exti.h"
 #include "bsp_rtc.h"
@@ -388,16 +389,18 @@ void setup(void)
     boot_done(BOOT_TIMERS, ok ? BOOT_PASS : BOOT_FAIL,
               "TIM2/3/5/6 counters + TIM5/TIM6 interrupt activity");
 
-    boot_skip(BOOT_KEYS, "Keys/switches/TIM4 encoder require manual movement");
+    boot_skip(BOOT_KEYS, "Hardware Tests: exercise keys and switches");
     boot_skip(BOOT_ANALOG, "Travel/calibration/battery accuracy require known inputs");
     boot_skip(BOOT_OUTPUTS, "Configured; LED/buzzer need physical feedback");
     boot_skip(BOOT_UART, "Configured; no external loopback fixture");
     boot_skip(BOOT_RADIO, "No peer/ACK test; SPI presence is not an RF link test");
-    boot_skip(BOOT_FLASH_WRITE, "NOT TESTED: preserve stored data; no test erase/program");
-    boot_skip(BOOT_EEPROM_WRITE, "NOT TESTED: preserve contents and write endurance");
-    boot_skip(BOOT_SD_WRITE, "NOT TESTED: preserve files; no format/write test");
+    boot_skip(BOOT_FLASH_WRITE, "Hardware Tests: dedicated blank sector write/read/erase");
+    boot_skip(BOOT_EEPROM_WRITE, "Hardware Tests: reserved blank byte write/read/restore");
+    boot_skip(BOOT_SD_WRITE, "Hardware Tests: create/read/delete a new temporary file");
     boot_skip(BOOT_TOUCH_QUALITY, "Manual full-screen accuracy test required");
-    boot_skip(BOOT_INTERNAL_MEMORY, "No destructive test of running MCU ROM/RAM");
+    boot_start(BOOT_INTERNAL_MEMORY);
+    boot_done(BOOT_INTERNAL_MEMORY, hardware_memory_test() == HW_PASS ? BOOT_PASS : BOOT_FAIL,
+              "Owned 1 KiB RAM walking patterns + ROM constants; not whole-chip integrity");
 }
 
 static void boot_show_result(void)

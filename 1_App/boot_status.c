@@ -8,10 +8,10 @@ const char * const boot_item_names[BOOT_ITEM_COUNT] = {
     "MPU6050 FIFO data", "Touch controller", "SD card commands",
     "SD filesystem read", "NRF SPI register", "Parameter load",
     "NRF config readback", "GPS NMEA reception", "Runtime timers",
-    "Keys/switches/encoder", "Analog travel / Vbat", "LED / buzzer output",
+    "Keys / switches", "Analog travel / Vbat", "LED / buzzer output",
     "UART external loop", "Radio peer link", "Flash erase/program",
     "EEPROM write", "SD / FatFs write", "Touch accuracy",
-    "MCU full ROM/RAM"
+    "MCU memory sample"
 };
 
 const char *boot_state_name(BootState state)

@@ -18,6 +18,15 @@
 #define SPI_FLASH_PARAM_ADDR               \
     (SPI_FLASH_PARAM_SECTOR * SPI_FLASH_LAYOUT_SECTOR_SIZE)
 
+/* Diagnostic erase sector: gap after the GB2312 font, before parameters.
+ * An occupied sector is BLOCKED, never erased by the diagnostic. */
+#define SPI_FLASH_DIAG_ADDR                0x005fe000UL
+#define SPI_FLASH_FONT_END                 0x005e5900UL
+#if SPI_FLASH_DIAG_ADDR < SPI_FLASH_FONT_END || \
+    SPI_FLASH_DIAG_ADDR + SPI_FLASH_LAYOUT_SECTOR_SIZE > SPI_FLASH_PARAM_ADDR
+#error "Diagnostic sector overlaps stored resources or parameters"
+#endif
+
 #if SPI_FLASH_PARAM_SECTOR >= SPI_FLASH_FATFS_FIRST_SECTOR
 #error "Parameter storage overlaps the SPI Flash FatFs partition"
 #endif

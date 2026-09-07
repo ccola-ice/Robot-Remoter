@@ -2,11 +2,14 @@ from pathlib import Path
 import subprocess, tempfile, sys
 
 root = Path(__file__).resolve().parents[2]
-eeprom = (root/'5_ModuleDrivers/bsp_i2c_eeprom.c').read_bytes().decode('gb18030')
+eeprom = (root/'5_ModuleDrivers/bsp_i2c_eeprom.c').read_bytes().decode('gb18030').replace('\r\n', '\n')
 flash = (root/'5_ModuleDrivers/bsp_spi_flash.c').read_bytes().decode('gb18030')
 # Compile the checked-in implementations, not copies maintained in the test.
-eeprom_part = eeprom[eeprom.index('static uint8_t EEPROM_WaitReadFlag'):]
+eeprom_part = eeprom[eeprom.index('static uint8_t EEPROM_WaitReadFlag(uint32_t flag, FlagStatus wanted)\n{'):]
 eeprom_part = eeprom_part[:eeprom_part.index('//addr:')]
+write_part = eeprom[eeprom.index('uint8_t EEPROM_Byte_Write('):]
+write_part = write_part[:write_part.index('//addr:')]
+eeprom_part += '\n' + write_part
 flash_part = flash[flash.index('uint8_t FLASH_BootProbe'):]
 with tempfile.TemporaryDirectory(prefix='remoter-boot-probe-') as folder:
     tmp = Path(folder)

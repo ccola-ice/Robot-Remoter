@@ -1,3 +1,5 @@
+#include "diagnostics.h"
+#include "bsp_fsmc_lcd.h"
 #include "menu.h"
 #include "gui.h"
 #include "gt9xx.h"
@@ -9,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MENU_ITEM_COUNT       9U
+#define MENU_ITEM_COUNT       11U
 #define MENU_EVENT_QUEUE_SIZE 8U
 #define MENU_REFRESH_TICKS    5U
 #define CLOCK_REFRESH_TICKS   20U
@@ -36,7 +38,9 @@ typedef enum
     MENU_PAGE_DRAW_BOARD,
     MENU_PAGE_NRF,
     MENU_PAGE_FILE_BROWSER,
-    MENU_PAGE_PARAMETER_SETTINGS
+    MENU_PAGE_PARAMETER_SETTINGS,
+    MENU_PAGE_DIAGNOSTICS,
+    MENU_PAGE_EEPROM
 } MenuPage;
 
 static const MenuPage menu_items[MENU_ITEM_COUNT] =
@@ -49,7 +53,9 @@ static const MenuPage menu_items[MENU_ITEM_COUNT] =
     MENU_PAGE_DRAW_BOARD,
     MENU_PAGE_NRF,
     MENU_PAGE_FILE_BROWSER,
-    MENU_PAGE_PARAMETER_SETTINGS
+    MENU_PAGE_PARAMETER_SETTINGS,
+    MENU_PAGE_DIAGNOSTICS,
+    MENU_PAGE_EEPROM
 };
 
 static const uint8_t nrf_power_register[4] = {0x09U, 0x0bU, 0x0dU, 0x0fU};
@@ -1108,6 +1114,19 @@ static void menu_handle_home_key(MenuKey key)
 
         case MENU_KEY_OK:
             current_page = menu_items[selected_item];
+            if(current_page == MENU_PAGE_DIAGNOSTICS || current_page == MENU_PAGE_EEPROM) {
+                GTP_IRQ_Disable();
+                if(current_page == MENU_PAGE_DIAGNOSTICS) diagnostics_menu();
+                else eeprom_menu();
+                LCD_SetBackColor(WHITE);
+                LCD_SetTextColor(BLACK);
+                /* Service screens consume raw keys; discard any pre-entry queued events. */
+                event_read_index = event_write_index;
+                current_page = MENU_PAGE_HOME;
+                page_dirty = 1U;
+                page_changed = 1U;
+                return;
+            }
             if(current_page == MENU_PAGE_NRF)
             {
                 menu_nrf_load_settings();

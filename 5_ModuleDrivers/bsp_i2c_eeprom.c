@@ -1,3 +1,4 @@
+#include "bsp_Systick.h"
 #include "bsp_i2c_eeprom.h"
 
 uint32_t eeprom_count_wait = EEPROM_TIME_OUT;
@@ -76,81 +77,38 @@ void EEPROM_I2C_Init(void)
 //data:要写入的数据
 //note:只能写入一个字节
 //return :0表示正常，非0为失败
-uint8_t EEPROM_Byte_Write(uint8_t addr ,uint8_t data)
+static uint8_t EEPROM_WaitReadFlag(uint32_t flag, FlagStatus wanted);
+
+uint8_t EEPROM_Byte_Write(uint8_t addr, uint8_t data)
 {
-    //(有关事件的内容详见野火手册的 24.2.3通讯过程 )
-    
-    //产生起始信号
-    I2C_GenerateSTART(EEPROM_I2C,ENABLE);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV5事件，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_MODE_SELECT) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(1);
-        }
-    }
-    
-    //向I2C1总线广播EEPROM设备地址，并设置写方向
-    I2C_Send7bitAddress(EEPROM_I2C,EEPROM_I2C_ADDR,I2C_Direction_Transmitter);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV6事件，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(2);
-        }
-    }
-    
-    //发送要写入的EEPROM存储单元格地址
-    I2C_SendData(EEPROM_I2C,addr);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV8_2事件，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_BYTE_TRANSMITTED) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(3);
-        }
-    }
-    
-    //发送要写入的数据
-    I2C_SendData(EEPROM_I2C,data);
-    
-    //重置eeprom_count_wait
-    eeprom_count_wait = EEPROM_TIME_OUT;
-    //等待EV8_2事件，直到检测成功
-    while(I2C_CheckEvent(EEPROM_I2C,I2C_EVENT_MASTER_BYTE_TRANSMITTED) != SUCCESS)
-    {
-        eeprom_count_wait --;
-        if(eeprom_count_wait == 0)
-        {
-            //打印错误编码并返回
-            Error_CallBack(4);
-        }
-    }
-    
-    //产生结束信号
-    I2C_GenerateSTOP(EEPROM_I2C,ENABLE);
-
-    //等待EEPROM写入时序完成
-    return Wait_For_Standby();
+    volatile uint32_t discard;
+    uint8_t error = 1U;
+    /* Fixed 0xA0 / 7-bit 0x50: never reach the AT24C256 collision at 0xA4. */
+    if(EEPROM_WaitReadFlag(I2C_FLAG_BUSY, RESET)) goto fail;
+    I2C_GenerateSTART(EEPROM_I2C, ENABLE);
+    error = 2U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_SB, SET)) goto fail;
+    I2C_Send7bitAddress(EEPROM_I2C, EEPROM_I2C_ADDR & 0xfeU, I2C_Direction_Transmitter);
+    error = 3U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_ADDR, SET)) goto fail;
+    discard = EEPROM_I2C->SR1; discard = EEPROM_I2C->SR2; (void)discard;
+    I2C_SendData(EEPROM_I2C, addr);
+    error = 4U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_BTF, SET)) goto fail;
+    I2C_SendData(EEPROM_I2C, data);
+    error = 5U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_BTF, SET)) goto fail;
+    I2C_GenerateSTOP(EEPROM_I2C, ENABLE);
+    error = 6U;
+    if(EEPROM_WaitReadFlag(I2C_FLAG_BUSY, RESET)) goto fail;
+    Delay_ms(6U); /* AT24C08 maximum internal write cycle is 5 ms. */
+    return 0U; /* Callers verify the actual data by random read. */
+fail:
+    I2C_GenerateSTOP(EEPROM_I2C, ENABLE);
+    I2C_DeInit(EEPROM_I2C);
+    EEPROM_I2C_Init();
+    return error;
 }
-
 
 //addr:要读取的EEPROM单元格地址
 //*data:读取到的数据指针，读取到的数据存储在这个指针所指向的地方(即地址).
