@@ -45,9 +45,14 @@ void nrf24l01_apply_settings(uint8_t enabled, uint8_t channel,
 uint8_t nrf24l01_read_runtime(uint8_t *enabled, uint8_t *channel,
                              uint8_t *power_register, uint8_t *data_rate)
 {
+    uint8_t old_ce = GPIO_ReadOutputDataBit(NRF_CE_GPIO_PORT, NRF_CE_PIN);
     uint8_t config = SPI_NRF_ReadReg(CONFIG);
     uint8_t rf_channel = SPI_NRF_ReadReg(RF_CH);
     uint8_t rf_setup = SPI_NRF_ReadReg(RF_SETUP);
+
+    /* Legacy register reads lower CE. Runtime inspection must not silently
+     * leave an enabled radio in standby. */
+    if(old_ce != 0U) NRF_CE_HIGH();
 
     /* 本项目始终开启CRC；该位异常或频道越界表示寄存器回读无效。 */
     if(((config & 0x0cU) != 0x0cU) || (rf_channel > 125U))

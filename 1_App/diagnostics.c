@@ -13,10 +13,19 @@
 #include "palette.h"
 #include "param.h"
 #include <stdio.h>
+#include <string.h>
 
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
 extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 extern volatile param_Config param;
+
+#define DIAG_LINE_CACHE_COUNT 14U
+typedef struct {
+    uint16_t y;
+    uint8_t valid;
+    char text[96];
+} DiagLineCache;
+static DiagLineCache diag_line_cache[DIAG_LINE_CACHE_COUNT];
 
 static uint8_t key_down(uint8_t key)
 {
@@ -50,32 +59,103 @@ int diag_key(void)
     return -1;
 }
 
+static uint16_t diag_lcd_color(uint8_t color)
+{
+    switch(color) {
+        case DIAG_UI_WHITE: return WHITE;
+        case DIAG_UI_BLUE: return BLUE;
+        case DIAG_UI_GREY: return GREY;
+        case DIAG_UI_RED: return RED;
+        case DIAG_UI_GREEN: return GREEN;
+        case DIAG_UI_YELLOW: return YELLOW;
+        default: return BLACK;
+    }
+}
+
+void diag_ui_fill(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
+                  uint8_t color)
+{
+    LCD_SetTextColor(diag_lcd_color(color));
+    ILI9806G_DrawRectangle(x, y, width, height, 1U);
+}
+
+void diag_ui_frame(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
+                   uint8_t color)
+{
+    LCD_SetTextColor(diag_lcd_color(color));
+    ILI9806G_DrawRectangle(x, y, width, height, 0U);
+}
+
+void diag_ui_text(uint16_t x, uint16_t y, uint16_t size,
+                  uint8_t foreground, uint8_t background, const char *text)
+{
+    LCD_SetTextColor(diag_lcd_color(foreground));
+    LCD_SetBackColor(diag_lcd_color(background));
+    ILI9806G_DisplayStringEx(x, y, size, size, (uint8_t *)text, 0U);
+}
+
+void diag_ui_ascii(uint16_t x, uint16_t y, uint8_t foreground,
+                   uint8_t background, const char *text)
+{
+    LCD_SetFont(&Font8x16);
+    LCD_SetTextColor(diag_lcd_color(foreground));
+    LCD_SetBackColor(diag_lcd_color(background));
+    ILI9806G_DispString_EN(x, y, (char *)text);
+}
+
 void diag_screen(const char *title)
 {
-    LCD_SetBackColor(BLACK);
-    LCD_SetTextColor(BLACK);
-    ILI9806G_Clear(0, 0, LCD_X_LENGTH, LCD_Y_LENGTH);
+    memset(diag_line_cache, 0, sizeof(diag_line_cache));
+    LCD_SetBackColor(WHITE);
     LCD_SetTextColor(WHITE);
-    LCD_SetFont(&Font16x32);
-    ILI9806G_DispString_EN(16U, 8U, (char *)title);
-    LCD_SetFont(&Font8x16);
+    ILI9806G_Clear(0, 0, LCD_X_LENGTH, LCD_Y_LENGTH);
+    diag_ui_fill(4U, 0U, 792U, 64U, DIAG_UI_BLUE);
+    /* Native 32-pixel glyphs match the established submenu header weight. */
+    diag_ui_text(20U, 4U, 32U, DIAG_UI_WHITE, DIAG_UI_BLUE, title);
 }
 
 void diag_line(uint16_t y, const char *text)
 {
-    char line[97];
-    LCD_SetFont(&Font8x16);
-    LCD_SetBackColor(BLACK);
-    LCD_SetTextColor(WHITE);
-    sprintf(line, "%-96.96s", text);
-    ILI9806G_DispString_EN(16U, y, line);
+    const uint8_t *scan = (const uint8_t *)text;
+    uint16_t width = 0U;
+    uint8_t index, slot = 0U;
+
+    for(index = 0U; index < DIAG_LINE_CACHE_COUNT; index++) {
+        if(diag_line_cache[index].valid && diag_line_cache[index].y == y) {
+            if(strcmp(diag_line_cache[index].text, text) == 0) return;
+            slot = index;
+            break;
+        }
+        if(!diag_line_cache[index].valid) slot = index;
+    }
+
+    /* Native glyphs retain their strokes. Each glyph paints its own background,
+       so only erase the old line's unused tail after drawing. */
+    while(*scan != 0U) {
+        if(*scan > 0x80U && scan[1] != 0U) { width += 32U; scan += 2; }
+        else { width += 16U; scan++; }
+    }
+    diag_ui_text(16U, y, 32U, DIAG_UI_BLACK, DIAG_UI_WHITE, text);
+    if(width < 772U)
+        diag_ui_fill(16U + width, y, 772U - width, 32U, DIAG_UI_WHITE);
+    diag_line_cache[slot].y = y;
+    diag_line_cache[slot].valid = 1U;
+    strncpy(diag_line_cache[slot].text, text,
+            sizeof(diag_line_cache[slot].text) - 1U);
+    diag_line_cache[slot].text[sizeof(diag_line_cache[slot].text) - 1U] = '\0';
+}
+
+void diag_ascii_line(uint16_t y, const char *text)
+{
+    diag_ui_fill(12U, y, 776U, 18U, DIAG_UI_WHITE);
+    diag_ui_ascii(16U, y, DIAG_UI_BLACK, DIAG_UI_WHITE, text);
 }
 
 static uint8_t confirm(const char *message)
 {
     int key;
     diag_line(406U, message);
-    diag_line(438U, "OK: yes / continue       BACK: no / cancel");
+    diag_line(438U, "OK：是/继续       BACK：否/取消");
     diag_release();
     for(;;) {
         key = diag_key();
@@ -100,7 +180,7 @@ static HwResult lcd_test(void)
         }
         /* Let the operator inspect every pixel before putting the prompt on it. */
         Delay_ms(1200U);
-        if(!confirm("Uniform color / aligned grid, without gaps or shifted halves?")) return HW_FAIL;
+        if(!confirm("颜色均匀、网格对齐，且无缺口或错位？")) return HW_FAIL;
     }
     return HW_PASS;
 }
@@ -111,8 +191,8 @@ static HwResult keys_test(void)
     uint16_t tick, back = 0U;
     uint8_t i, value, complete;
     char text[96];
-    diag_line(64U, "Press AND release each menu key; move every DCH switch/button through both levels.");
-    diag_line(92U, "Hold BACK for 1 second to cancel. Timeout: 60 seconds.");
+    diag_line(64U, "依次按下/松开菜单键；切换全部 DCH 开关。");
+    diag_line(96U, "长按 BACK 1秒取消；限时60秒。");
     diag_release();
     for(tick = 0; tick < 6000U; tick++) {
         complete = 0U;
@@ -130,10 +210,13 @@ static HwResult keys_test(void)
             if(seen[i] == 3U) complete++;
         }
         if(tick % 20U == 0U) {
-            sprintf(text, "L:%u R:%u OK:%u BACK:%u | DCH1:%u 2:%u 3:%u 4:%u 5:%u 6:%u",
-                    seen[0], seen[1], seen[2], seen[3], seen[4], seen[5], seen[6], seen[7], seen[8], seen[9]);
+            sprintf(text, "L:%u  R:%u  OK:%u  BACK:%u",
+                    seen[0], seen[1], seen[2], seen[3]);
             diag_line(160U, text);
-            diag_line(190U, "0=unseen, 1/2=one level seen, 3=both stable levels seen");
+            sprintf(text, "DCH 1:%u 2:%u 3:%u 4:%u 5:%u 6:%u",
+                    seen[4], seen[5], seen[6], seen[7], seen[8], seen[9]);
+            diag_line(192U, text);
+            diag_line(224U, "0=未检测，1/2=一种状态，3=两种状态");
         }
         if(complete == 10U) return HW_PASS;
         back = key_down(MENU_KEY_BACK) ? back + 1U : 0U;
@@ -150,8 +233,8 @@ static HwResult analog_test(void)
     uint8_t i, complete;
     char text[96];
     for(i = 0; i < 9U; i++) minimum[i] = 4095U;
-    diag_line(64U, "Move all 9 analog controls to BOTH ends. Required raw range: <=410 and >=3685.");
-    diag_line(90U, "BACK cancels. Timeout 90 seconds. This checks travel, not calibration accuracy.");
+    diag_line(64U, "9个模拟量均移到两端；须达到 <=410 / >=3685。");
+    diag_line(96U, "BACK：取消  限时90秒  仅检测行程");
     for(tick = 0; tick < 9000U; tick++) {
         complete = 0U;
         for(i = 0; i < 9U; i++) {
@@ -164,10 +247,10 @@ static HwResult analog_test(void)
             if(high[i] >= 3U) seen[i] |= 2U;
             if(seen[i] == 3U) complete++;
             if(tick % 20U == 0U) {
-                sprintf(text, "Control %u: current %4u  min %4u  max %4u  %s", i + 1U,
+                sprintf(text, "通道%u：当前%4u  最小%4u  最大%4u  %s", i + 1U,
                         value, minimum[i], maximum[i],
-                        seen[i] == 3U ? "PASS" : "MOVE");
-                diag_line(128U + i * 26U, text);
+                        seen[i] == 3U ? "通过" : "请移动");
+                diag_line(128U + i * 32U, text);
             }
         }
         if(complete == 9U) return HW_PASS;
@@ -183,10 +266,10 @@ static HwResult battery_test(void)
     int key;
     uint8_t i;
     char text[96];
-    diag_line(64U, "Measure battery voltage with a meter, then set that reference below.");
-    diag_line(92U, "LEFT/RIGHT: -/+10 mV   OK: compare   BACK: cancel. Does not change calibration.");
+    diag_line(64U, "用万用表测量电池电压，然后设置下方参考值。");
+    diag_line(96U, "LEFT/RIGHT：-/+10 mV  OK：对比  BACK：取消");
     for(;;) {
-        sprintf(text, "Meter reference: %lu mV (allowed 2500..4500 mV)", (unsigned long)reference);
+        sprintf(text, "万用表参考值：%lu mV（范围 2500..4500 mV）", (unsigned long)reference);
         diag_line(150U, text);
         key = diag_key();
         if(key == MENU_KEY_BACK) return HW_CANCELLED;
@@ -199,7 +282,7 @@ static HwResult battery_test(void)
     /* R74=R77=4.7k, ADC nominal 3.3V. Include the existing user correction. */
     measured = (sum / 32U) * 6600UL / 4095UL;
     measured = measured * param.batVoltAdjust / 1000UL;
-    sprintf(text, "ADC result %lu mV, meter %lu mV; allowed error +/-150 mV",
+    sprintf(text, "ADC %lu mV | 万用表 %lu mV | 误差限 +/-150 mV",
             (unsigned long)measured, (unsigned long)reference);
     diag_line(210U, text);
     printf("[DIAG] %s\r\n", text);
@@ -237,12 +320,12 @@ static HwResult outputs_test(void)
     uint32_t led1 = LED1_GPIO_PORT->ODR & LED1_PIN, led2 = LED2_GPIO_PORT->ODR & LED2_PIN;
     HwResult result = HW_FAIL;
     LED1_ON; LED2_OFF;
-    if(!confirm("Is LED1 on, with LED2 off?")) goto cleanup;
+    if(!confirm("LED1 是否点亮，且 LED2 熄灭？")) goto cleanup;
     LED1_OFF; LED2_ON;
-    if(!confirm("Is LED2 on, with LED1 off?")) goto cleanup;
+    if(!confirm("LED2 是否点亮，且 LED1 熄灭？")) goto cleanup;
     LED1_OFF; LED2_OFF;
     buzzer_tone();
-    if(!confirm("Did the buzzer sound, and are both LEDs now off?")) goto cleanup;
+    if(!confirm("是否听到蜂鸣器，且两个 LED 均已熄灭？")) goto cleanup;
     result = HW_PASS;
 cleanup:
     GPIO_WriteBit(LED1_GPIO_PORT, LED1_PIN, led1 ? Bit_SET : Bit_RESET);
@@ -255,7 +338,7 @@ static HwResult touch_test(void)
     uint16_t x, y;
     int key;
     if(!GTP_CalibrationIsReady()) return HW_BLOCKED;
-    if(!confirm("Draw both diagonals and a vertical line across the old gap; inspect tracking.")) return HW_CANCELLED;
+    if(!confirm("请画两条对角线及一条纵线，检查触摸轨迹。")) return HW_CANCELLED;
     Palette_Init(LCD_SCAN_MODE);
     LCD_SetTextColor(RED);
     for(x = 220U; x <= 760U; x += 270U)
@@ -268,41 +351,136 @@ static HwResult touch_test(void)
         Delay_ms(1U);
     }
     GTP_IRQ_Disable();
-    diag_screen("TOUCH QUALITY / OPERATOR CHECK");
+    diag_screen("触摸质量（人工确认）");
     if(key == MENU_KEY_BACK) return HW_CANCELLED;
-    return confirm("All 9 targets align and strokes stay continuous, with no jumps or double lines?") ? HW_PASS : HW_FAIL;
+    return confirm("9个目标是否对齐，轨迹连续且无跳点或重影？") ? HW_PASS : HW_FAIL;
 }
 
-#define TEST_COUNT 13U
+#define TEST_COUNT 10U
+static const char *result_text(HwResult result)
+{
+    static const char * const names[] = {"通过", "失败", "条件不足", "已取消"};
+    return result <= HW_CANCELLED ? names[result] : "失败";
+}
+
+static uint8_t diagnostics_state_color(uint8_t state)
+{
+    if(state == (uint8_t)HW_PASS + 1U) return DIAG_UI_GREEN;
+    if(state == (uint8_t)HW_FAIL + 1U) return DIAG_UI_RED;
+    if(state == (uint8_t)HW_BLOCKED + 1U) return DIAG_UI_YELLOW;
+    return DIAG_UI_BLACK;
+}
+
+static void diagnostics_menu_draw_row(const char * const *names,
+                                      const uint8_t *states, uint8_t item,
+                                      uint8_t selected, uint8_t first_visible)
+{
+    uint16_t y = 112U + (uint16_t)(item - first_visible) * 48U;
+    char line[48];
+
+    diag_ui_fill(4U, y, 792U, 40U, DIAG_UI_GREY);
+    diag_ui_fill(8U, y + 4U, 8U, 32U,
+                 item == selected ? DIAG_UI_BLUE : DIAG_UI_GREY);
+    diag_ui_frame(4U, y, 792U, 40U,
+                  item == selected ? DIAG_UI_BLUE : DIAG_UI_BLACK);
+    sprintf(line, "%2u  %s", item + 1U, names[item]);
+    /* Keep native glyph resolution: downscaling made the strokes too thin. */
+    diag_ui_text(28U, y + 4U, 32U, DIAG_UI_BLACK, DIAG_UI_GREY, line);
+    diag_ui_text(640U, y + 4U, 32U, diagnostics_state_color(states[item]),
+                 DIAG_UI_GREY,
+                 states[item] ? result_text((HwResult)(states[item] - 1U)) : "未测试");
+}
+
+static void diagnostics_menu_mark_row(uint8_t item, uint8_t first_visible,
+                                      uint8_t selected)
+{
+    uint16_t y = 112U + (uint16_t)(item - first_visible) * 48U;
+    diag_ui_fill(8U, y + 4U, 8U, 32U,
+                 selected ? DIAG_UI_BLUE : DIAG_UI_GREY);
+    diag_ui_frame(4U, y, 792U, 40U,
+                  selected ? DIAG_UI_BLUE : DIAG_UI_BLACK);
+}
+
+static void diagnostics_menu_draw_window(const char * const *names,
+                                         const uint8_t *states,
+                                         uint8_t selected,
+                                         uint8_t first_visible)
+{
+    uint8_t row;
+    char line[32];
+
+    diag_ui_fill(4U, 72U, 792U, 32U, DIAG_UI_GREY);
+    sprintf(line, "项目 %u-%u / %u",
+            first_visible + 1U, first_visible + 6U, TEST_COUNT);
+    diag_ui_text(20U, 78U, 20U, DIAG_UI_BLACK, DIAG_UI_GREY, line);
+    for(row = 0U; row < 6U; row++) {
+        diagnostics_menu_draw_row(names, states, first_visible + row,
+                                  selected, first_visible);
+    }
+}
+
+static void diagnostics_menu_draw(const char * const *names,
+                                  const uint8_t *states, uint8_t selected,
+                                  uint8_t first_visible)
+{
+    diag_screen("硬件测试");
+    diag_ui_ascii(20U, 42U, DIAG_UI_WHITE, DIAG_UI_BLUE,
+                  "HARDWARE DIAGNOSTICS / MANUAL ITEMS");
+    diagnostics_menu_draw_window(names, states, selected, first_visible);
+
+    diag_ui_text(12U, 406U, 16U, DIAG_UI_BLUE, DIAG_UI_WHITE,
+                 "LEFT/RIGHT：选择   OK：运行   BACK：返回");
+    diag_ui_fill(4U, 432U, 792U, 32U, DIAG_UI_WHITE);
+    diag_ui_text(12U, 440U, 16U, DIAG_UI_BLACK, DIAG_UI_WHITE,
+                 "EEPROM / Flash / SD 卡：开机自动检测");
+}
+
 void diagnostics_menu(void)
 {
-    static const char * const names[TEST_COUNT] = {"LCD colors / grid", "Keys / digital switches",
-        "Analog control travel", "Battery meter comparison", "LEDs / buzzer", "UART4 cable loopback",
-        "NRF diagnostic TX + ACK", "NRF diagnostic RX", "Flash dedicated-sector R/W",
-        "EEPROM reserved-byte R/W", "SD temporary-file R/W", "Touch quality (operator)", "MCU memory sample"};
+    static const char * const names[TEST_COUNT] = {"LCD 颜色/网格", "按键/DCH开关",
+        "模拟量行程", "电池电压对比", "LED/蜂鸣器", "UART4 线缆回环",
+        "NRF 发送+ACK（需另一台）", "NRF 接收（需另一台）",
+        "触摸质量（人工）", "MCU 内存抽检"};
     static uint8_t states[TEST_COUNT]; /* 0=untested; else HwResult+1, this power cycle. */
-    uint8_t selected = 0U, i, redraw = 1U;
+    uint8_t selected = 0U, first_visible = 0U, redraw = 1U;
+    uint8_t old_selected, old_first_visible;
     int key;
     HwResult result;
-    char line[96];
     GTP_IRQ_Disable();
     diag_release();
     for(;;) {
         if(redraw) {
-            diag_screen("HARDWARE TESTS");
-            for(i = 0; i < TEST_COUNT; i++) {
-                sprintf(line, "%c %2u. %-32s %s", i == selected ? '>' : ' ', i + 1U,
-                        names[i], states[i] ? hardware_result_name((HwResult)(states[i] - 1U)) : "NOT TESTED");
-                diag_line(60U + 25U * i, line);
-            }
-            diag_line(410U, "LEFT/RIGHT select | OK run | BACK return. Results remain until power-off.");
-            diag_line(440U, "Storage tests do not run on every boot. Boot results remain a separate snapshot.");
+            diagnostics_menu_draw(names, states, selected, first_visible);
             redraw = 0U;
         }
         key = diag_key();
         if(key == MENU_KEY_BACK) break;
-        if(key == MENU_KEY_LEFT) { selected = selected ? selected - 1U : TEST_COUNT - 1U; redraw = 1U; }
-        if(key == MENU_KEY_RIGHT) { selected = (selected + 1U) % TEST_COUNT; redraw = 1U; }
+        if(key == MENU_KEY_LEFT) {
+            old_selected = selected;
+            old_first_visible = first_visible;
+            selected = selected ? selected - 1U : TEST_COUNT - 1U;
+            if(selected < first_visible) first_visible = selected;
+            if(selected >= first_visible + 6U) first_visible = selected - 5U;
+            if(first_visible != old_first_visible)
+                diagnostics_menu_draw_window(names, states, selected, first_visible);
+            else {
+                diagnostics_menu_mark_row(old_selected, first_visible, 0U);
+                diagnostics_menu_mark_row(selected, first_visible, 1U);
+            }
+        }
+        if(key == MENU_KEY_RIGHT) {
+            old_selected = selected;
+            old_first_visible = first_visible;
+            selected = (selected + 1U) % TEST_COUNT;
+            if(selected < first_visible) first_visible = selected;
+            if(selected >= first_visible + 6U) first_visible = selected - 5U;
+            if(first_visible != old_first_visible)
+                diagnostics_menu_draw_window(names, states, selected, first_visible);
+            else {
+                diagnostics_menu_mark_row(old_selected, first_visible, 0U);
+                diagnostics_menu_mark_row(selected, first_visible, 1U);
+            }
+        }
         if(key == MENU_KEY_OK) {
             diag_screen(names[selected]);
             result = HW_CANCELLED;
@@ -313,38 +491,26 @@ void diagnostics_menu(void)
                 case 3: result = battery_test(); break;
                 case 4: result = outputs_test(); break;
                 case 5:
-                    if(confirm("Disconnect UART4 peripheral. Jumper PA0 TX to PA1 RX. Cable ready?"))
+                    if(confirm("断开 UART4；短接 PA0(TX)-PA1(RX)。已就绪？"))
                         result = hardware_uart_loopback_test();
                     break;
                 case 6: case 7:
-                    if(confirm(selected == 6U ? "Start peer RX first. Diagnostic channel 40, 1 Mbps, address D7 43 44 47 31. Ready?" :
-                               "Start this RX, then peer TX within 15s. Channel 40, 1 Mbps. Ready?"))
+                    if(confirm(selected == 6U ? "先启动另一台 NRF 接收；频道40、1 Mbps。就绪？" :
+                               "启动后20秒内运行另一台的 NRF 发送。已就绪？"))
                         result = hardware_radio_test(selected == 7U);
                     break;
-                case 8:
-                    if(confirm("Write/verify/erase dedicated blank sector 0x5FE000. Keep power connected. Start?"))
-                        result = hardware_flash_write_test();
-                    break;
-                case 9:
-                    if(confirm("Write/verify/restore reserved byte 0xFF at I2C 0x50. Keep power connected. Start?"))
-                        result = hardware_eeprom_write_test();
-                    break;
-                case 10:
-                    if(confirm("Create, verify and delete a NEW 4 KiB temporary file on SD. Start?"))
-                        result = hardware_sd_write_test();
-                    break;
-                case 11: result = touch_test(); break;
-                case 12: result = hardware_memory_test(); break;
+                case 8: result = touch_test(); break;
+                case 9: result = hardware_memory_test(); break;
                 default: break;
             }
             /* Cancellation never hides a recorded failure from an earlier attempt. */
             if(result != HW_CANCELLED) states[selected] = (uint8_t)result + 1U;
             printf("[DIAG] %s: %s\r\n", names[selected], hardware_result_name(result));
             diag_screen(names[selected]);
-            diag_line(100U, hardware_result_name(result));
-            if(result == HW_BLOCKED) diag_line(160U, "Prerequisite missing or reserved storage occupied. No pass recorded.");
-            if(selected == 12U) diag_line(160U, "Owned 1 KiB RAM patterns and four ROM constants; not full-chip integrity.");
-            (void)confirm("Test finished. Return to hardware test list.");
+            diag_line(100U, result_text(result));
+            if(result == HW_BLOCKED) diag_line(160U, "前置条件不足，本次不记录为通过。");
+            if(selected == 9U) diag_line(160U, "专用1 KiB RAM + 4个ROM常量；非全芯片检测。");
+            (void)confirm("测试结束，返回硬件测试列表。");
             diag_release();
             redraw = 1U;
         }

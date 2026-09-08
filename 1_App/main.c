@@ -214,6 +214,7 @@ void setup(void)
     u8 dmp_result = MPU_DMP_INIT_ERROR_DEVICE;
     int32_t touch_result = -1;
     SD_Error sd_result = SD_ERROR;
+    HwResult hw_result;
     uint32_t flash_id = 0UL;
     RCC_ClocksTypeDef clocks;
     char detail[72];
@@ -266,11 +267,27 @@ void setup(void)
     sprintf(detail, "JEDEC=%06lX expected=%06lX; read-only probe E%u",
             (unsigned long)flash_id, (unsigned long)FLASH_ID, code);
     boot_done(BOOT_FLASH, code == 0U ? BOOT_PASS : BOOT_FAIL, detail);
+    if(code == 0U) {
+        boot_start(BOOT_FLASH_WRITE);
+        hw_result = hardware_flash_write_test();
+        boot_done(BOOT_FLASH_WRITE, hw_result == HW_PASS ? BOOT_PASS : BOOT_FAIL,
+                  hw_result == HW_BLOCKED ? "Dedicated sector 0x5FE000 occupied; no erase performed" :
+                  hw_result == HW_PASS ? "Dedicated sector program/readback/erase verified" :
+                                         "Dedicated sector program/readback/erase failed");
+    } else boot_skip(BOOT_FLASH_WRITE, "Blocked: Flash read-only probe failed");
 
     boot_start(BOOT_EEPROM);
     code = EEPROM_BootProbe();
     sprintf(detail, "ACK + repeated read of first 256 bytes; E%u", code);
     boot_done(BOOT_EEPROM, code == 0U ? BOOT_PASS : BOOT_FAIL, detail);
+    if(code == 0U) {
+        boot_start(BOOT_EEPROM_WRITE);
+        hw_result = hardware_eeprom_write_test();
+        boot_done(BOOT_EEPROM_WRITE, hw_result == HW_PASS ? BOOT_PASS : BOOT_FAIL,
+                  hw_result == HW_BLOCKED ? "Reserved byte 0xFF occupied; no write performed" :
+                  hw_result == HW_PASS ? "Reserved byte 0xFF write/readback/restore verified" :
+                                         "Reserved byte write/readback/restore failed");
+    } else boot_skip(BOOT_EEPROM_WRITE, "Blocked: EEPROM read-only probe failed");
 
     boot_start(BOOT_RTC);
     code = RTC_Config();
@@ -342,12 +359,23 @@ void setup(void)
         res = f_mount(&fs_sdcard, "0:", 1);
         sprintf(detail, "Read partition/FAT metadata; mount result=%u", res);
         boot_done(BOOT_SD_FS, res == FR_OK ? BOOT_PASS : BOOT_FAIL, detail);
-    } else boot_skip(BOOT_SD_FS, "Blocked: SD card initialization failed");
+        if(res == FR_OK) {
+            boot_start(BOOT_SD_WRITE);
+            hw_result = hardware_sd_write_test();
+            boot_done(BOOT_SD_WRITE, hw_result == HW_PASS ? BOOT_PASS : BOOT_FAIL,
+                      hw_result == HW_BLOCKED ? "No unused diagnostic filename available" :
+                      hw_result == HW_PASS ? "Temporary 4 KiB file write/read/delete verified" :
+                                             "Temporary file write/read/delete failed");
+        } else boot_skip(BOOT_SD_WRITE, "Blocked: SD filesystem mount failed");
+    } else {
+        boot_skip(BOOT_SD_FS, "Blocked: SD card initialization failed");
+        boot_skip(BOOT_SD_WRITE, "Blocked: SD card initialization failed");
+    }
 
     boot_start(BOOT_NRF);
     ok = nrf24l01_check() == 0U;
     boot_done(BOOT_NRF, ok ? BOOT_PASS : BOOT_FAIL,
-              "NRF TX address register write/read comparison");
+              "NRF RF_CH complementary-pattern write/read/restore");
 
     if(boot_report.items[BOOT_FLASH].state == BOOT_PASS) {
         boot_start(BOOT_PARAMS);
@@ -394,9 +422,6 @@ void setup(void)
     boot_skip(BOOT_OUTPUTS, "Configured; LED/buzzer need physical feedback");
     boot_skip(BOOT_UART, "Configured; no external loopback fixture");
     boot_skip(BOOT_RADIO, "No peer/ACK test; SPI presence is not an RF link test");
-    boot_skip(BOOT_FLASH_WRITE, "Hardware Tests: dedicated blank sector write/read/erase");
-    boot_skip(BOOT_EEPROM_WRITE, "Hardware Tests: reserved blank byte write/read/restore");
-    boot_skip(BOOT_SD_WRITE, "Hardware Tests: create/read/delete a new temporary file");
     boot_skip(BOOT_TOUCH_QUALITY, "Manual full-screen accuracy test required");
     boot_start(BOOT_INTERNAL_MEMORY);
     boot_done(BOOT_INTERNAL_MEMORY, hardware_memory_test() == HW_PASS ? BOOT_PASS : BOOT_FAIL,

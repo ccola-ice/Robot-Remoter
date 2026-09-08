@@ -209,7 +209,7 @@ void gui_boot_finish(const BootReport *report)
             report->completed, (unsigned)BOOT_ITEM_COUNT, boot_report_percent(report),
             report->passed, report->failed, report->not_tested);
     ILI9806G_DispString_EN(20U, 370U, displayBuffer);
-    ILI9806G_DispString_EN(20U, 398U, "Open Hardware Tests for operator / fixture / storage write tests.");
+    ILI9806G_DispString_EN(20U, 398U, "Open Hardware Tests for operator / external-fixture tests.");
     boot_last_report = report;
     LCD_SetFont(&Font8x16);
     LCD_SetBackColor(BLACK);
@@ -486,7 +486,7 @@ void main_menu(uint8_t selected_item)
 		"Radio setup / status",
 		"Browse SD card files",
 		"View / edit / save settings",
-        "Run manual and storage tests",
+        "Run operator / fixture tests",
         "Read / edit AT24C08 safe window"
 	};
 	uint8_t i;

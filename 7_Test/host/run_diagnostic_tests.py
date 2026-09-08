@@ -24,6 +24,7 @@ with tempfile.TemporaryDirectory(prefix='remoter-diag-') as folder:
     (tmp/'eeprom_menu.c').write_bytes((root/'1_App/eeprom_menu.c').read_bytes())
     exe = tmp/'eeprom-menu-test.exe'
     subprocess.run([compiler, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
+                    '-finput-charset=GBK', '-fexec-charset=GBK',
                     '-I', str(tmp), str(Path(__file__).with_name('eeprom_menu_test.c')),
                     '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

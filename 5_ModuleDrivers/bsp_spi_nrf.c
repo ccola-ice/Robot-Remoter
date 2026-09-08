@@ -77,8 +77,9 @@ void NRF_SPI_Init(void)
   GPIO_InitStructure.GPIO_Pin = NRF_SPI_MOSI_PIN;
   GPIO_Init(NRF_SPI_MOSI_GPIO_PORT, &GPIO_InitStructure);  
 
-  /* 这是自定义的宏，用于拉高csn引脚，NRF进入空闲状态 */
-  NRF_CSN_HIGH(); 
+  /* Keep the radio deselected and out of RX/TX while SPI is configured. */
+  NRF_CE_LOW();
+  NRF_CSN_HIGH();
 
   /* NRF_SPI 模式配置 */
   // NRF芯片 支持SPI模式0及模式3，据此设置CPOL CPHA
@@ -315,29 +316,26 @@ void NRF_PowerDown(void)
   * @param  无
   * @retval SUCCESS/ERROR 连接正常/连接失败
   */
-static u8 buf[5]={0xC2,0xC2,0xC2,0xC2,0xC2};
-u8 buf1[5];
 u8 NRF_Check(void)
 {
-	u8 i; 
-	 
-	/*写入5个字节的地址.  */  
-	SPI_NRF_WriteBuf(NRF_WRITE_REG+TX_ADDR,buf,5);
+	u8 saved_channel, readback;
 
-	/*读出写入的地址 */
-	SPI_NRF_ReadBuf(TX_ADDR,buf1,5); 
-	 
-	/*比较*/               
-	for(i=0;i<5;i++)
-	{
-		if(buf1[i]!=0xC2)
-		break;
-	} 
-	       
-	if(i==5)
-		return SUCCESS ;        //MCU与NRF成功连接 
-	else
-		return ERROR ;        //MCU与NRF不正常连接
+	/* RF_CH has seven writable bits and is safer to probe than overwriting the
+	 * active multi-byte TX address. Two complementary values exercise MOSI/MISO. */
+	saved_channel = SPI_NRF_ReadReg(RF_CH);
+	if(saved_channel == 0xffU) return ERROR;
+	SPI_NRF_WriteReg(NRF_WRITE_REG + RF_CH, 0x2aU);
+	readback = SPI_NRF_ReadReg(RF_CH);
+	if(readback != 0x2aU) {
+		SPI_NRF_WriteReg(NRF_WRITE_REG + RF_CH, saved_channel & 0x7fU);
+		return ERROR;
+	}
+	SPI_NRF_WriteReg(NRF_WRITE_REG + RF_CH, 0x55U);
+	readback = SPI_NRF_ReadReg(RF_CH);
+	SPI_NRF_WriteReg(NRF_WRITE_REG + RF_CH, saved_channel & 0x7fU);
+	if(readback != 0x55U || SPI_NRF_ReadReg(RF_CH) != (saved_channel & 0x7fU))
+		return ERROR;
+	return SUCCESS;
 }
 
 /**

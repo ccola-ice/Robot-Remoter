@@ -4,15 +4,33 @@
 #include <string.h>
 #include "menu.h"
 
+#define DIAG_UI_BLACK  0U
+#define DIAG_UI_WHITE  1U
+#define DIAG_UI_BLUE   2U
+#define DIAG_UI_GREY   3U
+#define DIAG_UI_RED    4U
+
 static uint8_t bytes[256];
 static const int *keys;
 static unsigned key_count, key_index, writes, read_error, mismatch, failure_shown;
+static unsigned screen_draws;
 static void diag_release(void) {}
-static void diag_screen(const char *s) {(void)s;}
-static void diag_line(uint16_t y, const char *s)
+static void diag_screen(const char *s) {(void)s; screen_draws++;}
+static void diag_ui_fill(uint16_t x, uint16_t y, uint16_t width,
+                         uint16_t height, uint8_t color)
 {
-    (void)y;
-    if(strstr(s,"WRITE FAILED")) failure_shown=1U;
+    (void)x; (void)y; (void)width; (void)height; (void)color;
+}
+static void diag_ui_frame(uint16_t x, uint16_t y, uint16_t width,
+                          uint16_t height, uint8_t color)
+{
+    (void)x; (void)y; (void)width; (void)height; (void)color;
+}
+static void diag_ui_text(uint16_t x, uint16_t y, uint16_t size,
+                         uint8_t foreground, uint8_t background, const char *s)
+{
+    (void)x; (void)y; (void)size; (void)foreground; (void)background;
+    if(strstr(s,"\xD0\xB4\xC8\xEB\xCA\xA7\xB0\xDC")) failure_shown=1U;
 }
 static int diag_key(void)
 {
@@ -34,10 +52,11 @@ static uint8_t EEPROM_Byte_Write(uint8_t address, uint8_t value)
 static void run(const int *events, unsigned size, unsigned fail_read, unsigned wrong_value)
 {
     memset(bytes,0xa5,sizeof(bytes));
-    keys=events; key_count=size; key_index=writes=failure_shown=0U;
+    keys=events; key_count=size; key_index=writes=failure_shown=screen_draws=0U;
     read_error=fail_read; mismatch=wrong_value;
     eeprom_menu();
     assert(key_index == key_count);
+    assert(screen_draws == 1U); /* Key navigation must use partial redraws. */
 }
 #define RUN(events,r,m) run(events,sizeof(events)/sizeof(events[0]),r,m)
 int main(void)

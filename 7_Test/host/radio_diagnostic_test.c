@@ -45,7 +45,7 @@ static void SPI_I2S_SendData(unsigned spi, uint8_t data)
     }
     if(absent) {response=0xffU; return;}
     if(command <= 0x1fU) {
-        if(command == STATUS && ce && (regs[CONFIG][0]&1U) && !restored && !quiet)
+        if(command == STATUS && ce && (regs[CONFIG][0]&1U) && !quiet)
             regs[STATUS][0] = RX_DR;
         response=regs[command][offset-2U];
     } else if(command <= 0x3fU) {
@@ -56,14 +56,16 @@ static void SPI_I2S_SendData(unsigned spi, uint8_t data)
         payload[offset-2U]=data;
         if(offset == 33U) pending=1U;
     } else if(command == RD_RX_PLOAD) {
-        response=(uint8_t)(0x6dU ^ ((offset-2U)*17U));
+        unsigned index=offset-2U;
+        response=index==0U ? 0xd6U : index==1U ? (uint8_t)packets :
+                 (uint8_t)(0x6dU ^ (index*17U) ^ packets);
         if(bad_payload) response^=1U;
         if(offset == 33U) packets++;
     }
 }
 static uint8_t SPI_I2S_ReceiveData(unsigned spi) {(void)spi; return response;}
 static void Delay_us(unsigned us) {(void)us;}
-static void Delay_ms(unsigned ms) {elapsed+=ms; assert(elapsed < 16000U);}
+static void Delay_ms(unsigned ms) {elapsed+=ms; assert(elapsed < 21000U);}
 static uint8_t read_button_back_gpio(uint8_t id) {(void)id;return !cancel;}
 const char *hardware_result_name(HwResult r)
 {
@@ -94,7 +96,8 @@ int main(void)
 {
     unsigned i;
     reset(); assert(hardware_radio_test(0U) == HW_PASS && packets == 8U);
-    for(i=0;i<32;i++) assert(payload[i] == (uint8_t)(0x6dU ^ (i*17U)));
+    assert(payload[0] == 0xd6U && payload[1] == 7U);
+    for(i=2;i<32;i++) assert(payload[i] == (uint8_t)(0x6dU ^ (i*17U) ^ 7U));
     check_restored();
     reset(); assert(hardware_radio_test(1U) == HW_PASS && packets == 8U); check_restored();
     reset(); nack=1U; assert(hardware_radio_test(0U) == HW_FAIL); check_restored();
@@ -103,8 +106,8 @@ int main(void)
     reset(); misconfigure=1U; assert(hardware_radio_test(0U) == HW_FAIL); check_restored();
     reset(); absent=1U; assert(hardware_radio_test(0U) == HW_FAIL && !restored); check_restored();
     reset(); fail_spi=1U; assert(hardware_radio_test(0U) == HW_FAIL && !restored); check_restored();
-    reset(); quiet=1U; assert(hardware_radio_test(0U) == HW_FAIL && elapsed < 2100U); check_restored();
-    reset(); quiet=1U; assert(hardware_radio_test(1U) == HW_FAIL && elapsed < 15100U); check_restored();
+    reset(); quiet=1U; assert(hardware_radio_test(0U) == HW_FAIL && elapsed < 5100U); check_restored();
+    reset(); quiet=1U; assert(hardware_radio_test(1U) == HW_FAIL && elapsed < 20100U); check_restored();
     reset(); regs[FIFO_STATUS][0]=0U;
     assert(hardware_radio_test(0U) == HW_BLOCKED && !restored && !packets);
     assert(regs[FIFO_STATUS][0]==0U && ce == 1U);

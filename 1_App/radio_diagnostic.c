@@ -42,13 +42,22 @@ static void reg_write(uint8_t reg, uint8_t value)
     transaction(NRF_WRITE_REG | reg, &value, 1U, 1U);
 }
 
+static void packet_fill(uint8_t *packet, uint8_t sequence)
+{
+    uint8_t i;
+    packet[0] = 0xd6U;
+    packet[1] = sequence;
+    for(i = 2U; i < 32U; i++)
+        packet[i] = (uint8_t)(0x6dU ^ (i * 17U) ^ sequence);
+}
+
 HwResult hardware_radio_test(uint8_t receive)
 {
     static const uint8_t regs[] = {CONFIG, EN_AA, EN_RXADDR, SETUP_AW, SETUP_RETR,
         RF_CH, RF_SETUP, RX_PW_P0, 0x1cU}; /* DYNPD: fixed 32-byte diagnostic packets */
     uint8_t old[sizeof(regs)], tx[5], rx[5], packet[32], received[32];
     uint8_t address[5] = {0xd7U, 0x43U, 0x44U, 0x47U, 0x31U};
-    uint8_t i, count = 0U, status, old_ce;
+    uint8_t i, count = 0U, status, fifo, old_ce, retry = 0U;
     uint16_t ms = 0U;
     HwResult result = HW_FAIL;
     io_error = 0U;
@@ -61,19 +70,22 @@ HwResult hardware_radio_test(uint8_t receive)
     i = reg_read(SETUP_AW);
     if(io_error || i < 1U || i > 3U) goto no_change;
     if((status & 0x11U) != 0x11U) { result = HW_BLOCKED; goto no_change; }
-    status = reg_read(STATUS);
-    if(io_error || (status & 0x70U)) { result = HW_BLOCKED; goto no_change; }
     for(i = 0; i < sizeof(regs); i++) old[i] = reg_read(regs[i]);
     transaction(TX_ADDR, tx, 5U, 0U);
     transaction(RX_ADDR_P0, rx, 5U, 0U);
     if(io_error) goto no_change;
     reg_write(CONFIG, 0x0cU); /* Power down before reconfiguration. */
     reg_write(EN_AA, 1U); reg_write(EN_RXADDR, 1U); reg_write(SETUP_AW, 3U);
-    reg_write(SETUP_RETR, 0x3fU); reg_write(RF_CH, 40U); reg_write(RF_SETUP, 0x06U);
+    /* Four-millisecond retransmit spacing is tolerant of a busy peer UI. */
+    reg_write(SETUP_RETR, 0xffU); reg_write(RF_CH, 40U); reg_write(RF_SETUP, 0x06U);
     reg_write(RX_PW_P0, 32U); reg_write(0x1cU, 0U);
     transaction(NRF_WRITE_REG | TX_ADDR, address, 5U, 1U);
     transaction(NRF_WRITE_REG | RX_ADDR_P0, address, 5U, 1U);
-    for(i = 0; i < 32U; i++) packet[i] = (uint8_t)(0x6dU ^ (i * 17U));
+    /* Empty FIFOs were verified above, so stale IRQ flags are safe to clear. */
+    reg_write(STATUS, 0x70U);
+    transaction(FLUSH_TX, packet, 0U, 1U);
+    transaction(FLUSH_RX, packet, 0U, 1U);
+    packet_fill(packet, 0U);
     reg_write(CONFIG, receive ? 0x0fU : 0x0eU);
     Delay_ms(2U);
     /* Check the settings that make an ACK meaningful; reject all-ones absent devices. */
@@ -85,23 +97,34 @@ HwResult hardware_radio_test(uint8_t receive)
         transaction(WR_TX_PLOAD, packet, 32U, 1U);
         NRF_CE_HIGH(); Delay_us(20U); NRF_CE_LOW();
     }
-    for(ms = 0; ms < 15000U; ms++) {
+    for(ms = 0; ms < 20000U; ms++) {
         status = reg_read(STATUS);
+        fifo = reg_read(FIFO_STATUS);
         if(io_error || status == 0xffU) goto cleanup;
         if(!read_button_back_gpio(0U)) { result = HW_CANCELLED; goto cleanup; }
-        if(receive && (status & RX_DR)) {
+        if(receive && ((status & RX_DR) || !(fifo & 0x01U))) {
             transaction(RD_RX_PLOAD, received, 32U, 0U);
+            packet_fill(packet, count);
             if(io_error || memcmp(packet, received, 32U)) goto cleanup;
             reg_write(STATUS, RX_DR);
             if(++count == 8U) { result = HW_PASS; break; }
         } else if(!receive && (status & TX_DS)) {
             reg_write(STATUS, TX_DS);
+            retry = 0U;
             if(++count == 8U) { result = HW_PASS; break; }
             Delay_ms(20U);
+            packet_fill(packet, count);
+            transaction(WR_TX_PLOAD, packet, 32U, 1U);
+            NRF_CE_HIGH(); Delay_us(20U); NRF_CE_LOW();
+        } else if(!receive && (status & MAX_RT)) {
+            reg_write(STATUS, MAX_RT);
+            transaction(FLUSH_TX, packet, 0U, 1U);
+            if(++retry >= 3U) goto cleanup;
+            Delay_ms(50U);
             transaction(WR_TX_PLOAD, packet, 32U, 1U);
             NRF_CE_HIGH(); Delay_us(20U); NRF_CE_LOW();
         }
-        if(!receive && ((status & MAX_RT) || ms >= 2000U)) goto cleanup;
+        if(!receive && ms >= 5000U) goto cleanup;
         Delay_ms(1U);
     }
 cleanup:
@@ -122,7 +145,7 @@ cleanup:
     if(memcmp(packet, tx, 5U) || memcmp(packet + 5, rx, 5U) || io_error) result = HW_FAIL;
 no_change:
     if(old_ce) NRF_CE_HIGH();
-    printf("[DIAG] radio %s: packets=%u/8 ms=%u result=%s\r\n",
-           receive ? "RX" : "TX+ACK", count, ms, hardware_result_name(result));
+    printf("[DIAG] radio %s: packets=%u/8 ms=%u retries=%u result=%s\r\n",
+           receive ? "RX" : "TX+ACK", count, ms, retry, hardware_result_name(result));
     return result;
 }
