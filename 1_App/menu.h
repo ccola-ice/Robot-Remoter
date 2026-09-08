@@ -11,6 +11,8 @@ typedef enum
     MENU_KEY_BACK
 } MenuKey;
 
+typedef struct GuiRobotTelemetry GuiRobotTelemetry;
+
 /* Initialize the menu after the LCD is ready. */
 void menu_init(void);
 
@@ -22,5 +24,8 @@ void menu_tick_10ms(void);
 
 /* Non-blocking menu state machine. Call it repeatedly from the main loop. */
 void menu_process(void);
+
+/* Future NRF packet decoding can publish one complete robot telemetry frame here. */
+void menu_robot_telemetry_update(const GuiRobotTelemetry *telemetry);
 
 #endif

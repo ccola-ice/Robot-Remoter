@@ -26,6 +26,30 @@ typedef struct
     char value[GUI_PARAM_VALUE_LENGTH];
 } GuiParamRow;
 
+typedef struct GuiRobotTelemetry
+{
+    float speed_mps;
+    float position_x_m;
+    float position_y_m;
+    float position_z_m;
+    float acceleration_x_mps2;
+    float acceleration_y_mps2;
+    float acceleration_z_mps2;
+    float roll_deg;
+    float pitch_deg;
+    float yaw_deg;
+    float voltage_v;
+    double latitude_deg;
+    double longitude_deg;
+    float gps_altitude_m;
+    uint32_t packet_count;
+    uint16_t packet_age_ms;
+    uint8_t battery_percent;
+    uint8_t satellites;
+    uint8_t gps_fix;
+    uint8_t link_online;
+} GuiRobotTelemetry;
+
 void gui_prepare_page(void);
 
 void gui_clock_overlay(void);
@@ -44,6 +68,8 @@ void digital_channel_monitor_page(const uint8_t *raw_values,
                                   const uint8_t *stable_values);
 
 void imu6050_information(void);
+
+void robot_control_page(const GuiRobotTelemetry *telemetry);
 
 void main_menu(uint8_t selected_item);
 

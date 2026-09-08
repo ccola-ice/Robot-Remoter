@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MENU_ITEM_COUNT       11U
+#define MENU_ITEM_COUNT       12U
 #define MENU_EVENT_QUEUE_SIZE 8U
 #define MENU_REFRESH_TICKS    5U
 #define CLOCK_REFRESH_TICKS   20U
@@ -40,7 +40,8 @@ typedef enum
     MENU_PAGE_FILE_BROWSER,
     MENU_PAGE_PARAMETER_SETTINGS,
     MENU_PAGE_DIAGNOSTICS,
-    MENU_PAGE_EEPROM
+    MENU_PAGE_EEPROM,
+    MENU_PAGE_ROBOT_CONTROL
 } MenuPage;
 
 static const MenuPage menu_items[MENU_ITEM_COUNT] =
@@ -55,7 +56,8 @@ static const MenuPage menu_items[MENU_ITEM_COUNT] =
     MENU_PAGE_FILE_BROWSER,
     MENU_PAGE_PARAMETER_SETTINGS,
     MENU_PAGE_DIAGNOSTICS,
-    MENU_PAGE_EEPROM
+    MENU_PAGE_EEPROM,
+    MENU_PAGE_ROBOT_CONTROL
 };
 
 static const uint8_t nrf_power_register[4] = {0x09U, 0x0bU, 0x0dU, 0x0fU};
@@ -111,6 +113,40 @@ static uint8_t param_editing;
 static uint8_t param_dirty;
 static uint8_t param_dirty_before_edit;
 static uint16_t param_revision;
+static GuiRobotTelemetry robot_telemetry;
+
+void menu_robot_telemetry_update(const GuiRobotTelemetry *telemetry)
+{
+    if(telemetry != 0)
+    {
+        robot_telemetry = *telemetry;
+    }
+}
+
+static void menu_robot_telemetry_demo_init(void)
+{
+    memset(&robot_telemetry, 0, sizeof(robot_telemetry));
+    robot_telemetry.speed_mps = 1.25f;
+    robot_telemetry.position_x_m = 12.3f;
+    robot_telemetry.position_y_m = -4.8f;
+    robot_telemetry.position_z_m = 0.2f;
+    robot_telemetry.acceleration_x_mps2 = 0.08f;
+    robot_telemetry.acceleration_y_mps2 = -0.04f;
+    robot_telemetry.acceleration_z_mps2 = 9.79f;
+    robot_telemetry.roll_deg = 1.8f;
+    robot_telemetry.pitch_deg = -0.7f;
+    robot_telemetry.yaw_deg = 128.6f;
+    robot_telemetry.voltage_v = 24.6f;
+    robot_telemetry.latitude_deg = 31.230416;
+    robot_telemetry.longitude_deg = 121.473701;
+    robot_telemetry.gps_altitude_m = 12.8f;
+    robot_telemetry.packet_count = 1248UL;
+    robot_telemetry.packet_age_ms = 42U;
+    robot_telemetry.battery_percent = 82U;
+    robot_telemetry.satellites = 18U;
+    robot_telemetry.gps_fix = 3U;
+    robot_telemetry.link_online = 1U;
+}
 
 static uint8_t menu_nrf_power_index(uint8_t power_register)
 {
@@ -1263,6 +1299,10 @@ static void menu_draw_current_page(void)
             break;
         }
 
+        case MENU_PAGE_ROBOT_CONTROL:
+            robot_control_page(&robot_telemetry);
+            break;
+
         default:
             current_page = MENU_PAGE_HOME;
             main_menu(selected_item);
@@ -1291,6 +1331,10 @@ static void menu_refresh_dynamic_page(void)
     {
         system_data_read_and_set();
     }
+    else if(current_page == MENU_PAGE_ROBOT_CONTROL)
+    {
+        robot_control_page(&robot_telemetry);
+    }
 }
 
 void menu_init(void)
@@ -1303,6 +1347,7 @@ void menu_init(void)
     clock_refresh_due = 1U;
     refresh_due = 0;
     current_page = MENU_PAGE_HOME;
+    menu_robot_telemetry_demo_init();
     page_dirty = 1;
     page_changed = 1;
 }
