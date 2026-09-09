@@ -1756,10 +1756,13 @@ static void gui_robot_card(uint16_t x, uint16_t y, uint16_t width,
 	ILI9806G_DispString_EN(x + 12U, y + 4U, (char *)title);
 }
 
-#define ROBOT_LEFT_X_ADC_INDEX  0U
+/* CHANNEL MONITOR mapping (zero-based ADC1_Value indices):
+ * left X=CH03, left Y=CH02; right X=CH06, right Y=CH05.
+ * Both horizontal axes require display/control direction correction. */
+#define ROBOT_LEFT_X_ADC_INDEX  2U
 #define ROBOT_LEFT_Y_ADC_INDEX  1U
-#define ROBOT_RIGHT_X_ADC_INDEX 2U
-#define ROBOT_RIGHT_Y_ADC_INDEX 3U
+#define ROBOT_RIGHT_X_ADC_INDEX 5U
+#define ROBOT_RIGHT_Y_ADC_INDEX 4U
 
 static int16_t gui_robot_stick_value(uint16_t raw, uint8_t channel)
 {
@@ -1882,9 +1885,9 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 		gui_robot_card(4U, 112U, 260U, 152U, "MOTION / POSITION");
 		gui_robot_card(272U, 112U, 260U, 152U, "ATTITUDE");
 		gui_robot_card(540U, 112U, 256U, 152U, "POWER / GPS STATUS");
-		gui_robot_card(4U, 272U, 260U, 204U, "LEFT JOYSTICK / ADC1 CH1-2");
+		gui_robot_card(4U, 272U, 260U, 204U, "LEFT JOYSTICK / CH03-X CH02-Y");
 		gui_robot_card(272U, 272U, 256U, 204U, "ACCELERATION / GPS");
-		gui_robot_card(536U, 272U, 260U, 204U, "RIGHT JOYSTICK / ADC1 CH3-4");
+		gui_robot_card(536U, 272U, 260U, 204U, "RIGHT JOYSTICK / CH06-X CH05-Y");
 	}
 
 	telemetry_changed = ((snapshot_valid == 0U) ||
@@ -1955,9 +1958,10 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 	left_raw_y = ADC1_Value[ROBOT_LEFT_Y_ADC_INDEX];
 	right_raw_x = ADC1_Value[ROBOT_RIGHT_X_ADC_INDEX];
 	right_raw_y = ADC1_Value[ROBOT_RIGHT_Y_ADC_INDEX];
-	left_x = gui_robot_stick_value(left_raw_x, ROBOT_LEFT_X_ADC_INDEX);
+	/* Correct both horizontal axes to the controller's displayed direction. */
+	left_x = -gui_robot_stick_value(left_raw_x, ROBOT_LEFT_X_ADC_INDEX);
 	left_y = gui_robot_stick_value(left_raw_y, ROBOT_LEFT_Y_ADC_INDEX);
-	right_x = gui_robot_stick_value(right_raw_x, ROBOT_RIGHT_X_ADC_INDEX);
+	right_x = -gui_robot_stick_value(right_raw_x, ROBOT_RIGHT_X_ADC_INDEX);
 	right_y = gui_robot_stick_value(right_raw_y, ROBOT_RIGHT_Y_ADC_INDEX);
 	gui_robot_draw_stick(134U, 356U, left_raw_x, left_raw_y, left_x, left_y,
 						  BLUE2, &old_dot_x[0], &old_dot_y[0],
