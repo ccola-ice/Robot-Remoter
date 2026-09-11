@@ -10,8 +10,7 @@ const char * const boot_item_names[BOOT_ITEM_COUNT] = {
     "NRF config readback", "GPS NMEA reception", "Runtime timers",
     "Keys / switches", "Analog travel / Vbat", "LED / buzzer output",
     "UART external loop", "Radio peer link", "Flash erase/program",
-    "EEPROM write", "SD / FatFs write", "Touch accuracy",
-    "MCU memory sample"
+    "EEPROM write", "SD / FatFs write", "MCU memory sample"
 };
 
 const char *boot_state_name(BootState state)

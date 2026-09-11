@@ -9,9 +9,7 @@
 #include "bsp_mpu6050.h"
 #include "bsp_rtc.h"
 #include "nmea/nmea.h"
-#include "palette.h"
 #include "gt9xx.h"
-#include "bsp_i2c_touch.h"
 #include "ff.h"
 #include "param.h"
 #include <string.h>
@@ -462,14 +460,13 @@ void system_basic_information(void)
 void main_menu(uint8_t selected_item)
 {
 	static uint8_t last_selected_item = 0xffU;
-	static const char *menu_text[12] =
+	static const char *menu_text[11] =
 	{
 		"System Information",
 		"Channel Monitor",
 		"Digital Inputs",
 		"IMU / MPU6050",
 		"GPS / BDS",
-		"Touch Draw Board",
 		"NRF Wireless",
 		"File Browser",
 		"Parameter Settings",
@@ -477,14 +474,13 @@ void main_menu(uint8_t selected_item)
         "EEPROM",
         "Robot Control"
 	};
-	static const char *menu_hint[12] =
+	static const char *menu_hint[11] =
 	{
 		"Memory / firmware",
 		"10 analog channels",
 		"6 buttons / toggle channels",
 		"Live attitude / motion",
 		"Position / satellites",
-		"Touch drawing tools",
 		"Radio setup / status",
 		"Browse SD card files",
 		"View / edit / save settings",
@@ -499,7 +495,7 @@ void main_menu(uint8_t selected_item)
 	uint16_t card_height;
 	uint8_t first_draw = 0U;
 
-	if(selected_item >= 12U)
+	if(selected_item >= 11U)
 	{
 		selected_item = 0U;
 	}
@@ -524,7 +520,7 @@ void main_menu(uint8_t selected_item)
 		ILI9806G_DispString_EN(20U, 32U, "LEFT/RIGHT: Select     OK: Enter");
 	}
 
-	for(i = (selected_item / 10U) * 10U; i < 12U && i < (selected_item / 10U + 1U) * 10U; i++)
+	for(i = (selected_item / 10U) * 10U; i < 11U && i < (selected_item / 10U + 1U) * 10U; i++)
 	{
 		card_x = ((i & 1U) == 0U) ? 4U : 404U;
 		card_y = 72U + (uint16_t)((i % 10U) / 2U) * 66U;
@@ -566,7 +562,7 @@ void main_menu(uint8_t selected_item)
 		ILI9806G_DrawRectangle(4U, 416U, 792U, 32U, 1U);
 	}
 	LCD_SetTextColor(BLUE);
-	sprintf(displayBuffer, "Selected: %2u / 12    Page %u/2",
+	sprintf(displayBuffer, "Selected: %2u / 11    Page %u/2",
 			(uint16_t)(selected_item + 1U), (uint16_t)(selected_item / 10U + 1U));
 	ILI9806G_DispString_EN(4U, 416U, displayBuffer);
 	if(first_draw != 0U) gui_boot_menu_badge();
@@ -1972,18 +1968,4 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(BLACK);
-}
-
-//»æÖÆ´¥Ãþ»­°å½çÃæ
-void Draw_Board(void)
-{
-	if(display_flag == 1)
-	{
-		display_flag = 0;
-		GTP_IRQ_Disable();
-		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-		Palette_Init(LCD_SCAN_MODE);
-		GTP_IRQ_Enable();
-		if(!GTP_CalibrationIsReady()) GTP_CalibrationStart();
-	}	
 }

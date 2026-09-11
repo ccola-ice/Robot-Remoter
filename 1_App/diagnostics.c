@@ -9,8 +9,6 @@
 #include "bsp_adc3_independent_dual.h"
 #include "bsp_gpio_led.h"
 #include "gt9xx.h"
-#include "bsp_i2c_touch.h"
-#include "palette.h"
 #include "param.h"
 #include <stdio.h>
 #include <string.h>
@@ -333,30 +331,7 @@ cleanup:
     return result;
 }
 
-static HwResult touch_test(void)
-{
-    uint16_t x, y;
-    int key;
-    if(!GTP_CalibrationIsReady()) return HW_BLOCKED;
-    if(!confirm("请画两条对角线及一条纵线，检查触摸轨迹。")) return HW_CANCELLED;
-    Palette_Init(LCD_SCAN_MODE);
-    LCD_SetTextColor(RED);
-    for(x = 220U; x <= 760U; x += 270U)
-        for(y = 40U; y <= 440U; y += 200U) ILI9806G_DrawCircle(x, y, 12U, 0U);
-    GTP_IRQ_Enable();
-    for(;;) {
-        GTP_Service();
-        key = diag_key();
-        if(key == MENU_KEY_OK || key == MENU_KEY_BACK) break;
-        Delay_ms(1U);
-    }
-    GTP_IRQ_Disable();
-    diag_screen("触摸质量（人工确认）");
-    if(key == MENU_KEY_BACK) return HW_CANCELLED;
-    return confirm("9个目标是否对齐，轨迹连续且无跳点或重影？") ? HW_PASS : HW_FAIL;
-}
-
-#define TEST_COUNT 10U
+#define TEST_COUNT 9U
 static const char *result_text(HwResult result)
 {
     static const char * const names[] = {"通过", "失败", "条件不足", "已取消"};
@@ -440,7 +415,7 @@ void diagnostics_menu(void)
     static const char * const names[TEST_COUNT] = {"LCD 颜色/网格", "按键/DCH开关",
         "模拟量行程", "电池电压对比", "LED/蜂鸣器", "UART4 线缆回环",
         "NRF 发送+ACK（需另一台）", "NRF 接收（需另一台）",
-        "触摸质量（人工）", "MCU 内存抽检"};
+        "MCU 内存抽检"};
     static uint8_t states[TEST_COUNT]; /* 0=untested; else HwResult+1, this power cycle. */
     uint8_t selected = 0U, first_visible = 0U, redraw = 1U;
     uint8_t old_selected, old_first_visible;
@@ -499,8 +474,7 @@ void diagnostics_menu(void)
                                "启动后20秒内运行另一台的 NRF 发送。已就绪？"))
                         result = hardware_radio_test(selected == 7U);
                     break;
-                case 8: result = touch_test(); break;
-                case 9: result = hardware_memory_test(); break;
+                case 8: result = hardware_memory_test(); break;
                 default: break;
             }
             /* Cancellation never hides a recorded failure from an earlier attempt. */
@@ -509,7 +483,7 @@ void diagnostics_menu(void)
             diag_screen(names[selected]);
             diag_line(100U, result_text(result));
             if(result == HW_BLOCKED) diag_line(160U, "前置条件不足，本次不记录为通过。");
-            if(selected == 9U) diag_line(160U, "专用1 KiB RAM + 4个ROM常量；非全芯片检测。");
+            if(selected == 8U) diag_line(160U, "专用1 KiB RAM + 4个ROM常量；非全芯片检测。");
             (void)confirm("测试结束，返回硬件测试列表。");
             diag_release();
             redraw = 1U;

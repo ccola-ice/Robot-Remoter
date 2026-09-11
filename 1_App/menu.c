@@ -2,7 +2,6 @@
 #include "bsp_fsmc_lcd.h"
 #include "menu.h"
 #include "gui.h"
-#include "gt9xx.h"
 #include "param.h"
 #include "platform_nrf.h"
 #include "bsp_gpio_digital_channel.h"
@@ -11,7 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MENU_ITEM_COUNT       12U
+#define MENU_ITEM_COUNT       11U
 #define MENU_EVENT_QUEUE_SIZE 8U
 #define MENU_REFRESH_TICKS    5U
 #define CLOCK_REFRESH_TICKS   20U
@@ -35,7 +34,6 @@ typedef enum
     MENU_PAGE_DIGITAL_CHANNELS,
     MENU_PAGE_IMU,
     MENU_PAGE_GPS,
-    MENU_PAGE_DRAW_BOARD,
     MENU_PAGE_NRF,
     MENU_PAGE_FILE_BROWSER,
     MENU_PAGE_PARAMETER_SETTINGS,
@@ -51,7 +49,6 @@ static const MenuPage menu_items[MENU_ITEM_COUNT] =
     MENU_PAGE_DIGITAL_CHANNELS,
     MENU_PAGE_IMU,
     MENU_PAGE_GPS,
-    MENU_PAGE_DRAW_BOARD,
     MENU_PAGE_NRF,
     MENU_PAGE_FILE_BROWSER,
     MENU_PAGE_PARAMETER_SETTINGS,
@@ -1151,7 +1148,6 @@ static void menu_handle_home_key(MenuKey key)
         case MENU_KEY_OK:
             current_page = menu_items[selected_item];
             if(current_page == MENU_PAGE_DIAGNOSTICS || current_page == MENU_PAGE_EEPROM) {
-                GTP_IRQ_Disable();
                 if(current_page == MENU_PAGE_DIAGNOSTICS) diagnostics_menu();
                 else eeprom_menu();
                 LCD_SetBackColor(WHITE);
@@ -1205,12 +1201,6 @@ static void menu_handle_page_key(MenuKey key)
         return;
     }
 
-    if(current_page == MENU_PAGE_DRAW_BOARD && key == MENU_KEY_OK)
-    {
-        GTP_CalibrationStart();
-        return;
-    }
-
     if(key == MENU_KEY_BACK)
     {
         current_page = MENU_PAGE_HOME;
@@ -1256,10 +1246,6 @@ static void menu_draw_current_page(void)
 
         case MENU_PAGE_GPS:
             system_data_read_and_set();
-            break;
-
-        case MENU_PAGE_DRAW_BOARD:
-            Draw_Board();
             break;
 
         case MENU_PAGE_NRF:

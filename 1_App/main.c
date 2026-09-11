@@ -422,7 +422,6 @@ void setup(void)
     boot_skip(BOOT_OUTPUTS, "Configured; LED/buzzer need physical feedback");
     boot_skip(BOOT_UART, "Configured; no external loopback fixture");
     boot_skip(BOOT_RADIO, "No peer/ACK test; SPI presence is not an RF link test");
-    boot_skip(BOOT_TOUCH_QUALITY, "Manual full-screen accuracy test required");
     boot_start(BOOT_INTERNAL_MEMORY);
     boot_done(BOOT_INTERNAL_MEMORY, hardware_memory_test() == HW_PASS ? BOOT_PASS : BOOT_FAIL,
               "Owned 1 KiB RAM walking patterns + ROM constants; not whole-chip integrity");

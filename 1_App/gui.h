@@ -93,7 +93,6 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
 
 void system_data_read_and_set(void);
 
-void Draw_Board(void);
 
 #endif
 
