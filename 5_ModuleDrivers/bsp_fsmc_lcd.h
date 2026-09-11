@@ -180,9 +180,9 @@ extern uint8_t LCD_SCAN_MODE;
 #define      ILI9806G_D15_PinSource          GPIO_PinSource10
 
 /********************************* ILI9806 常用命令 **********************************/
-#define      CMD_SetCoordinateX		 		    0x2A00	     //设置X坐标
-#define      CMD_SetCoordinateY		 		    0x2B00	     //设置Y坐标
-#define      CMD_SetPixel		 		      	0x2C00	     //填充像素
+#define      CMD_SetCoordinateX		 		    0x2A	     //设置X坐标
+#define      CMD_SetCoordinateY		 		    0x2B	     //设置Y坐标
+#define      CMD_SetPixel		 		      	0x2C	     //填充像素
 #define		 LCD_ClearLine 						ILI9806G_ClearLine
 
 /********************************** ILI9806 函数 ***************************************/
@@ -235,7 +235,7 @@ void ILI9806G_DisplayStringEx_YDir(	uint16_t x, 			//字符显示位置x
 
 
 /**
-  * @brief  向NT35510写入命令
+  * @brief  向ILI9806G写入命令
   * @param  usCmd :要写入的命令（表寄存器地址）
   * @retval 无
   */	
@@ -247,7 +247,7 @@ __inline void ILI9806G_Write_Cmd ( uint16_t usCmd )
 
 
 /**
-  * @brief  向NT35510写入数据
+  * @brief  向ILI9806G写入数据
   * @param  usData :要写入的数据
   * @retval 无
   */	
@@ -259,7 +259,7 @@ __inline void ILI9806G_Write_Data ( uint16_t usData )
 
 
 /**
-  * @brief  从NT35510读取数据
+  * @brief  从ILI9806G读取数据
   * @param  无
   * @retval 读取到的数据
   */	

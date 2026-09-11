@@ -617,6 +617,15 @@ int main(void)
     registers[0x804DU] = 1U;
     assert(GTP_Init_Panel() == 0);
     test_geometry(); test_frames(); test_buttons(); test_brushes(); test_calibration(); test_field_calibration(); test_single_field_path(); test_single_lifecycle();
+
+    /* The restored ILI9806G panel starts from the GT917S/0x8050 profile. */
+    touchIC = GT917S;
+    memcpy(registers + 0x8140U, "917S\x34\x12", 6U);
+    registers[0x8051U] = 0x20U; registers[0x8052U] = 3U;
+    registers[0x8053U] = 0xE0U; registers[0x8054U] = 1U;
+    registers[0x8056U] = 1U;
+    assert(GTP_Init_Panel() == 0 && touchIC == GT917S);
+
     bus_addr = 0x28U;
     assert(GTP_Init_Panel() == 0 && g_gtp_address == 0x28U);
     fail_read = 1U;

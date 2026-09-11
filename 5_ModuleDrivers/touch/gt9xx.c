@@ -134,9 +134,10 @@ const uint8_t CTP_CFG_GT911[] =  {
 //uint8_t config[GTP_CONFIG_MAX_LENGTH + GTP_ADDR_LENGTH]
 //                = {GTP_REG_CONFIG_DATA >> 8, GTP_REG_CONFIG_DATA & 0xff};
 
-TOUCH_IC touchIC = GT911;			
+/* The ILI9806G panel uses the older 0x8050-series Goodix controller. */
+TOUCH_IC touchIC = GT917S;			
 
-const TOUCH_PARAM_TypeDef touch_param[2] = 
+const TOUCH_PARAM_TypeDef touch_param[5] = 
 {
   /* GT917S,4.3´çÆÁ */
   {
@@ -146,6 +147,27 @@ const TOUCH_PARAM_TypeDef touch_param[2] =
   },
   
   /* GT911,4.3´çÆÁ */
+  {
+  .max_width = 800,
+  .max_height = 480,
+  .config_reg_addr = 0x8047,
+  },
+
+  /* GT5688, old panel */
+  {
+  .max_width = 800,
+  .max_height = 480,
+  .config_reg_addr = 0x8050,
+  },
+
+  /* GT9147 */
+  {
+  .max_width = 800,
+  .max_height = 480,
+  .config_reg_addr = 0x8047,
+  },
+
+  /* GT9157 */
   {
   .max_width = 800,
   .max_height = 480,
@@ -1332,7 +1354,7 @@ Output:
     ret = GTP_Read_Version();
     if(ret != 2)
     {
-        GTP_ERROR("GT911 version read failed: %d", ret);
+        GTP_ERROR("touch version read failed: %d", ret);
         return -1;
     }
     
@@ -1485,12 +1507,12 @@ Output:
 	free(config);
 #endif
 
-    /* Keep the panel-specific factory sensor/driver channel map.  The generic
-     * table is not interchangeable between different GT911 glass layouts. */
+    /* Keep the panel-specific factory sensor/driver channel map.  Goodix
+     * configuration tables are not interchangeable between glass layouts. */
 	 /* Read back the active geometry and interrupt mode. */
     if(GTP_Get_Info() != SUCCESS)
     {
-        GTP_ERROR("GT911 configuration read failed");
+        GTP_ERROR("touch configuration read failed");
         return -1;
     }
 
@@ -1521,23 +1543,48 @@ int32_t GTP_Read_Version(void)
 {
     uint8_t buf[8] = {GTP_REG_VERSION >> 8, GTP_REG_VERSION & 0xFFU};
     int32_t ret = GTP_I2C_Read(g_gtp_address, buf, sizeof(buf));
+    uint8_t identified = 1U;
 
     if(ret != 2)
     {
-        GTP_ERROR("GT911 version register read failed: %d", ret);
+        GTP_ERROR("touch version register read failed: %d", ret);
         return -1;
     }
 
-    if((buf[2] != '9') || (buf[3] != '1') || (buf[4] != '1'))
+    if(buf[2] == '9' && buf[3] == '1' && buf[4] == '7' && buf[5] == 'S')
+    {
+        touchIC = GT917S;
+    }
+    else if(buf[2] == '5' && buf[3] == '6' && buf[4] == '8' && buf[5] == '8')
+    {
+        touchIC = GT5688;
+    }
+    else if(buf[2] == '9' && buf[3] == '1' && buf[4] == '1')
+    {
+        touchIC = GT911;
+    }
+    else if(buf[2] == '9' && buf[3] == '1' && buf[4] == '4' && buf[5] == '7')
+    {
+        touchIC = GT9147;
+    }
+    else if(buf[2] == '9' && buf[3] == '1' && buf[4] == '5' && buf[5] == '7')
+    {
+        touchIC = GT9157;
+    }
+    else
+    {
+        identified = 0U;
+    }
+
+    if(identified == 0U)
     {
         GTP_ERROR("unexpected touch IC id: %02X %02X %02X %02X",
                   buf[2], buf[3], buf[4], buf[5]);
         return -1;
     }
 
-    touchIC = GT911;
-    GTP_INFO("GT911 Version: %c%c%c_%02x%02x",
-             buf[2], buf[3], buf[4], buf[7], buf[6]);
+    GTP_INFO("Goodix Version: %c%c%c%c_%02x%02x, type=%u",
+             buf[2], buf[3], buf[4], buf[5], buf[7], buf[6], touchIC);
     return ret;
 }
 /*******************************************************
