@@ -24,6 +24,7 @@ typedef struct {
     char text[96];
 } DiagLineCache;
 static DiagLineCache diag_line_cache[DIAG_LINE_CACHE_COUNT];
+static uint8_t diag_transition_pending;
 
 static uint8_t key_down(uint8_t key)
 {
@@ -104,9 +105,9 @@ void diag_ui_ascii(uint16_t x, uint16_t y, uint8_t foreground,
 void diag_screen(const char *title)
 {
     memset(diag_line_cache, 0, sizeof(diag_line_cache));
+    diag_transition_pending = 1U;
     LCD_SetBackColor(WHITE);
-    LCD_SetTextColor(WHITE);
-    ILI9806G_Clear(0, 0, LCD_X_LENGTH, LCD_Y_LENGTH);
+    /* Draw the new header first so page changes never expose a blank frame. */
     diag_ui_fill(4U, 0U, 792U, 64U, DIAG_UI_BLUE);
     /* Native 32-pixel glyphs match the established submenu header weight. */
     diag_ui_text(20U, 4U, 32U, DIAG_UI_WHITE, DIAG_UI_BLUE, title);
@@ -136,6 +137,17 @@ void diag_line(uint16_t y, const char *text)
     diag_ui_text(16U, y, 32U, DIAG_UI_BLACK, DIAG_UI_WHITE, text);
     if(width < 772U)
         diag_ui_fill(16U + width, y, 772U - width, 32U, DIAG_UI_WHITE);
+    if(diag_transition_pending != 0U) {
+        /* Keep the first instruction/result visible while retiring the old
+           screen around it; never present an entirely blank content frame. */
+        diag_transition_pending = 0U;
+        if(y > 64U) diag_ui_fill(0U, 64U, LCD_X_LENGTH, y - 64U, DIAG_UI_WHITE);
+        if(y + 32U < LCD_Y_LENGTH)
+            diag_ui_fill(0U, y + 32U, LCD_X_LENGTH,
+                         LCD_Y_LENGTH - y - 32U, DIAG_UI_WHITE);
+        diag_ui_fill(0U, y, 16U, 32U, DIAG_UI_WHITE);
+        diag_ui_fill(788U, y, 12U, 32U, DIAG_UI_WHITE);
+    }
     diag_line_cache[slot].y = y;
     diag_line_cache[slot].valid = 1U;
     strncpy(diag_line_cache[slot].text, text,
@@ -402,6 +414,20 @@ static void diagnostics_menu_draw(const char * const *names,
     diag_ui_ascii(20U, 42U, DIAG_UI_WHITE, DIAG_UI_BLUE,
                   "HARDWARE DIAGNOSTICS / MANUAL ITEMS");
     diagnostics_menu_draw_window(names, states, selected, first_visible);
+
+    diag_ui_fill(0U, 64U, LCD_X_LENGTH, 8U, DIAG_UI_WHITE);
+    diag_ui_fill(0U, 72U, 4U, LCD_Y_LENGTH - 72U, DIAG_UI_WHITE);
+    diag_ui_fill(796U, 72U, 4U, LCD_Y_LENGTH - 72U, DIAG_UI_WHITE);
+    diag_ui_fill(4U, 104U, 792U, 8U, DIAG_UI_WHITE);
+    {
+        uint8_t row;
+        for(row = 0U; row < 6U; row++)
+            diag_ui_fill(4U, 152U + (uint16_t)row * 48U,
+                         792U, 8U, DIAG_UI_WHITE);
+    }
+    diag_ui_fill(4U, 392U, 792U, 14U, DIAG_UI_WHITE);
+    diag_ui_fill(4U, 422U, 792U, 10U, DIAG_UI_WHITE);
+    diag_ui_fill(4U, 464U, 792U, 16U, DIAG_UI_WHITE);
 
     diag_ui_text(12U, 406U, 16U, DIAG_UI_BLUE, DIAG_UI_WHITE,
                  "LEFT/RIGHT：选择   OK：运行   BACK：返回");

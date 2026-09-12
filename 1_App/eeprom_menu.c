@@ -45,6 +45,17 @@ static void eeprom_draw_shell(void)
                      DIAG_UI_BLUE, DIAG_UI_GREY, text);
     }
     diag_ui_fill(4U, 344U, 792U, 40U, DIAG_UI_GREY);
+
+    /* The table and status panels replace the old page directly.  Erase only
+       their narrow gutters so entering EEPROM never needs a blank frame. */
+    diag_ui_fill(0U, 64U, 800U, 8U, DIAG_UI_WHITE);
+    diag_ui_fill(0U, 72U, 4U, 408U, DIAG_UI_WHITE);
+    diag_ui_fill(796U, 72U, 4U, 408U, DIAG_UI_WHITE);
+    diag_ui_fill(4U, 104U, 792U, 8U, DIAG_UI_WHITE);
+    diag_ui_fill(4U, 336U, 792U, 8U, DIAG_UI_WHITE);
+    diag_ui_fill(4U, 384U, 792U, 4U, DIAG_UI_WHITE);
+    diag_ui_fill(4U, 420U, 792U, 16U, DIAG_UI_WHITE);
+    diag_ui_fill(4U, 468U, 792U, 12U, DIAG_UI_WHITE);
 }
 
 static void eeprom_draw_cell(uint8_t cell_address, uint8_t selected_address,

@@ -38,7 +38,7 @@ extern uint8_t Image$$RW_IRAM1$$ZI$$Length;
 
 char displayBuffer[100];
 
-static uint8_t display_flag = 0;	//界面切换标志，每次只有第一次切换界面时才清屏（ILI9806G_Clear），其他情况不清屏
+static uint8_t display_flag = 0;	//界面切换标志，仅首次绘制页面静态内容
 static uint8_t clock_force_redraw = 1U;
 static uint8_t clock_last_seconds = 0xffU;
 static uint16_t boot_progress_width;
@@ -47,6 +47,20 @@ void gui_prepare_page(void)
 {
 	display_flag = 1;
 	clock_force_redraw = 1U;
+}
+
+static void gui_clear_page_band(uint16_t y, uint16_t height)
+{
+	ILI9806G_Fill(0U, y, LCD_X_LENGTH, y + height, WHITE);
+}
+
+/* Only erase the narrow layout boundary here.  The page widgets overwrite
+ * their own background, so a transition never exposes a blank content frame. */
+static void gui_clear_page_content(void)
+{
+	ILI9806G_Fill(0U, 64U, LCD_X_LENGTH, 72U, WHITE);
+	ILI9806G_Fill(0U, 72U, 4U, LCD_Y_LENGTH, WHITE);
+	ILI9806G_Fill(796U, 72U, LCD_X_LENGTH, LCD_Y_LENGTH, WHITE);
 }
 
 void gui_clock_overlay(void)
@@ -398,12 +412,13 @@ void system_basic_information(void)
 	uint32_t rw_bytes;
 	uint32_t flash_percent_x10;
 	uint32_t ram_percent_x10;
+	uint8_t first_draw = 0U;
 
 	if(display_flag == 1)
 	{
 		display_flag = 0;
-		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
+		first_draw = 1U;
 	}
 	
 	code_ro_bytes = (uint32_t)(uintptr_t)&Image$$ER_IROM1$$Length;
@@ -418,41 +433,66 @@ void system_basic_information(void)
 
 	LCD_SetFont(&Font16x32);
 	LCD_SetBackColor(WHITE);
+	if(first_draw != 0U) gui_clear_page_band(LINE(0), 32U);
 	LCD_SetTextColor(BLUE);
 	ILI9806G_DispString_EN(4U, LINE(0), "System / Memory Information");
+	if(first_draw != 0U) gui_clear_page_band(LINE(1), 32U);
 	LCD_SetTextColor(BLACK);
 	ILI9806G_DispString_EN(4U, LINE(1), "MCU: STM32F407ZGT6 @ 168 MHz");
+	if(first_draw != 0U)
+	{
+		LCD_SetBackColor(WHITE);
+		LCD_SetTextColor(BLACK);
+	}
 
+	if(first_draw != 0U) gui_clear_page_band(LINE(2), 32U);
 	sprintf(displayBuffer, "Flash linked: %lu.%01lu / 1024.0 KB   %lu.%01lu%% ",
 			flash_bytes / 1024UL, ((flash_bytes % 1024UL) * 10UL) / 1024UL,
 			flash_percent_x10 / 10UL, flash_percent_x10 % 10UL);
 	ILI9806G_DispString_EN(4U, LINE(2), displayBuffer);
+	if(first_draw != 0U) gui_clear_page_band(LINE(3), 32U);
 	gui_draw_progress_bar(20U, LINE(3) + 5U, 760U, 22U, flash_percent_x10, BLUE);
 
+	if(first_draw != 0U) gui_clear_page_band(LINE(4), 32U);
 	sprintf(displayBuffer, "RAM linked: %lu.%01lu / 128.0 KB      %lu.%01lu%% ",
 			ram_bytes / 1024UL, ((ram_bytes % 1024UL) * 10UL) / 1024UL,
-			ram_percent_x10 / 10UL, ram_percent_x10 % 10UL);
+		ram_percent_x10 / 10UL, ram_percent_x10 % 10UL);
 	ILI9806G_DispString_EN(4U, LINE(4), displayBuffer);
+	if(first_draw != 0U) gui_clear_page_band(LINE(5), 32U);
 	gui_draw_progress_bar(20U, LINE(5) + 5U, 760U, 22U, ram_percent_x10, GREEN);
 
+	if(first_draw != 0U)
+	{
+		gui_clear_page_band(LINE(6), 32U);
+		gui_clear_page_band(LINE(7), 32U);
+	}
 	sprintf(displayBuffer, "ROM Code + RO: %lu.%01lu KB                  ",
 			code_ro_bytes / 1024UL, ((code_ro_bytes % 1024UL) * 10UL) / 1024UL);
 	ILI9806G_DispString_EN(4U, LINE(7), displayBuffer);
+	if(first_draw != 0U) gui_clear_page_band(LINE(8), 32U);
 	sprintf(displayBuffer, "RW initialized: %lu bytes                    ", rw_bytes);
 	ILI9806G_DispString_EN(4U, LINE(8), displayBuffer);
+	if(first_draw != 0U) gui_clear_page_band(LINE(9), 32U);
 	sprintf(displayBuffer, "ZI/BSS + Heap/Stack: %lu.%01lu KB            ",
 			zi_bytes / 1024UL, ((zi_bytes % 1024UL) * 10UL) / 1024UL);
 	ILI9806G_DispString_EN(4U, LINE(9), displayBuffer);
 
+	if(first_draw != 0U) gui_clear_page_band(LINE(10), 32U);
 	sprintf(displayBuffer, "RAM remaining: %lu.%01lu KB                  ",
 			(GUI_MCU_RAM_BYTES - ram_bytes) / 1024UL,
 			(((GUI_MCU_RAM_BYTES - ram_bytes) % 1024UL) * 10UL) / 1024UL);
 	ILI9806G_DispString_EN(4U, LINE(10), displayBuffer);
+	if(first_draw != 0U) gui_clear_page_band(LINE(11), 32U);
 	sprintf(displayBuffer, "Flash remaining: %lu.%01lu KB                ",
 			(GUI_MCU_FLASH_BYTES - flash_bytes) / 1024UL,
 			(((GUI_MCU_FLASH_BYTES - flash_bytes) % 1024UL) * 10UL) / 1024UL);
 	ILI9806G_DispString_EN(4U, LINE(11), displayBuffer);
 
+	if(first_draw != 0U)
+	{
+		gui_clear_page_band(LINE(12), 64U);
+		gui_clear_page_band(LINE(14), 32U);
+	}
 	LCD_SetTextColor(BLUE);
 	ILI9806G_DispString_EN(4U, LINE(14), "Live values from current linker image");
 }
@@ -503,7 +543,6 @@ void main_menu(uint8_t selected_item)
 	if(display_flag == 1 || last_selected_item / 10U != selected_item / 10U)
 	{
 		display_flag = 0;
-		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
 		first_draw = 1U;
 		last_selected_item = 0xffU;
@@ -518,6 +557,7 @@ void main_menu(uint8_t selected_item)
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DispString_EN(20U, 0U, "REMOTER CONTROL CENTER");
 		ILI9806G_DispString_EN(20U, 32U, "LEFT/RIGHT: Select     OK: Enter");
+		gui_clear_page_content();
 	}
 
 	for(i = (selected_item / 10U) * 10U; i < 11U && i < (selected_item / 10U + 1U) * 10U; i++)
@@ -552,6 +592,26 @@ void main_menu(uint8_t selected_item)
 			LCD_SetTextColor((i == selected_item) ? BLUE : BLACK);
 			ILI9806G_DrawRectangle(card_x, card_y, card_width, card_height, 0U);
 		}
+	}
+	if(first_draw != 0U)
+	{
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DrawRectangle(396U, 72U, 8U, 324U, 1U);
+		if(selected_item < 10U)
+		{
+			for(i = 0U; i < 4U; i++)
+			{
+				ILI9806G_DrawRectangle(4U, 132U + (uint16_t)i * 66U,
+								  792U, 6U, 1U);
+			}
+		}
+		else
+		{
+			ILI9806G_DrawRectangle(404U, 72U, 392U, 60U, 1U);
+			ILI9806G_DrawRectangle(4U, 138U, 792U, 258U, 1U);
+		}
+		ILI9806G_DrawRectangle(4U, 396U, 792U, 20U, 1U);
+		ILI9806G_DrawRectangle(4U, 448U, 792U, 32U, 1U);
 	}
 
 	LCD_SetFont(&Font16x32);
@@ -589,7 +649,6 @@ void digital_channel_monitor_page(const uint8_t *raw_values,
 	if(display_flag == 1U)
 	{
 		display_flag = 0U;
-		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
 		first_draw = 1U;
 		for(channel = 0U; channel < 6U; channel++)
@@ -610,6 +669,7 @@ void digital_channel_monitor_page(const uint8_t *raw_values,
 		LCD_SetFont(&Font8x16);
 		ILI9806G_DispString_EN(20U, 36U,
 			"DCH1..DCH6 / RAW AND 30 ms DEBOUNCED VALUES");
+		gui_clear_page_content();
 
 		for(channel = 0U; channel < 6U; channel++)
 		{
@@ -632,6 +692,11 @@ void digital_channel_monitor_page(const uint8_t *raw_values,
 			ILI9806G_DispString_EN(card_x + 136U, card_y + 12U, displayBuffer);
 		}
 
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DrawRectangle(396U, 72U, 8U, 328U, 1U);
+		ILI9806G_DrawRectangle(4U, 176U, 792U, 8U, 1U);
+		ILI9806G_DrawRectangle(4U, 288U, 792U, 8U, 1U);
+		ILI9806G_DrawRectangle(4U, 400U, 792U, 80U, 1U);
 		LCD_SetBackColor(WHITE);
 		LCD_SetTextColor(BLUE2);
 		LCD_SetFont(&Font8x16);
@@ -950,7 +1015,6 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
 	if(display_flag == 1)
 	{
 		display_flag = 0;
-		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
 		first_draw = 1U;
 		last_revision = 0xffffU;
@@ -969,6 +1033,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DispString_EN(20U, 0U, "FILE BROWSER");
 		ILI9806G_DispString_EN(20U, 32U, "SD Card  Read-only mode");
+		gui_clear_page_content();
 	}
 
 	if(content_changed != 0U)
@@ -982,24 +1047,18 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
 		strcat(displayBuffer, safe_text);
 		ILI9806G_DispString_EN_CH(12U, 72U, displayBuffer);
 
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DrawRectangle(4U, 112U, 792U, 288U, 1U);
-		if(item_count == 0U)
-		{
-			LCD_SetBackColor(WHITE);
-			LCD_SetTextColor(GREY);
-			ILI9806G_DispString_EN(260U, 224U, "<EMPTY DIRECTORY>");
-		}
-
 		for(row = 0U; row < 6U; row++)
 		{
 			item_index = (uint8_t)(first_visible + row);
+			row_y = 112U + (uint16_t)row * 48U;
 			if(item_index >= item_count)
 			{
-				break;
+				LCD_SetTextColor(WHITE);
+				ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 1U);
+				ILI9806G_DrawRectangle(4U, row_y + 40U, 792U, 8U, 1U);
+				continue;
 			}
 
-			row_y = 112U + (uint16_t)row * 48U;
 			LCD_SetTextColor(GREY);
 			ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 1U);
 			LCD_SetBackColor(GREY);
@@ -1023,6 +1082,14 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
 			{
 				ILI9806G_DispString_EN(620U, row_y + 4U, size_text);
 			}
+			LCD_SetTextColor(WHITE);
+			ILI9806G_DrawRectangle(4U, row_y + 40U, 792U, 8U, 1U);
+		}
+		if(item_count == 0U)
+		{
+			LCD_SetBackColor(WHITE);
+			LCD_SetTextColor(GREY);
+			ILI9806G_DispString_EN(260U, 224U, "<EMPTY DIRECTORY>");
 		}
 	}
 
@@ -1046,6 +1113,13 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
 		ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 0U);
 	}
 
+	if(first_draw != 0U)
+	{
+		gui_clear_page_band(104U, 8U);
+		gui_clear_page_band(400U, 8U);
+		gui_clear_page_band(424U, 8U);
+		gui_clear_page_band(464U, 16U);
+	}
 	LCD_SetFont(&Font8x16);
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(BLUE);
@@ -1095,7 +1169,6 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 	if(display_flag == 1)
 	{
 		display_flag = 0;
-		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
 		first_draw = 1U;
 		last_selected_item = 0xffU;
@@ -1134,12 +1207,13 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 		LCD_SetFont(&Font16x32);
 		ILI9806G_DispString_EN(20U, 0U, "PARAMETER SETTINGS");
 		ILI9806G_DispString_EN(20U, 32U, "Scrollable configuration / explicit Flash save");
+		gui_clear_page_content();
 
 		LCD_SetTextColor(GREY);
 		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DrawRectangle(4U, 112U, 792U, 288U, 1U);
 
+		gui_clear_page_band(104U, 8U);
+		gui_clear_page_band(400U, 32U);
 		LCD_SetBackColor(WHITE);
 		LCD_SetTextColor(BLUE);
 		LCD_SetFont(&Font8x16);
@@ -1147,6 +1221,7 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 			"LEFT/RIGHT Select/Change   OK Edit/Confirm   BACK Cancel/Exit");
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DrawRectangle(4U, 432U, 792U, 32U, 1U);
+		gui_clear_page_band(464U, 16U);
 	}
 
 	if(state_changed != 0U)
@@ -1213,6 +1288,19 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
 		strcpy(last_rows[row].label, rows[row].label);
 		strcpy(last_rows[row].value, rows[row].value);
 	}
+	if(first_draw != 0U)
+	{
+		LCD_SetTextColor(WHITE);
+		for(row = 0U; row < GUI_PARAM_VISIBLE_ROWS; row++)
+		{
+			row_y = 112U + (uint16_t)row * 48U;
+			if(row >= visible_count)
+			{
+				ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 1U);
+			}
+			ILI9806G_DrawRectangle(4U, row_y + 40U, 792U, 8U, 1U);
+		}
+	}
 
 	if(window_changed != 0U)
 	{
@@ -1267,13 +1355,14 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
 	static const int8_t power_dbm[4] = {-18, -12, -6, 0};
 	static const char *rate_text[3] = {"250 Kbps", "1 Mbps", "2 Mbps"};
 	uint8_t i;
+	uint8_t first_draw = 0U;
 	char marker;
 
 	if(display_flag == 1)
 	{
 		display_flag = 0;
-		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
+		first_draw = 1U;
 	}
 
 	if(power_index > 3U)
@@ -1295,9 +1384,17 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
 
 	LCD_SetFont(&Font16x32);
 	LCD_SetBackColor(WHITE);
+	if(first_draw != 0U) gui_clear_page_band(LINE(0), 32U);
 	LCD_SetTextColor(BLUE);
 	ILI9806G_DispString_EN(4U, LINE(0), "NRF Wireless Settings");
+	if(first_draw != 0U) gui_clear_page_band(LINE(1), 32U);
 	ILI9806G_DispString_EN(4U, LINE(1), "LEFT/RIGHT: Select   OK: Edit/Run   BACK: Exit");
+	if(first_draw != 0U)
+	{
+		gui_clear_page_band(LINE(2), 32U);
+		LCD_SetFont(&Font16x32);
+		LCD_SetBackColor(WHITE);
+	}
 
 	for(i = 0; i < 6U; i++)
 	{
@@ -1338,11 +1435,13 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
 				sprintf(displayBuffer, "%c Check Module Connection                   ", marker);
 				break;
 		}
+		if(first_draw != 0U) gui_clear_page_band(LINE(i + 3U), 32U);
 		ILI9806G_DispString_EN(4U, LINE(i + 3U), displayBuffer);
 	}
 
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(BLUE);
+	if(first_draw != 0U) gui_clear_page_band(LINE(9), 32U);
 	sprintf(displayBuffer, "Connection: %-35s", runtime_valid ? "OK" : "FAILED");
 	ILI9806G_DispString_EN(4U, LINE(9), displayBuffer);
 	if(runtime_valid != 0U)
@@ -1355,11 +1454,19 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
 	{
 		sprintf(displayBuffer, "Actual: register readback unavailable          ");
 	}
+	if(first_draw != 0U) gui_clear_page_band(LINE(10), 32U);
 	ILI9806G_DispString_EN(4U, LINE(10), displayBuffer);
+	if(first_draw != 0U) gui_clear_page_band(LINE(11), 32U);
 	sprintf(displayBuffer, "Result: %-38s", status_text);
 	ILI9806G_DispString_EN(4U, LINE(11), displayBuffer);
+	if(first_draw != 0U)
+	{
+		gui_clear_page_band(LINE(12), 32U);
+		gui_clear_page_band(LINE(13), 32U);
+	}
 	LCD_SetTextColor(BLACK);
 	ILI9806G_DispString_EN(4U, LINE(13), "Blue=selected  Red=editing  OK=confirm");
+	if(first_draw != 0U) gui_clear_page_band(LINE(14), 32U);
 }
 
 typedef struct
@@ -1445,7 +1552,6 @@ void system_data_read_and_set(void)
 	if(display_flag == 1)
 	{
 		display_flag = 0;
-		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
 		first_draw = 1U;
 		snapshot_valid = 0U;
@@ -1461,6 +1567,7 @@ void system_data_read_and_set(void)
 		ILI9806G_DispString_EN(20U, 0U, "GPS / BDS NAVIGATION");
 		LCD_SetFont(&Font8x16);
 		ILI9806G_DispString_EN(20U, 36U, "LIVE NMEA POSITION AND RECEIVER STATUS");
+		gui_clear_page_content();
 
 		LCD_SetTextColor(GREY);
 		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
@@ -1476,6 +1583,13 @@ void system_data_read_and_set(void)
 		gui_gps_draw_card(264U, 360U, 252U, 80U, "GROUND SPEED");
 		gui_gps_draw_card(524U, 360U, 272U, 80U, "TRUE COURSE");
 
+		gui_clear_page_band(104U, 8U);
+		gui_clear_page_band(248U, 8U);
+		gui_clear_page_band(352U, 8U);
+		gui_clear_page_band(440U, 40U);
+		ILI9806G_Fill(504U, 112U, 512U, 248U, WHITE);
+		ILI9806G_Fill(256U, 256U, 264U, 440U, WHITE);
+		ILI9806G_Fill(516U, 256U, 524U, 440U, WHITE);
 		LCD_SetFont(&Font8x16);
 		LCD_SetBackColor(WHITE);
 		LCD_SetTextColor(BLACK);
@@ -1648,7 +1762,6 @@ void channel_monitor_page(void)
 	if(display_flag == 1)
 	{
 		display_flag = 0;
-		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
 		first_draw = 1U;
 	}
@@ -1671,10 +1784,7 @@ void channel_monitor_page(void)
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DispString_EN(20U, 0U, "CHANNEL MONITOR");
 		ILI9806G_DispString_EN(20U, 32U, "10 analog inputs / optimized live view");
-
-		LCD_SetBackColor(WHITE);
-		LCD_SetTextColor(BLUE);
-		ILI9806G_DispString_EN(4U, 424U, "0..4095  Red=center 2048  BACK=Exit");
+		gui_clear_page_content();
 	}
 
 	for(i = 0U; i < 5U; i++)
@@ -1684,6 +1794,23 @@ void channel_monitor_page(void)
 		gui_draw_channel_card(404U, card_y[i], i + 5U,
 						  channel_value[i + 5U], GREEN,
 						  &previous_bar_width[i + 5U], first_draw);
+	}
+	if(first_draw != 0U)
+	{
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DrawRectangle(396U, 72U, 8U, 328U, 1U);
+		for(i = 0U; i < 4U; i++)
+		{
+			ILI9806G_DrawRectangle(4U, 126U + (uint16_t)i * 64U,
+								  792U, 18U, 1U);
+		}
+		gui_clear_page_band(382U, 42U);
+		gui_clear_page_band(456U, 24U);
+		LCD_SetBackColor(WHITE);
+		LCD_SetTextColor(BLUE);
+		LCD_SetFont(&Font16x32);
+		ILI9806G_DispString_EN(4U, 424U,
+			"0..4095  Red=center 2048  BACK=Exit");
 	}
 
 	LCD_SetBackColor(WHITE);
@@ -1698,7 +1825,6 @@ void imu6050_information(void)
 	if(display_flag == 1)
 	{
 		display_flag = 0;
-		ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
 		first_draw = 1U;
 	}
@@ -1712,6 +1838,7 @@ void imu6050_information(void)
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DispString_EN(20U, 0U, "IMU / MPU6050");
 		ILI9806G_DispString_EN(20U, 32U, "DMP attitude / 100 Hz sensor / 20 FPS UI");
+		gui_clear_page_content();
 
 		LCD_SetTextColor(GREY);
 		ILI9806G_DrawRectangle(4U, 396U, 792U, 80U, 1U);
@@ -1723,6 +1850,14 @@ void imu6050_information(void)
 					   &previous_bar_width[1], first_draw);
 	gui_draw_imu_axis(268U, "YAW", yaw, 180.0f, RED,
 					   &previous_bar_width[2], first_draw);
+	if(first_draw != 0U)
+	{
+		gui_clear_page_band(72U, 4U);
+		gui_clear_page_band(156U, 16U);
+		gui_clear_page_band(252U, 16U);
+		gui_clear_page_band(348U, 48U);
+		gui_clear_page_band(476U, 4U);
+	}
 
 	LCD_SetBackColor(GREY);
 	LCD_SetTextColor(imu_data_valid ? GREEN : RED);
@@ -1855,7 +1990,6 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 	if(display_flag == 1U)
 	{
 		display_flag = 0U;
-		ILI9806G_Clear(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
 		GTP_IRQ_Disable();
 		first_draw = 1U;
 		snapshot_valid = 0U;
@@ -1875,6 +2009,7 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 		LCD_SetFont(&Font8x16);
 		ILI9806G_DispString_EN(20U, 40U,
 			"LIVE ROBOT STATE RECEIVED THROUGH NRF");
+		gui_clear_page_content();
 
 		LCD_SetTextColor(GREY);
 		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
@@ -1884,6 +2019,12 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 		gui_robot_card(4U, 272U, 260U, 204U, "LEFT JOYSTICK / CH03-X CH02-Y");
 		gui_robot_card(272U, 272U, 256U, 204U, "ACCELERATION / GPS");
 		gui_robot_card(536U, 272U, 260U, 204U, "RIGHT JOYSTICK / CH06-X CH05-Y");
+		gui_clear_page_band(104U, 8U);
+		gui_clear_page_band(264U, 8U);
+		gui_clear_page_band(476U, 4U);
+		ILI9806G_Fill(264U, 112U, 272U, 476U, WHITE);
+		ILI9806G_Fill(532U, 112U, 540U, 264U, WHITE);
+		ILI9806G_Fill(528U, 272U, 536U, 476U, WHITE);
 	}
 
 	telemetry_changed = ((snapshot_valid == 0U) ||
