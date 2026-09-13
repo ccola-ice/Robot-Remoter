@@ -35,6 +35,16 @@ try {
         'gui_update_progress_bar', 'gui_draw_channel_card', 'main_menu', 'channel_monitor_page',
         'gui_robot_card', 'gui_robot_stick_value', 'gui_robot_draw_stick', 'robot_control_page')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_gui.inc'), ($mapping + [Environment]::NewLine + $guiFunctions))
+    $diag = [IO.File]::ReadAllText((Join-Path $repo '1_App/diagnostics.c'), $enc)
+    $start = $diag.IndexOf('#define DIAG_LINE_CACHE_COUNT')
+    $end = $diag.IndexOf('static uint8_t confirm(', $start)
+    $diagCode = $diag.Substring($start, $end - $start)
+    $start = $diag.IndexOf('#define TEST_COUNT')
+    $diagCode += $diag.Substring($start)
+    [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_diag.inc'), $diagCode, $enc)
+    $names = [regex]::Match($diag, '(?s)static const char \* const names\[TEST_COUNT\] = .*?;').Value
+    if(!$names) { throw 'Missing diagnostic menu labels.' }
+    [IO.File]::WriteAllText((Join-Path $temp 'lcd_diag_names.inc'), $names, $enc)
     [IO.File]::WriteAllText((Join-Path $temp 'stm32f4xx.h'), '#include <stdint.h>')
     [IO.File]::WriteAllText((Join-Path $temp 'bsp_usart_debug.h'), '')
     [IO.File]::WriteAllText((Join-Path $temp 'bsp_spi_flash.h'), @'
@@ -43,7 +53,7 @@ static void FLASH_Read_Data(uint8_t *buffer, unsigned address, unsigned size)
 { (void)address; while(size--) *buffer++ = 0U; }
 '@)
     $exe = Join-Path $temp 'lcd-page-test.exe'
-    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-I' $temp '-I' (Join-Path $repo '1_App') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') '-o' $exe
+    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-finput-charset=GBK' '-fexec-charset=GBK' '-I' $temp '-I' (Join-Path $repo '1_App') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') '-o' $exe
     if($LASTEXITCODE -ne 0) { throw 'LCD page test compilation failed.' }
     & $exe
     if($LASTEXITCODE -ne 0) { throw 'LCD page tests failed.' }

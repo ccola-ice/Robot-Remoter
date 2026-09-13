@@ -3,10 +3,10 @@
 
 #include <stdint.h>
 
-/* Display only: menu updates arrive every 50 ms. Keep fractional ADC bits
+/* Display only: menu updates arrive every 20 ms. Keep fractional ADC bits
  * so the low-pass filter converges in both directions without integer bias. */
 #define GUI_ANALOG_HYSTERESIS 8
-#define GUI_NUMERIC_REFRESH_FRAMES 4U
+#define GUI_NUMERIC_REFRESH_FRAMES 10U /* Remote telemetry only, 200 ms. */
 
 typedef struct
 {
@@ -27,8 +27,12 @@ static uint16_t gui_analog_filter_update(GuiAnalogFilter *filter,
         return raw;
     }
     delta = (int32_t)raw * 256L - filter->value_q8;
-    /* Follow intentional movement faster; smooth small changes more heavily. */
-    filter->value_q8 += delta / ((delta > 32768L || delta < -32768L) ? 2L : 4L);
+    /* A deliberate movement must be visible on this frame, not settle over
+     * several frames. Keep low-pass smoothing only inside the noise band. */
+    if(delta >= 8192L || delta <= -8192L)
+        filter->value_q8 = (int32_t)raw * 256L;
+    else
+        filter->value_q8 += delta / ((delta >= 4096L || delta <= -4096L) ? 2L : 4L);
     rounded = (filter->value_q8 + 128L) / 256L;
     delta = rounded - filter->stable;
     if(delta >= GUI_ANALOG_HYSTERESIS || delta <= -GUI_ANALOG_HYSTERESIS ||

@@ -474,6 +474,15 @@ int main(void)
 
     while(1)
     {
+		if(finish_button_10ms == 1)
+		{
+			finish_button_10ms = 0;
+			button_ticks();
+			digital_channel_update_10ms();
+			menu_tick_10ms();
+		}
+        /* Handle navigation before slower IMU/GPS/serial work. */
+        menu_process();
         GTP_Service();
 		if(finish_1hz == 1)
 		{
@@ -530,14 +539,6 @@ int main(void)
 		if(finish_50hz == 1)
 		{
 			finish_50hz = 0;
-		}
-
-		if(finish_button_10ms == 1)
-		{
-			finish_button_10ms = 0;
-			button_ticks();
-			digital_channel_update_10ms();
-			menu_tick_10ms();
 		}
 
 		if(finish_100hz == 1)

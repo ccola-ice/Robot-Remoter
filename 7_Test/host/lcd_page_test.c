@@ -5,6 +5,9 @@
 #include "fonts.h"
 #include "gui.h"
 #include "gui_analog_filter.h"
+#include "diagnostics.h"
+#include "hardware_tests.h"
+#include "menu.h"
 
 #define WHITE 0xffffU
 #define GREY 0xf7deU
@@ -13,6 +16,7 @@
 #define BLUE2 0x051fU
 #define GREEN 0x07e0U
 #define RED 0xf800U
+#define YELLOW 0xffe0U
 #define CMD_SetCoordinateX 0x2aU
 #define CMD_SetCoordinateY 0x2bU
 #define CMD_SetPixel 0x2cU
@@ -71,6 +75,95 @@ static void GTP_IRQ_Disable(void) {}
 static void gui_boot_menu_badge(void) {}
 
 #include "lcd_page_gui.inc"
+
+static uint8_t key_levels[4];
+static unsigned delay_calls, replay_entry;
+static uint8_t read_button_left_gpio(uint8_t id) { (void)id; return !key_levels[0]; }
+static uint8_t read_button_right_gpio(uint8_t id) { (void)id; return !key_levels[1]; }
+static uint8_t read_button_ok_gpio(uint8_t id) { (void)id; return !key_levels[2]; }
+static uint8_t read_button_back_gpio(uint8_t id) { (void)id; return !key_levels[3]; }
+static void Delay_ms(unsigned ms)
+{
+    assert(ms == 10U);
+    assert(++delay_calls < 100U);
+    if(replay_entry) {
+        /* The complete screen must be visible even with entry OK still held. */
+        assert(lcd_page_active == 0U);
+        assert(memcmp(panel, expected, sizeof(panel)) == 0);
+        if(delay_calls == 4U) key_levels[MENU_KEY_OK] = 0U;
+        if(delay_calls == 10U) key_levels[MENU_KEY_BACK] = 1U;
+    }
+}
+/* Glyph shapes are mocked here; production layout/fills and LCD bus are real. */
+static void ILI9806G_DisplayStringEx(uint16_t x, uint16_t y, uint16_t w,
+                                    uint16_t h, uint8_t *text, uint16_t mode)
+{
+    (void)mode;
+    while(*text) {
+        uint16_t width = *text > 0x80U && text[1] ? w : w / 2U;
+        ILI9806G_Fill(x, y, x + width - 1U, y + h - 1U, CurrentBackColor);
+        ILI9806G_Fill(x + 1U, y + 1U, x + width - 2U, y + h - 2U, CurrentTextColor);
+        text += width == w ? 2U : 1U;
+        x += width;
+    }
+}
+static uint8_t confirm(const char *text) { (void)text; assert(0); return 0U; }
+static HwResult lcd_test(void) { assert(0); return HW_FAIL; }
+static HwResult keys_test(void) { assert(0); return HW_FAIL; }
+static HwResult analog_test(void) { assert(0); return HW_FAIL; }
+static HwResult battery_test(void) { assert(0); return HW_FAIL; }
+static HwResult outputs_test(void) { assert(0); return HW_FAIL; }
+HwResult hardware_uart_loopback_test(void) { assert(0); return HW_FAIL; }
+HwResult hardware_radio_test(uint8_t receive) { (void)receive; assert(0); return HW_FAIL; }
+HwResult hardware_memory_test(void) { assert(0); return HW_FAIL; }
+const char *hardware_result_name(HwResult result) { (void)result; return "mock"; }
+#include "lcd_page_diag.inc"
+
+static void test_diagnostics(void)
+{
+    /* Generate the reference through the actual menu, including its own labels. */
+    unsigned i;
+    LCD_PageBuffer_Enable(0U);
+    for(i = 0U; i < 800U * 480U; i++) panel[i] = WHITE;
+    key_levels[MENU_KEY_BACK] = 0U;
+    key_levels[MENU_KEY_OK] = 0U;
+    /* The reference uses the same full draw function and exact menu labels. */
+    {
+#include "lcd_diag_names.inc"
+        uint8_t states[TEST_COUNT] = {0};
+        diagnostics_menu_draw(names, states, 0U, 0U);
+        diag_present();
+    }
+    memcpy(expected, panel, sizeof(panel));
+    for(i = 0U; i < 800U * 480U; i++) panel[i] = RED;
+    LCD_PageBuffer_Enable(1U);
+    pixel_writes = memory_commands = delay_calls = 0U;
+    key_levels[MENU_KEY_OK] = 1U;
+    replay_entry = 1U;
+    diagnostics_menu();
+    replay_entry = 0U;
+    assert(key_levels[MENU_KEY_BACK] == 1U); /* Exit on press, before release. */
+    assert(memory_commands == 1U && pixel_writes == 800U * 480U);
+    assert(panel[479U * 800U + 799U] == WHITE); /* No old-screen margins. */
+    /* Return home immediately, with BACK still down. */
+    gui_prepare_page();
+    main_menu(0U);
+    LCD_EndPage();
+    assert(lcd_page_active == 0U && diag_transition_pending == 0U);
+    key_levels[MENU_KEY_BACK] = 0U;
+    delay_calls = 0U;
+    diag_release();
+    key_levels[MENU_KEY_OK] = 1U;
+    assert(diag_key() == -1);
+    key_levels[MENU_KEY_OK] = 0U; /* Bounce must not become a press. */
+    assert(diag_key() == -1);
+    key_levels[MENU_KEY_OK] = 1U;
+    assert(diag_key() == -1 && diag_key() == -1);
+    assert(diag_key() == MENU_KEY_OK);
+    for(i = 0U; i < 50U; i++) assert(diag_key() == -1);
+    assert(delay_calls == 3U); /* diag_key never blocks for release. */
+    key_levels[MENU_KEY_OK] = 0U;
+}
 
 static void draw_page(unsigned page)
 {
@@ -191,6 +284,8 @@ int main(void)
     test_transitions();
     test_edges_and_fallback();
     test_ascii_fast_path();
-    puts("LCD page tests passed: repeated menu/channel/robot transitions match direct rendering; no LCD writes while composing; one complete transfer; edges, portrait, fallback and live updates.");
+    test_diagnostics();
+    test_diagnostics();
+    puts("LCD page tests passed: menu/channel/robot transitions, Hardware Test entry while OK held, exit while BACK held, debounce, complete transfers, edges, portrait, fallback and live updates.");
     return 0;
 }

@@ -25,6 +25,15 @@ typedef struct {
 } DiagLineCache;
 static DiagLineCache diag_line_cache[DIAG_LINE_CACHE_COUNT];
 static uint8_t diag_transition_pending;
+static uint8_t diag_key_levels[4], diag_key_counts[4];
+
+static void diag_present(void)
+{
+    if(diag_transition_pending != 0U) {
+        LCD_EndPage();
+        diag_transition_pending = 0U;
+    }
+}
 
 static uint8_t key_down(uint8_t key)
 {
@@ -39,23 +48,33 @@ static uint8_t key_down(uint8_t key)
 void diag_release(void)
 {
     uint8_t stable = 0U;
+    diag_present();
     while(stable < 3U) {
         if(key_down(0U) || key_down(1U) || key_down(2U) || key_down(3U)) stable = 0U;
         else stable++;
         Delay_ms(10U);
     }
+    memset(diag_key_levels, 0, sizeof(diag_key_levels));
+    memset(diag_key_counts, 0, sizeof(diag_key_counts));
 }
 
 int diag_key(void)
 {
-    uint8_t key;
-    for(key = 0; key < 4U; key++) {
-        if(key_down(key)) {
-            Delay_ms(20U);
-            if(key_down(key)) { diag_release(); return key; }
+    uint8_t key, down;
+    int event = -1;
+    diag_present();
+    /* Called every 10 ms. A held key produces one event after 3 stable samples;
+     * returning the event never waits for the user to release the key. */
+    for(key = 0U; key < 4U; key++) {
+        down = key_down(key);
+        if(down == diag_key_levels[key]) diag_key_counts[key] = 0U;
+        else if(++diag_key_counts[key] >= 3U) {
+            diag_key_counts[key] = 0U;
+            diag_key_levels[key] = down;
+            if(down != 0U && event < 0) event = key;
         }
     }
-    return -1;
+    return event;
 }
 
 static uint16_t diag_lcd_color(uint8_t color)
@@ -104,10 +123,11 @@ void diag_ui_ascii(uint16_t x, uint16_t y, uint8_t foreground,
 
 void diag_screen(const char *title)
 {
+    LCD_BeginPage(WHITE);
     memset(diag_line_cache, 0, sizeof(diag_line_cache));
     diag_transition_pending = 1U;
     LCD_SetBackColor(WHITE);
-    /* Draw the new header first so page changes never expose a blank frame. */
+    /* Header and content are composed together, including unused margins. */
     diag_ui_fill(4U, 0U, 792U, 64U, DIAG_UI_BLUE);
     /* Native 32-pixel glyphs match the established submenu header weight. */
     diag_ui_text(20U, 4U, 32U, DIAG_UI_WHITE, DIAG_UI_BLUE, title);
@@ -137,17 +157,7 @@ void diag_line(uint16_t y, const char *text)
     diag_ui_text(16U, y, 32U, DIAG_UI_BLACK, DIAG_UI_WHITE, text);
     if(width < 772U)
         diag_ui_fill(16U + width, y, 772U - width, 32U, DIAG_UI_WHITE);
-    if(diag_transition_pending != 0U) {
-        /* Keep the first instruction/result visible while retiring the old
-           screen around it; never present an entirely blank content frame. */
-        diag_transition_pending = 0U;
-        if(y > 64U) diag_ui_fill(0U, 64U, LCD_X_LENGTH, y - 64U, DIAG_UI_WHITE);
-        if(y + 32U < LCD_Y_LENGTH)
-            diag_ui_fill(0U, y + 32U, LCD_X_LENGTH,
-                         LCD_Y_LENGTH - y - 32U, DIAG_UI_WHITE);
-        diag_ui_fill(0U, y, 16U, 32U, DIAG_UI_WHITE);
-        diag_ui_fill(788U, y, 12U, 32U, DIAG_UI_WHITE);
-    }
+
     diag_line_cache[slot].y = y;
     diag_line_cache[slot].valid = 1U;
     strncpy(diag_line_cache[slot].text, text,
@@ -188,6 +198,7 @@ static HwResult lcd_test(void)
             for(x = 0; x < 800U; x += 40U) ILI9806G_DrawLine(x, 0, x, 479U);
             for(y = 0; y < 480U; y += 40U) ILI9806G_DrawLine(0, y, 799U, y);
         }
+        diag_present();
         /* Let the operator inspect every pixel before putting the prompt on it. */
         Delay_ms(1200U);
         if(!confirm("颜色均匀、网格对齐，且无缺口或错位？")) return HW_FAIL;
@@ -443,17 +454,14 @@ void diagnostics_menu(void)
         "NRF 发送+ACK（需另一台）", "NRF 接收（需另一台）",
         "MCU 内存抽检"};
     static uint8_t states[TEST_COUNT]; /* 0=untested; else HwResult+1, this power cycle. */
-    uint8_t selected = 0U, first_visible = 0U, redraw = 1U;
+    uint8_t selected = 0U, first_visible = 0U;
     uint8_t old_selected, old_first_visible;
     int key;
     HwResult result;
     GTP_IRQ_Disable();
+    diagnostics_menu_draw(names, states, selected, first_visible);
     diag_release();
     for(;;) {
-        if(redraw) {
-            diagnostics_menu_draw(names, states, selected, first_visible);
-            redraw = 0U;
-        }
         key = diag_key();
         if(key == MENU_KEY_BACK) break;
         if(key == MENU_KEY_LEFT) {
@@ -511,8 +519,8 @@ void diagnostics_menu(void)
             if(result == HW_BLOCKED) diag_line(160U, "前置条件不足，本次不记录为通过。");
             if(selected == 8U) diag_line(160U, "专用1 KiB RAM + 4个ROM常量；非全芯片检测。");
             (void)confirm("测试结束，返回硬件测试列表。");
+            diagnostics_menu_draw(names, states, selected, first_visible);
             diag_release();
-            redraw = 1U;
         }
         Delay_ms(10U);
     }

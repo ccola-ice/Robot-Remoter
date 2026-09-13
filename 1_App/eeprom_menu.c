@@ -179,7 +179,9 @@ void eeprom_menu(void)
     int key;
     char status[96] = "Ñ¡Ôñ×Ö½Ú£¬°´ OK ±à¼­";
     eeprom_ui_valid = 0U;
+    eeprom_draw_page(address, editing, digit, &read_ok, &value, status);
     diag_release();
+    redraw = 0U;
     for(;;) {
         if(redraw) {
             eeprom_draw_page(address, editing, digit, &read_ok, &value, status);

@@ -1,6 +1,7 @@
 #include "diagnostics.h"
 #include "bsp_fsmc_lcd.h"
 #include "menu.h"
+#include "multi_button_user.h"
 #include "gui.h"
 #include "param.h"
 #include "platform_nrf.h"
@@ -1150,6 +1151,7 @@ static void menu_handle_home_key(MenuKey key)
             if(current_page == MENU_PAGE_DIAGNOSTICS || current_page == MENU_PAGE_EEPROM) {
                 if(current_page == MENU_PAGE_DIAGNOSTICS) diagnostics_menu();
                 else eeprom_menu();
+                user_BUTTON_resume();
                 LCD_SetBackColor(WHITE);
                 LCD_SetTextColor(BLACK);
                 /* Service screens consume raw keys; discard any pre-entry queued events. */
@@ -1353,7 +1355,9 @@ void menu_post_key(MenuKey key)
 
 void menu_tick_10ms(void)
 {
-    if(++refresh_tick_count >= MENU_REFRESH_TICKS)
+    if(++refresh_tick_count >=
+       ((current_page == MENU_PAGE_MONITOR || current_page == MENU_PAGE_ROBOT_CONTROL) ?
+        2U : MENU_REFRESH_TICKS))
     {
         refresh_tick_count = 0;
         refresh_due = 1;

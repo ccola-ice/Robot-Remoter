@@ -1763,7 +1763,7 @@ void channel_monitor_page(void)
 	static const uint16_t card_y[5] = {80U, 144U, 208U, 272U, 336U};
 	static uint16_t previous_bar_width[10], previous_value[10];
 	static GuiAnalogFilter filters[10];
-	static uint8_t numeric_frame;
+	/* ADC values are considered on every live frame. */
 	uint8_t draw_text;
 	uint16_t channel_value[10];
 	uint8_t i;
@@ -1784,13 +1784,7 @@ void channel_monitor_page(void)
 	{
 		channel_value[i + 7U] = gui_analog_filter_update(&filters[i + 7U], ADC3_Value[i], first_draw);
 	}
-	if(first_draw != 0U) numeric_frame = 0U;
-	draw_text = first_draw;
-	if(++numeric_frame >= GUI_NUMERIC_REFRESH_FRAMES)
-	{
-		numeric_frame = 0U;
-		draw_text = 1U;
-	}
+	draw_text = 1U;
 
 	LCD_SetFont(&Font16x32);
 	if(first_draw != 0U)
@@ -2142,10 +2136,10 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 	right_y = gui_robot_stick_value(right_raw_y, ROBOT_RIGHT_Y_ADC_INDEX);
 	gui_robot_draw_stick(134U, 356U, left_raw_x, left_raw_y, left_x, left_y,
 						  BLUE2, &old_dot_x[0], &old_dot_y[0],
-						  &old_raw_x[0], &old_raw_y[0], draw_text, first_draw);
+						  &old_raw_x[0], &old_raw_y[0], 1U, first_draw);
 	gui_robot_draw_stick(666U, 356U, right_raw_x, right_raw_y, right_x, right_y,
 						  GREEN, &old_dot_x[1], &old_dot_y[1],
-						  &old_raw_x[1], &old_raw_y[1], draw_text, first_draw);
+						  &old_raw_x[1], &old_raw_y[1], 1U, first_draw);
 
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(BLACK);

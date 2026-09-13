@@ -45,22 +45,15 @@ static void test_filter(void)
 {
     GuiAnalogFilter filter;
     unsigned i;
-    uint16_t value, previous;
+    uint16_t value;
     assert(gui_analog_filter_update(&filter, 2048U, 1U) == 2048U);
     for(i = 0U; i < 1000U; i++)
         assert(gui_analog_filter_update(&filter, (uint16_t)(2048 + (int)(i % 13U) - 6), 0U) == 2048U);
-    previous = 2048U;
-    for(i = 0U; i < 4U; i++)
-    {
-        value = gui_analog_filter_update(&filter, 4095U, 0U);
-        assert(value >= previous && value <= 4095U);
-        previous = value;
-    }
-    assert(value > 3900U); /* At least 90% of the movement in 200 ms. */
-    for(i = 0U; i < 60U; i++) value = gui_analog_filter_update(&filter, 4095U, 0U);
-    assert(value == 4095U);
-    for(i = 0U; i < 60U; i++) value = gui_analog_filter_update(&filter, 0U, 0U);
-    assert(value == 0U);
+    assert(gui_analog_filter_update(&filter, 4095U, 0U) == 4095U);
+    assert(gui_analog_filter_update(&filter, 0U, 0U) == 0U);
+    assert(gui_analog_filter_update(&filter, 1200U, 0U) == 1200U);
+    assert(gui_analog_filter_update(&filter, 1232U, 0U) == 1232U);
+    assert(gui_analog_filter_update(&filter, 1200U, 0U) == 1200U);
     assert(gui_analog_filter_update(&filter, 3000U, 1U) == 3000U);
     assert(gui_analog_filter_update(&filter, 65535U, 1U) == 4095U);
     gui_analog_filter_update(&filter, 2000U, 1U);
@@ -85,8 +78,11 @@ static void test_monitor(void)
     assert(adc_texts == 10U);
     ADC1_Value[0] = 4095U;
     before = adc_texts;
-    for(frame = 0U; frame < 20U; frame++) channel_monitor_page();
-    assert(adc_texts - before <= 5U && displayed_adc[0] > 4000U);
+    channel_monitor_page();
+    assert(adc_texts == before + 1U && displayed_adc[0] == 4095U);
+    ADC1_Value[0] = 0U;
+    channel_monitor_page();
+    assert(adc_texts == before + 2U && displayed_adc[0] == 0U);
     ADC1_Value[0] = 1234U;
     display_flag = 1U;
     channel_monitor_page();
@@ -108,15 +104,18 @@ static void test_robot(void)
     }
     assert(circles == 0U && lines == 0U && stick_texts == 0U);
     ADC1_Value[2] = 4095U;
-    for(frame = 0U; frame < 4U; frame++) robot_control_page(&telemetry);
+    robot_control_page(&telemetry);
     assert(circles > 0U && stick_texts == 2U);
+    ADC1_Value[2] = 0U;
+    robot_control_page(&telemetry);
+    assert(stick_texts == 4U);
     before = telemetry_texts;
     for(frame = 0U; frame < 20U; frame++)
     {
         telemetry.packet_count++;
         robot_control_page(&telemetry);
     }
-    assert(telemetry_texts - before == 5U);
+    assert(telemetry_texts - before == 2U);
     before = telemetry_texts;
     telemetry.link_online = 1U;
     robot_control_page(&telemetry);

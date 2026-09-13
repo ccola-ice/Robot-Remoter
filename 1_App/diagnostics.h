@@ -25,6 +25,6 @@ void diag_ui_text(uint16_t x, uint16_t y, uint16_t size,
                   uint8_t foreground, uint8_t background, const char *text);
 void diag_ui_ascii(uint16_t x, uint16_t y, uint8_t foreground,
                    uint8_t background, const char *text);
-int diag_key(void); /* Debounced press AND release; MenuKey or -1. */
+int diag_key(void); /* Debounced down edge at 10 ms polling; MenuKey or -1. */
 void diag_release(void);
 #endif
