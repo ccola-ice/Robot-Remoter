@@ -1,4 +1,5 @@
 #include "gui.h"
+#include "gui_analog_filter.h"
 #include "bsp_fsmc_lcd.h"
 #include "bsp_adc1_independent_dual.h"
 #include "bsp_adc3_independent_dual.h"
@@ -45,6 +46,8 @@ static uint16_t boot_progress_width;
 
 void gui_prepare_page(void)
 {
+	/* Compose the full page off-screen; menu_process presents it after the clock. */
+	LCD_BeginPage(WHITE);
 	display_flag = 1;
 	clock_force_redraw = 1U;
 }
@@ -54,8 +57,7 @@ static void gui_clear_page_band(uint16_t y, uint16_t height)
 	ILI9806G_Fill(0U, y, LCD_X_LENGTH, y + height, WHITE);
 }
 
-/* Only erase the narrow layout boundary here.  The page widgets overwrite
- * their own background, so a transition never exposes a blank content frame. */
+/* Restore layout boundaries when page content is drawn, including home pagination. */
 static void gui_clear_page_content(void)
 {
 	ILI9806G_Fill(0U, 64U, LCD_X_LENGTH, 72U, WHITE);
@@ -334,7 +336,8 @@ static void gui_update_progress_bar(uint16_t x, uint16_t y, uint16_t width,
 
 static void gui_draw_channel_card(uint16_t x, uint16_t y, uint8_t channel,
 							  uint16_t value, uint16_t bar_color,
-							  uint16_t *previous_width, uint8_t draw_frame)
+							  uint16_t *previous_width, uint16_t *previous_value,
+							  uint8_t draw_text, uint8_t draw_frame)
 {
 	uint16_t shown_value = (value > 4095U) ? 4095U : value;
 	uint16_t bar_x = x + 170U;
@@ -350,10 +353,14 @@ static void gui_draw_channel_card(uint16_t x, uint16_t y, uint8_t channel,
 		ILI9806G_DispString_EN(x + 8U, y + 7U, displayBuffer);
 	}
 
-	LCD_SetBackColor(GREY);
-	LCD_SetTextColor(BLACK);
-	sprintf(displayBuffer, "%4u", value);
-	ILI9806G_DispString_EN(x + 88U, y + 7U, displayBuffer);
+	if(draw_frame != 0U || (draw_text != 0U && value != *previous_value))
+	{
+		LCD_SetBackColor(GREY);
+		LCD_SetTextColor(BLACK);
+		sprintf(displayBuffer, "%4u", value);
+		ILI9806G_DispString_EN(x + 88U, y + 7U, displayBuffer);
+		*previous_value = value;
+	}
 
 	gui_update_progress_bar(bar_x, y + 13U, bar_width, 20U,
 							((uint32_t)shown_value * 1000UL) / 4095UL,
@@ -1754,7 +1761,10 @@ void system_data_read_and_set(void)
 void channel_monitor_page(void)
 {
 	static const uint16_t card_y[5] = {80U, 144U, 208U, 272U, 336U};
-	static uint16_t previous_bar_width[10];
+	static uint16_t previous_bar_width[10], previous_value[10];
+	static GuiAnalogFilter filters[10];
+	static uint8_t numeric_frame;
+	uint8_t draw_text;
 	uint16_t channel_value[10];
 	uint8_t i;
 	uint8_t first_draw = 0U;
@@ -1768,11 +1778,18 @@ void channel_monitor_page(void)
 
 	for(i = 0U; i < 7U; i++)
 	{
-		channel_value[i] = ADC1_Value[i];
+		channel_value[i] = gui_analog_filter_update(&filters[i], ADC1_Value[i], first_draw);
 	}
 	for(i = 0U; i < 3U; i++)
 	{
-		channel_value[i + 7U] = ADC3_Value[i];
+		channel_value[i + 7U] = gui_analog_filter_update(&filters[i + 7U], ADC3_Value[i], first_draw);
+	}
+	if(first_draw != 0U) numeric_frame = 0U;
+	draw_text = first_draw;
+	if(++numeric_frame >= GUI_NUMERIC_REFRESH_FRAMES)
+	{
+		numeric_frame = 0U;
+		draw_text = 1U;
 	}
 
 	LCD_SetFont(&Font16x32);
@@ -1783,17 +1800,18 @@ void channel_monitor_page(void)
 		LCD_SetBackColor(BLUE);
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DispString_EN(20U, 0U, "CHANNEL MONITOR");
-		ILI9806G_DispString_EN(20U, 32U, "10 analog inputs / optimized live view");
+		ILI9806G_DispString_EN(20U, 32U, "10 analog inputs / filtered live view");
 		gui_clear_page_content();
 	}
 
 	for(i = 0U; i < 5U; i++)
 	{
 		gui_draw_channel_card(4U, card_y[i], i, channel_value[i], BLUE,
-						  &previous_bar_width[i], first_draw);
+						  &previous_bar_width[i], &previous_value[i], draw_text, first_draw);
 		gui_draw_channel_card(404U, card_y[i], i + 5U,
 						  channel_value[i + 5U], GREEN,
-						  &previous_bar_width[i + 5U], first_draw);
+						  &previous_bar_width[i + 5U], &previous_value[i + 5U],
+						  draw_text, first_draw);
 	}
 	if(first_draw != 0U)
 	{
@@ -1930,7 +1948,8 @@ static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
 							 int16_t control_x, int16_t control_y,
 							 uint16_t color, uint16_t *old_x,
 							 uint16_t *old_y, uint16_t *old_raw_x,
-							 uint16_t *old_raw_y, uint8_t first_draw)
+							 uint16_t *old_raw_y, uint8_t draw_text,
+							 uint8_t first_draw)
 {
 	uint16_t dot_x = (uint16_t)((int32_t)center_x +
 							   (int32_t)control_x * 46L / 1000L);
@@ -1938,21 +1957,32 @@ static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
 							   (int32_t)control_y * 46L / 1000L);
 	uint16_t text_x = center_x - 104U;
 
-	if((first_draw == 0U) && (raw_x == *old_raw_x) && (raw_y == *old_raw_y))
+	int32_t move_x = (int32_t)dot_x - *old_x;
+	int32_t move_y = (int32_t)dot_y - *old_y;
+
+	/* Raw ADC changes often leave the dot on the same pixel. Do not erase it.
+	 * Two-pixel hysteresis also suppresses toggling at a pixel boundary. */
+	if(first_draw != 0U || move_x >= 2L || move_x <= -2L ||
+	   move_y >= 2L || move_y <= -2L)
 	{
+		if(first_draw == 0U)
+		{
+			LCD_SetTextColor(GREY);
+			ILI9806G_DrawCircle(*old_x, *old_y, 8U, 1U);
+		}
+		LCD_SetTextColor(WHITE);
+		ILI9806G_DrawLine(center_x - 56U, center_y, center_x + 56U, center_y);
+		ILI9806G_DrawLine(center_x, center_y - 56U, center_x, center_y + 56U);
+		LCD_SetTextColor(color);
+		ILI9806G_DrawCircle(center_x, center_y, 56U, 0U);
+		ILI9806G_DrawCircle(dot_x, dot_y, 8U, 1U);
+		*old_x = dot_x;
+		*old_y = dot_y;
+	}
+
+	if(first_draw == 0U &&
+	   (draw_text == 0U || (raw_x == *old_raw_x && raw_y == *old_raw_y)))
 		return;
-	}
-	if(first_draw == 0U)
-	{
-		LCD_SetTextColor(GREY);
-		ILI9806G_DrawCircle(*old_x, *old_y, 8U, 1U);
-	}
-	LCD_SetTextColor(WHITE);
-	ILI9806G_DrawLine(center_x - 56U, center_y, center_x + 56U, center_y);
-	ILI9806G_DrawLine(center_x, center_y - 56U, center_x, center_y + 56U);
-	LCD_SetTextColor(color);
-	ILI9806G_DrawCircle(center_x, center_y, 56U, 0U);
-	ILI9806G_DrawCircle(dot_x, dot_y, 8U, 1U);
 
 	LCD_SetFont(&Font16x32);
 	LCD_SetBackColor(GREY);
@@ -1960,11 +1990,9 @@ static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
 	sprintf(displayBuffer, "X%+5d Y%+5d", control_x, control_y);
 	ILI9806G_DispString_EN(text_x, 416U, displayBuffer);
 	LCD_SetFont(&Font8x16);
-	sprintf(displayBuffer, "RAW X:%4u Y:%4u       ", raw_x, raw_y);
+	sprintf(displayBuffer, "ADC X:%4u Y:%4u       ", raw_x, raw_y);
 	ILI9806G_DispString_EN(text_x, 452U, displayBuffer);
 
-	*old_x = dot_x;
-	*old_y = dot_y;
 	*old_raw_x = raw_x;
 	*old_raw_y = raw_y;
 }
@@ -1976,6 +2004,9 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 	static uint16_t battery_bar_width;
 	static uint16_t old_dot_x[2], old_dot_y[2];
 	static uint16_t old_raw_x[2], old_raw_y[2];
+	static GuiAnalogFilter filters[4];
+	static uint8_t numeric_frame;
+	uint8_t draw_text;
 	uint8_t first_draw = 0U;
 	uint8_t telemetry_changed;
 	uint8_t battery;
@@ -2027,8 +2058,17 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 		ILI9806G_Fill(528U, 272U, 536U, 476U, WHITE);
 	}
 
+	if(first_draw != 0U) numeric_frame = 0U;
+	draw_text = first_draw;
+	if(++numeric_frame >= GUI_NUMERIC_REFRESH_FRAMES)
+	{
+		numeric_frame = 0U;
+		draw_text = 1U;
+	}
+	/* Keep link transitions immediate; refresh numeric telemetry at about 5 Hz. */
 	telemetry_changed = ((snapshot_valid == 0U) ||
-		(memcmp(&previous, telemetry, sizeof(previous)) != 0)) ? 1U : 0U;
+		(previous.link_online != telemetry->link_online) ||
+		(draw_text != 0U && memcmp(&previous, telemetry, sizeof(previous)) != 0)) ? 1U : 0U;
 	if(telemetry_changed != 0U)
 	{
 		previous = *telemetry;
@@ -2091,10 +2131,10 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 		ILI9806G_DispString_EN(288U, 404U, displayBuffer);
 	}
 
-	left_raw_x = ADC1_Value[ROBOT_LEFT_X_ADC_INDEX];
-	left_raw_y = ADC1_Value[ROBOT_LEFT_Y_ADC_INDEX];
-	right_raw_x = ADC1_Value[ROBOT_RIGHT_X_ADC_INDEX];
-	right_raw_y = ADC1_Value[ROBOT_RIGHT_Y_ADC_INDEX];
+	left_raw_x = gui_analog_filter_update(&filters[0], ADC1_Value[ROBOT_LEFT_X_ADC_INDEX], first_draw);
+	left_raw_y = gui_analog_filter_update(&filters[1], ADC1_Value[ROBOT_LEFT_Y_ADC_INDEX], first_draw);
+	right_raw_x = gui_analog_filter_update(&filters[2], ADC1_Value[ROBOT_RIGHT_X_ADC_INDEX], first_draw);
+	right_raw_y = gui_analog_filter_update(&filters[3], ADC1_Value[ROBOT_RIGHT_Y_ADC_INDEX], first_draw);
 	/* Correct both horizontal axes to the controller's displayed direction. */
 	left_x = -gui_robot_stick_value(left_raw_x, ROBOT_LEFT_X_ADC_INDEX);
 	left_y = gui_robot_stick_value(left_raw_y, ROBOT_LEFT_Y_ADC_INDEX);
@@ -2102,10 +2142,10 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 	right_y = gui_robot_stick_value(right_raw_y, ROBOT_RIGHT_Y_ADC_INDEX);
 	gui_robot_draw_stick(134U, 356U, left_raw_x, left_raw_y, left_x, left_y,
 						  BLUE2, &old_dot_x[0], &old_dot_y[0],
-						  &old_raw_x[0], &old_raw_y[0], first_draw);
+						  &old_raw_x[0], &old_raw_y[0], draw_text, first_draw);
 	gui_robot_draw_stick(666U, 356U, right_raw_x, right_raw_y, right_x, right_y,
 						  GREEN, &old_dot_x[1], &old_dot_y[1],
-						  &old_raw_x[1], &old_raw_y[1], first_draw);
+						  &old_raw_x[1], &old_raw_y[1], draw_text, first_draw);
 
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(BLACK);

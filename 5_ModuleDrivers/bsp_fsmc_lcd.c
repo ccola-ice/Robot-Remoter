@@ -1,4 +1,5 @@
 #include "bsp_fsmc_lcd.h"
+#include "bsp_fsmc_sram.h"
 #include "bsp_SysTick.h"
 #include "fonts.h"	
 
@@ -32,6 +33,170 @@ static void                	ILI9806G_REG_Config          ( void );
 static void                	ILI9806G_SetCursor           ( uint16_t usX, uint16_t usY );
 static __inline void       	ILI9806G_FillColor           ( uint32_t ulAmout_Point, uint16_t usColor );
 static uint16_t            	ILI9806G_Read_PixelData      ( void );
+
+/* Page transitions reserve the first 750 KiB of external SRAM (RGB565).
+ * The panel keeps displaying its old GRAM while the next page is composed.
+ * Enable only after the external SRAM boot test has passed. */
+#define LCD_PAGE_PIXEL_CAPACITY (800UL * 480UL)
+static volatile uint16_t * const lcd_page_pixels =
+    (volatile uint16_t *)SRAM_BASE_ADDR;
+static uint8_t lcd_page_enabled, lcd_page_active, lcd_page_window_valid;
+static uint16_t lcd_page_width, lcd_page_height;
+static uint32_t lcd_page_x0, lcd_page_y0, lcd_page_x1, lcd_page_y1;
+static uint32_t lcd_page_x, lcd_page_y;
+
+static uint32_t lcd_page_started_cycles;
+
+/* Rectangles dominate menu composition. Check their bounds once per row,
+ * then write spans without per-pixel window decoding or address multiplication. */
+static void lcd_page_fill_span(volatile uint16_t *dest, uint32_t count, uint16_t color)
+{
+    while(count >= 8U)
+    {
+        dest[0] = color; dest[1] = color; dest[2] = color; dest[3] = color;
+        dest[4] = color; dest[5] = color; dest[6] = color; dest[7] = color;
+        dest += 8U;
+        count -= 8U;
+    }
+    while(count-- != 0U) *dest++ = color;
+}
+
+static uint8_t lcd_page_fill_window(uint32_t count, uint16_t color)
+{
+    uint32_t x_end, y_end, y;
+    if(lcd_page_window_valid == 0U) return 1U;
+    if(count != (lcd_page_x1 - lcd_page_x0) * (lcd_page_y1 - lcd_page_y0))
+        return 0U;
+    x_end = lcd_page_x1 < lcd_page_width ? lcd_page_x1 : lcd_page_width;
+    y_end = lcd_page_y1 < lcd_page_height ? lcd_page_y1 : lcd_page_height;
+    if(lcd_page_x0 >= x_end || lcd_page_y0 >= y_end) return 1U;
+    for(y = lcd_page_y0; y < y_end; y++)
+        lcd_page_fill_span(lcd_page_pixels + y * lcd_page_width + lcd_page_x0,
+                           x_end - lcd_page_x0, color);
+    return 1U;
+}
+
+/* All built-in ASCII fonts have byte-aligned rows. Keep their common,
+ * fully-visible path separate from the clipped pixel-stream fallback. */
+static uint8_t lcd_page_draw_ascii(uint16_t x, uint16_t y, const uint8_t *bitmap)
+{
+    uint16_t width = LCD_Currentfonts->Width, height = LCD_Currentfonts->Height;
+    uint16_t row, column, foreground = CurrentTextColor, background = CurrentBackColor;
+    volatile uint16_t *dest;
+    uint8_t bits;
+    if((width & 7U) != 0U || (uint32_t)x + width > lcd_page_width ||
+       (uint32_t)y + height > lcd_page_height) return 0U;
+    for(row = 0U; row < height; row++)
+    {
+        dest = lcd_page_pixels + ((uint32_t)y + row) * lcd_page_width + x;
+        for(column = 0U; column < width; column += 8U)
+        {
+            bits = *bitmap++;
+            dest[0] = (bits & 0x80U) ? foreground : background;
+            dest[1] = (bits & 0x40U) ? foreground : background;
+            dest[2] = (bits & 0x20U) ? foreground : background;
+            dest[3] = (bits & 0x10U) ? foreground : background;
+            dest[4] = (bits & 0x08U) ? foreground : background;
+            dest[5] = (bits & 0x04U) ? foreground : background;
+            dest[6] = (bits & 0x02U) ? foreground : background;
+            dest[7] = (bits & 0x01U) ? foreground : background;
+            dest += 8U;
+        }
+    }
+    return 1U;
+}
+
+void LCD_PageBuffer_Enable(uint8_t enabled)
+{
+    lcd_page_enabled = enabled;
+    lcd_page_active = 0U;
+}
+
+void LCD_BeginPage(uint16_t background)
+{
+    uint32_t count = (uint32_t)LCD_X_LENGTH * LCD_Y_LENGTH;
+    if(lcd_page_enabled == 0U || count == 0U || count > LCD_PAGE_PIXEL_CAPACITY)
+        return;
+    lcd_page_started_cycles = DWT->CYCCNT;
+    lcd_page_width = LCD_X_LENGTH;
+    lcd_page_height = LCD_Y_LENGTH;
+    lcd_page_window_valid = 0U;
+    lcd_page_active = 1U;
+    lcd_page_fill_span(lcd_page_pixels, count, background);
+}
+
+static void lcd_page_set_window(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
+{
+    lcd_page_x0 = lcd_page_x = x;
+    lcd_page_y0 = lcd_page_y = y;
+    lcd_page_x1 = (uint32_t)x + width;
+    lcd_page_y1 = (uint32_t)y + height;
+    lcd_page_window_valid = (width != 0U && height != 0U);
+}
+
+static __inline void lcd_begin_pixels(void)
+{
+    if(lcd_page_active == 0U)
+        ILI9806G_Write_Cmd(CMD_SetPixel);
+    else
+    {
+        lcd_page_x = lcd_page_x0;
+        lcd_page_y = lcd_page_y0;
+    }
+}
+
+static __inline void lcd_write_pixel(uint16_t color)
+{
+    if(lcd_page_active == 0U)
+    {
+        ILI9806G_Write_Data(color);
+        return;
+    }
+    if(lcd_page_window_valid == 0U) return;
+    /* Preserve the original window stride even when it crosses an edge. */
+    if(lcd_page_x < lcd_page_width && lcd_page_y < lcd_page_height)
+        lcd_page_pixels[lcd_page_y * lcd_page_width + lcd_page_x] = color;
+    if(++lcd_page_x >= lcd_page_x1)
+    {
+        lcd_page_x = lcd_page_x0;
+        if(++lcd_page_y >= lcd_page_y1) lcd_page_y = lcd_page_y0;
+    }
+}
+
+void LCD_EndPage(void)
+{
+    uint32_t remaining, present_started, present_finished, cycles_per_us;
+    volatile uint16_t *pixel;
+    if(lcd_page_active == 0U) return;
+    present_started = DWT->CYCCNT;
+    lcd_page_active = 0U;
+    pixel = lcd_page_pixels;
+    remaining = (uint32_t)lcd_page_width * lcd_page_height;
+    ILI9806G_OpenWindow(0U, 0U, lcd_page_width, lcd_page_height);
+    ILI9806G_Write_Cmd(CMD_SetPixel);
+    /* One uninterrupted pixel stream, without clearing the visible GRAM,
+     * rendering glyphs, or changing the backlight during the transfer.
+     * This is a software back buffer, not a hardware/TE-synchronized swap. */
+    while(remaining >= 8U)
+    {
+        ILI9806G_Write_Data(*pixel++);
+        ILI9806G_Write_Data(*pixel++);
+        ILI9806G_Write_Data(*pixel++);
+        ILI9806G_Write_Data(*pixel++);
+        ILI9806G_Write_Data(*pixel++);
+        ILI9806G_Write_Data(*pixel++);
+        ILI9806G_Write_Data(*pixel++);
+        ILI9806G_Write_Data(*pixel++);
+        remaining -= 8U;
+    }
+    while(remaining-- != 0U) ILI9806G_Write_Data(*pixel++);
+    present_finished = DWT->CYCCNT;
+    cycles_per_us = SystemCoreClock / 1000000UL;
+    if(cycles_per_us != 0U)
+        printf("[LCD] page compose=%lu us, transfer=%lu us\r\n",
+               (unsigned long)((present_started - lcd_page_started_cycles) / cycles_per_us),
+               (unsigned long)((present_finished - present_started) / cycles_per_us));
+}
 
 ///**
 //  * @brief  向ILI9806G写入命令
@@ -771,9 +936,9 @@ void LCD_Draw_Rect(uint16_t x0,uint16_t x1,uint16_t y0,uint16_t y1,uint16_t colo
 
     ILI9806G_OpenWindow(x0, y0, (uint16_t)(x1 - x0 + 1U), (uint16_t)(y1 - y0 + 1U));
     pixel_count = (uint32_t)(x1 - x0 + 1U) * (uint32_t)(y1 - y0 + 1U);
-    ILI9806G_Write_Cmd(CMD_SetPixel);
+    lcd_begin_pixels();
     while (pixel_count-- != 0U)
-        ILI9806G_Write_Data(color);
+        lcd_write_pixel(color);
 }
 
 
@@ -914,6 +1079,11 @@ void ILI9806G_GramScan ( uint8_t ucOption )
  */
 void ILI9806G_OpenWindow ( uint16_t usX, uint16_t usY, uint16_t usWidth, uint16_t usHeight )
 {	
+    if(lcd_page_active != 0U)
+    {
+        lcd_page_set_window(usX, usY, usWidth, usHeight);
+        return;
+    }
 	ILI9806G_Write_Cmd ( CMD_SetCoordinateX ); 				 /* 设置X坐标 */
 	ILI9806G_Write_Data ( usX >> 8  );	 /* 先高8位，然后低8位 */
 	ILI9806G_Write_Data ( usX & 0xff  );	 /* 设置起始点和结束点*/
@@ -946,15 +1116,26 @@ static void ILI9806G_SetCursor ( uint16_t usX, uint16_t usY )
  * @param  usColor ：颜色
  * @retval 无
  */
-static __inline void ILI9806G_FillColor ( uint32_t ulAmout_Point, uint16_t usColor )
+static __inline void ILI9806G_FillColor(uint32_t count, uint16_t color)
 {
-	uint32_t i = 0;
-	
-	/* memory write */
-	ILI9806G_Write_Cmd ( CMD_SetPixel );	
-		
-	for ( i = 0; i < ulAmout_Point; i ++ )
-		ILI9806G_Write_Data ( usColor );
+    lcd_begin_pixels();
+    if(lcd_page_active != 0U)
+    {
+        if(lcd_page_fill_window(count, color) != 0U) return;
+        while(count-- != 0U) lcd_write_pixel(color);
+        return;
+    }
+    /* Preserve the direct rendering path without an active-buffer branch
+     * on every pixel (also used by boot screens and live progress bars). */
+    while(count >= 8U)
+    {
+        ILI9806G_Write_Data(color); ILI9806G_Write_Data(color);
+        ILI9806G_Write_Data(color); ILI9806G_Write_Data(color);
+        ILI9806G_Write_Data(color); ILI9806G_Write_Data(color);
+        ILI9806G_Write_Data(color); ILI9806G_Write_Data(color);
+        count -= 8U;
+    }
+    while(count-- != 0U) ILI9806G_Write_Data(color);
 }
 
 
@@ -1034,6 +1215,11 @@ static uint16_t ILI9806G_Read_PixelData ( void )
 uint16_t ILI9806G_GetPointPixel ( uint16_t usX, uint16_t usY )
 { 
 	uint16_t usPixelData;
+    if(lcd_page_active != 0U)
+    {
+        if(usX >= lcd_page_width || usY >= lcd_page_height) return 0U;
+        return lcd_page_pixels[(uint32_t)usY * lcd_page_width + usX];
+    }
 	
 	ILI9806G_SetCursor ( usX, usY );
 	
@@ -1242,11 +1428,15 @@ void ILI9806G_DispChar_EN ( uint16_t usX, uint16_t usY, const char cChar )
 	//字模首地址
 	/*ascii码表偏移值乘以每个字模的字节数，求出字模的偏移位置*/
 	Pfont = (uint8_t *)&LCD_Currentfonts->table[ucRelativePositon * fontLength];
+    if(lcd_page_active != 0U && lcd_page_draw_ascii(usX, usY, Pfont) != 0U)
+    {
+        return;
+    }
 	
 	//设置显示窗口
 	ILI9806G_OpenWindow ( usX, usY, LCD_Currentfonts->Width, LCD_Currentfonts->Height);
 	
-	ILI9806G_Write_Cmd ( CMD_SetPixel );			
+	lcd_begin_pixels();
 
 	//按字节读取字模数据
 	//由于前面直接设置了显示窗口，显示数据会自动换行
@@ -1256,9 +1446,9 @@ void ILI9806G_DispChar_EN ( uint16_t usX, uint16_t usY, const char cChar )
 		for ( bitCount = 0; bitCount < 8; bitCount++ )
 		{
 			if ( Pfont[byteCount] & (0x80>>bitCount) )
-				ILI9806G_Write_Data ( CurrentTextColor );			
+				lcd_write_pixel(CurrentTextColor);
 			else
-				ILI9806G_Write_Data ( CurrentBackColor );
+				lcd_write_pixel(CurrentBackColor);
 		}	
 	}	
 }
@@ -1388,7 +1578,7 @@ void ILI9806G_DispChar_CH ( uint16_t usX, uint16_t usY, uint16_t usChar )
 	//设置显示窗口
 	ILI9806G_OpenWindow ( usX, usY, WIDTH_CH_CHAR, HEIGHT_CH_CHAR );
 	
-	ILI9806G_Write_Cmd ( CMD_SetPixel );
+	lcd_begin_pixels();
 	
 	//取字模数据  
 	GetGBKCode ( ucBuffer, usChar );	
@@ -1407,9 +1597,9 @@ void ILI9806G_DispChar_CH ( uint16_t usX, uint16_t usY, uint16_t usChar )
 		for ( bitCount = 0; bitCount < WIDTH_CH_CHAR; bitCount ++ )
 		{			
 			if ( usTemp & ( 0x80000000 >> bitCount ) )  //高位在前 
-			  ILI9806G_Write_Data ( CurrentTextColor );				
+			  lcd_write_pixel(CurrentTextColor);
 			else
-				ILI9806G_Write_Data ( CurrentBackColor );			
+				lcd_write_pixel(CurrentBackColor);
 		}		
 	}
 	
@@ -1766,7 +1956,7 @@ void ILI9806G_DrawChar_Ex(uint16_t usX, //字符显示位置x
 	//设置显示窗口
 	ILI9806G_OpenWindow ( usX, usY, Font_width, Font_Height);
 	
-	ILI9806G_Write_Cmd ( CMD_SetPixel );		
+	lcd_begin_pixels();
 	
 	//按字节读取字模数据
 	//由于前面直接设置了显示窗口，显示数据会自动换行
@@ -1779,9 +1969,9 @@ void ILI9806G_DrawChar_Ex(uint16_t usX, //字符显示位置x
 					//整个字节值为1表示该像素为笔迹
 					//整个字节值为0表示该像素为背景
 					if ( *c++ == DrawModel )
-						ILI9806G_Write_Data ( CurrentBackColor );			
+						lcd_write_pixel(CurrentBackColor);
 					else
-						ILI9806G_Write_Data ( CurrentTextColor );
+						lcd_write_pixel(CurrentTextColor);
 			}	
 	}	
 }

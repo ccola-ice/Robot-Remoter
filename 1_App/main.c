@@ -69,16 +69,16 @@ extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 
 extern volatile  param_Config param;;
 
-FATFS fs_sdcard;                   	/* SD¿¨ FatFs¹¤×÷Çø */
-FATFS fs_flash;                    	/* SPI Flash FatFs¹¤×÷Çø */
-extern FIL fnew_sdcard;				/* ÎÄ¼þ¶ÔÏó */
-extern FRESULT res;                	/* ÎÄ¼þ²Ù×÷½á¹û */
-extern unsigned int fnum;			/* ÎÄ¼þ³É¹¦¶ÁÐ´ÊýÁ¿ */
+FATFS fs_sdcard;                   	/* SDï¿½ï¿½ FatFsï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
+FATFS fs_flash;                    	/* SPI Flash FatFsï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
+extern FIL fnew_sdcard;				/* ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ */
+extern FRESULT res;                	/* ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
+extern unsigned int fnum;			/* ï¿½Ä¼ï¿½ï¿½É¹ï¿½ï¿½ï¿½Ð´ï¿½ï¿½ï¿½ï¿½ */
 
-float pitch,roll,yaw; 		//dmp½âËãÅ·À­½Ç
-short aacx,aacy,aacz;		//¼ÓËÙ¶È´«¸ÐÆ÷Ô­Ê¼Êý¾Ý
-short gyrox,gyroy,gyroz;	//ÍÓÂÝÒÇÔ­Ê¼Êý¾Ý
-short temp;					//ÎÂ¶È
+float pitch,roll,yaw; 		//dmpï¿½ï¿½ï¿½ï¿½Å·ï¿½ï¿½ï¿½ï¿½
+short aacx,aacy,aacz;		//ï¿½ï¿½ï¿½Ù¶È´ï¿½ï¿½ï¿½ï¿½ï¿½Ô­Ê¼ï¿½ï¿½ï¿½ï¿½
+short gyrox,gyroy,gyroz;	//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô­Ê¼ï¿½ï¿½ï¿½ï¿½
+short temp;					//ï¿½Â¶ï¿½
 uint8_t imu_data_valid;
 static uint8_t imu_read_failures;
 static uint8_t imu_dmp_ready;
@@ -259,6 +259,7 @@ void setup(void)
     /* Keep the memory test before f_mount and all application memory use. */
     boot_start(BOOT_SRAM);
     ok = sram_read_write_test();
+    LCD_PageBuffer_Enable(ok);
     boot_done(BOOT_SRAM, ok ? BOOT_PASS : BOOT_FAIL,
               "External 1 MiB, 8/16-bit R/W, each block restored");
 
@@ -520,7 +521,7 @@ int main(void)
 			{
 				imu_data_valid = 0U;
 			}
-			RTC_TimeAndDate_Show(); // ÏÔÊ¾Ê±¼äºÍÈÕÆÚ
+			RTC_TimeAndDate_Show();
 			finish_10hz = 0;
 		}
 

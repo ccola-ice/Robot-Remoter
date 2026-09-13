@@ -1388,6 +1388,7 @@ void menu_process(void)
         refresh_due = 0;
         menu_draw_current_page();
         gui_clock_overlay();
+        LCD_EndPage();
         clock_refresh_due = 0U;
     }
     else if(refresh_due)

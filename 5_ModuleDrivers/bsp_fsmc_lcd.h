@@ -186,6 +186,11 @@ extern uint8_t LCD_SCAN_MODE;
 #define		 LCD_ClearLine 						ILI9806G_ClearLine
 
 /********************************** ILI9806 º¯Êý ***************************************/
+/* Call Enable only after the SRAM boot test. Pair Begin/End around page draws. */
+void LCD_PageBuffer_Enable(uint8_t enabled);
+void LCD_BeginPage(uint16_t background);
+void LCD_EndPage(void);
+
 void                     	ILI9806G_Init                    ( void );
 void                    	ILI9806G_Rst                     ( void );
 void                     	ILI9806G_BackLed_Control         ( FunctionalState enumState );
