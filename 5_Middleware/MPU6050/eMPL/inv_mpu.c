@@ -2944,7 +2944,7 @@ unsigned short inv_row_2_scale(const signed char *row)
 //空函数,未用到.
 void mget_ms(unsigned long *time)
 {
-
+    (void)get_tick_count(time);
 }
 //mpu6050,dmp初始化
 //返回值:0,正常
@@ -2992,15 +2992,17 @@ u8 mpu_dmp_get_data(float *pitch,float *roll,float *yaw)
 	float q0=1.0f,q1=0.0f,q2=0.0f,q3=0.0f;
 	unsigned long sensor_timestamp;
 	short gyro[3], accel[3], sensors;
-	unsigned char more;
+	unsigned char more, reads = 0;
 	long quat[4]; 
-	/* Always use the newest packet. Slow display drawing can leave multiple
-	 * DMP packets queued; draining them here prevents latency and FIFO buildup. */
-	do
-	{
-		if(dmp_read_fifo(gyro, accel, quat, &sensor_timestamp, &sensors, &more))
-			return 1;
-	} while(more != 0U);
+    do {
+        if(dmp_read_fifo(gyro, accel, quat, &sensor_timestamp, &sensors, &more))
+            return 1;
+        ++reads;
+    } while(more && reads < 8U);
+    if(more) {
+        mpu_reset_fifo();
+        return 1;
+    }
 	/* Gyro and accel data are written to the FIFO by the DMP in chip frame and hardware units.
 	 * This behavior is convenient because it keeps the gyro and accel outputs of dmp_read_fifo and mpu_read_fifo consistent.
 	**/

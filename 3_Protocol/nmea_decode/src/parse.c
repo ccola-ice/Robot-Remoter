@@ -62,10 +62,18 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 int _nmea_parse_time(const char *buff, int buff_sz, nmeaTIME *res)
 {
-    int success = 0;
+    int success = 0, i;
+
+    if(!buff || !res || buff_sz < 6 || buff_sz > 10)
+        return -1;
+    for(i = 0; i < buff_sz; ++i)
+        if(i == 6 ? buff[i] != '.' : !isdigit((unsigned char)buff[i]))
+            return -1;
+    res->hsec = 0;
 
     switch(buff_sz)
     {
@@ -87,6 +95,12 @@ int _nmea_parse_time(const char *buff, int buff_sz, nmeaTIME *res)
         break;
     }
 
+    if(res->hour > 23 || res->min > 59 || res->sec > 59)
+        success = 0;
+    if(buff_sz == 8)
+        res->hsec *= 10;
+    else if(buff_sz == 10)
+        res->hsec /= 10;
     return (success?0:-1);
 }
 
@@ -182,8 +196,10 @@ int nmea_find_tail(const char *buff, int buff_sz, int *res_crc)
         }
         else if('*' == *buff)
         {
-            if(buff + tail_sz <= end_buff && '\r' == buff[3] && '\n' == buff[4])
+            if(end_buff - buff >= tail_sz && '\r' == buff[3] && '\n' == buff[4])
             {
+                if(!isxdigit((unsigned char)buff[1]) || !isxdigit((unsigned char)buff[2]))
+                    return nread + tail_sz;
                 *res_crc = nmea_atoi(buff + 1, 2, 16);
                 nread = buff_sz - (int)(end_buff - (buff + tail_sz));
                 if(*res_crc != crc)
@@ -214,7 +230,7 @@ int nmea_find_tail(const char *buff, int buff_sz, int *res_crc)
  */
 int nmea_parse_GPGGA(const char *buff, int buff_sz, nmeaGPGGA *pack)
 {
-    char time_buff[NMEA_TIMEPARSE_BUF];
+    char time_buff[NMEA_TIMEPARSE_BUF] = {0};
 
     NMEA_ASSERT(buff && pack);
 
@@ -223,7 +239,7 @@ int nmea_parse_GPGGA(const char *buff, int buff_sz, nmeaGPGGA *pack)
     nmea_trace_buff(buff, buff_sz);
 
     if(14 != nmea_scanf(buff, buff_sz,
-        "$GPGGA,%s,%f,%C,%f,%C,%d,%d,%f,%f,%C,%f,%C,%f,%d*",
+        "$GPGGA,%10s,%f,%C,%f,%C,%d,%d,%f,%f,%C,%f,%C,%f,%d*",
         &(time_buff[0]),
         &(pack->lat), &(pack->ns), &(pack->lon), &(pack->ew),
         &(pack->sig), &(pack->satinuse), &(pack->HDOP), &(pack->elv), &(pack->elv_units),
@@ -300,6 +316,11 @@ int nmea_parse_GPGSV(const char *buff, int buff_sz, nmeaGPGSV *pack)
         &(pack->sat_data[2].id), &(pack->sat_data[2].elv), &(pack->sat_data[2].azimuth), &(pack->sat_data[2].sig),
         &(pack->sat_data[3].id), &(pack->sat_data[3].elv), &(pack->sat_data[3].azimuth), &(pack->sat_data[3].sig));
 
+    if(nsen < 3 || pack->pack_count < 1 || pack->pack_index < 1 ||
+       pack->pack_index > pack->pack_count ||
+       pack->pack_index > (NMEA_MAXSAT + NMEA_SATINPACK - 1) / NMEA_SATINPACK ||
+       pack->sat_count < 0 || pack->sat_count > NMEA_MAXSAT)
+        return 0;
     nsat = (pack->pack_index - 1) * NMEA_SATINPACK;
     nsat = (nsat + NMEA_SATINPACK > pack->sat_count)?pack->sat_count - nsat:NMEA_SATINPACK;
     nsat = nsat * 4 + 3 /* first three sentence`s */;
@@ -323,7 +344,7 @@ int nmea_parse_GPGSV(const char *buff, int buff_sz, nmeaGPGSV *pack)
 int nmea_parse_GPRMC(const char *buff, int buff_sz, nmeaGPRMC *pack)
 {
     int nsen;
-    char time_buff[NMEA_TIMEPARSE_BUF];
+    char time_buff[NMEA_TIMEPARSE_BUF] = {0};
 
     NMEA_ASSERT(buff && pack);
 
@@ -332,7 +353,7 @@ int nmea_parse_GPRMC(const char *buff, int buff_sz, nmeaGPRMC *pack)
     nmea_trace_buff(buff, buff_sz);
 
     nsen = nmea_scanf(buff, buff_sz,
-        "$GPRMC,%s,%C,%f,%C,%f,%C,%f,%f,%2d%2d%2d,%f,%C,%C*",
+        "$GPRMC,%10s,%C,%f,%C,%f,%C,%f,%f,%2d%2d%2d,%f,%C,%C*",
         &(time_buff[0]),
         &(pack->status), &(pack->lat), &(pack->ns), &(pack->lon), &(pack->ew),
         &(pack->speed), &(pack->direction),
@@ -406,7 +427,7 @@ int nmea_parse_GPVTG(const char *buff, int buff_sz, nmeaGPVTG *pack)
  */
 int nmea_parse_GNGGA(const char *buff, int buff_sz, nmeaGNGGA *pack)
 {
-    char time_buff[NMEA_TIMEPARSE_BUF];
+    char time_buff[NMEA_TIMEPARSE_BUF] = {0};
 
     NMEA_ASSERT(buff && pack);
 
@@ -415,7 +436,7 @@ int nmea_parse_GNGGA(const char *buff, int buff_sz, nmeaGNGGA *pack)
     nmea_trace_buff(buff, buff_sz);
 
     if(14 != nmea_scanf(buff, buff_sz,
-        "$GNGGA,%s,%f,%C,%f,%C,%d,%d,%f,%f,%C,%f,%C,%f,%d*",
+        "$GNGGA,%10s,%f,%C,%f,%C,%d,%d,%f,%f,%C,%f,%C,%f,%d*",
         &(time_buff[0]),
         &(pack->Lat), &(pack->uLat), &(pack->Lon), &(pack->uLon),
         &(pack->FS), &(pack->numSv), &(pack->HDOP), &(pack->Msl), &(pack->uMsl),
@@ -444,7 +465,7 @@ int nmea_parse_GNGGA(const char *buff, int buff_sz, nmeaGNGGA *pack)
 int nmea_parse_GNRMC(const char *buff, int buff_sz, nmeaGNRMC *pack)
 {
     int nsen;
-    char time_buff[NMEA_TIMEPARSE_BUF];
+    char time_buff[NMEA_TIMEPARSE_BUF] = {0};
 
     NMEA_ASSERT(buff && pack);
 
@@ -453,7 +474,7 @@ int nmea_parse_GNRMC(const char *buff, int buff_sz, nmeaGNRMC *pack)
     nmea_trace_buff(buff, buff_sz);
 
     nsen = nmea_scanf(buff, buff_sz,
-        "$GNRMC,%s,%C,%f,%C,%f,%C,%f,%f,%2d%2d%2d,%f,%C,%C*",
+        "$GNRMC,%10s,%C,%f,%C,%f,%C,%f,%f,%2d%2d%2d,%f,%C,%C*",
         &(time_buff[0]),
         &(pack->status), &(pack->Lat), &(pack->uLat), &(pack->Lon), &(pack->uLon),
         &(pack->Spd), &(pack->Cog),
@@ -528,9 +549,9 @@ int nmea_parse_GNVTG(const char *buff, int buff_sz, nmeaGNVTG *pack)
 int nmea_parse_GNZDA(const char *buff, int buff_sz, nmeaGNZDA *pack)
 {
     int nsen;
-    int year;
+    int year = 0;
     int temp1,temp2;
-    char time_buff[NMEA_TIMEPARSE_BUF];
+    char time_buff[NMEA_TIMEPARSE_BUF] = {0};
 
     NMEA_ASSERT(buff && pack);
 
@@ -539,7 +560,7 @@ int nmea_parse_GNZDA(const char *buff, int buff_sz, nmeaGNZDA *pack)
     nmea_trace_buff(buff, buff_sz);
 
     nsen = nmea_scanf(buff, buff_sz,
-        "$GNZDA,%s,%2d,%2d,%4d,%2d,%2d*",
+        "$GNZDA,%10s,%2d,%2d,%4d,%2d,%2d*",
         &(time_buff[0]),
         &(pack->utc.day), &(pack->utc.mon), &year,&temp1,&temp2);
 
@@ -570,7 +591,7 @@ int nmea_parse_GNZDA(const char *buff, int buff_sz, nmeaGNZDA *pack)
 int nmea_parse_GNGLL(const char *buff, int buff_sz, nmeaGNGLL *pack)
 {
     int nsen;
-    char time_buff[NMEA_TIMEPARSE_BUF];
+    char time_buff[NMEA_TIMEPARSE_BUF] = {0};
 
     NMEA_ASSERT(buff && pack);
 
@@ -579,7 +600,7 @@ int nmea_parse_GNGLL(const char *buff, int buff_sz, nmeaGNGLL *pack)
     nmea_trace_buff(buff, buff_sz);
 
     nsen = nmea_scanf(buff, buff_sz,
-        "$GNGLL,%f,%C,%f,%C,%s,%C,%C*",
+        "$GNGLL,%f,%C,%f,%C,%10s,%C,%C*",
         &(pack->Lat), &(pack->uLat), &(pack->Lon), &(pack->uLon),
         &(time_buff[0]),
         &(pack->Value),&(pack->mode));
@@ -629,6 +650,11 @@ int nmea_parse_BDGSV(const char *buff, int buff_sz, nmeaBDGSV *pack)
         &(pack->sat_data[2].id), &(pack->sat_data[2].elv), &(pack->sat_data[2].azimuth), &(pack->sat_data[2].sig),
         &(pack->sat_data[3].id), &(pack->sat_data[3].elv), &(pack->sat_data[3].azimuth), &(pack->sat_data[3].sig));
 
+    if(nsen < 3 || pack->NumMsg < 1 || pack->MsgNo < 1 ||
+       pack->MsgNo > pack->NumMsg ||
+       pack->MsgNo > (NMEA_MAXSAT + NMEA_SATINPACK - 1) / NMEA_SATINPACK ||
+       pack->numSv < 0 || pack->numSv > NMEA_MAXSAT)
+        return 0;
     nsat = (pack->MsgNo - 1) * NMEA_SATINPACK;
     nsat = (nsat + NMEA_SATINPACK > pack->numSv)?pack->numSv - nsat:NMEA_SATINPACK;
     nsat = nsat * 4 + 3 /* first three sentence`s */;
@@ -662,7 +688,7 @@ int nmea_parse_GPTXT(const char *buff, int buff_sz, nmeaGPTXT *pack)
     nmea_trace_buff(buff, buff_sz);
 
     nsen = nmea_scanf(buff, buff_sz,
-        "$GPTXT,%2d,%2d,%2d,%s*",
+        "$GPTXT,%2d,%2d,%2d,%255s*",
         &(pack->xx), &(pack->yy), &(pack->zz),&(txt_buff[0]));
 
 
@@ -712,9 +738,12 @@ void nmea_GPGSA2info(nmeaGPGSA *pack, nmeaINFO *info)
     info->HDOP = pack->HDOP;
     info->VDOP = pack->VDOP;
 
+    for(j = 0; j < NMEA_MAXSAT; ++j)
+        info->satinfo.sat[j].in_use = 0;
+
     for(i = 0; i < NMEA_MAXSAT; ++i)
     {
-        for(j = 0; j < info->satinfo.inview; ++j)
+        for(j = 0; j < info->satinfo.inview && j < NMEA_MAXSAT; ++j)
         {
             if(pack->sat_prn[i] && pack->sat_prn[i] == info->satinfo.sat[j].id)
             {
@@ -1005,14 +1034,17 @@ void nmea_BDGSA2info(nmeaBDGSA *pack, nmeaINFO *info)
 
     NMEA_ASSERT(pack && info);
 
-    info->fix = pack->Smode;
+    info->fix = pack->FS;
     info->PDOP = pack->PDOP;
     info->HDOP = pack->HDOP;
     info->VDOP = pack->VDOP;
 
+    for(j = 0; j < NMEA_MAXSAT; ++j)
+        info->BDsatinfo.sat[j].in_use = 0;
+
     for(i = 0; i < NMEA_MAXSAT; ++i)
     {
-        for(j = 0; j < info->BDsatinfo.inview; ++j)
+        for(j = 0; j < info->BDsatinfo.inview && j < NMEA_MAXSAT; ++j)
         {
             if(pack->SVID[i] && pack->SVID[i] == info->BDsatinfo.sat[j].id)
             {

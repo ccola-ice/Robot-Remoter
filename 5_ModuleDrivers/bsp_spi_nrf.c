@@ -1,5 +1,6 @@
 #include "bsp_spi_nrf.h"
 #include "bsp_usart_debug.h"
+#include "bsp_SysTick.h"
 
 u8 RX_BUF[RX_PLOAD_WIDTH];		//接收数据缓存
 u8 TX_BUF[TX_PLOAD_WIDTH];		//发射数据缓存
@@ -7,6 +8,35 @@ u8 TX_ADDRESS[TX_ADR_WIDTH] = {0x34,0x43,0x10,0x10,0x01};  // 定义一个静态发送地
 u8 RX_ADDRESS[RX_ADR_WIDTH] = {0x34,0x43,0x10,0x10,0x01};
 static u8 nrf_channel = CHANAL;
 static u8 nrf_rf_setup = 0x0f;
+static uint8_t nrf_io_error;
+static uint8_t nrf_tx_active;
+static uint8_t nrf_tx_enabled;
+static uint32_t nrf_tx_started;
+static uint32_t nrf_config_generation;
+
+uint32_t NRF_GetConfigGeneration(void) { return nrf_config_generation; }
+
+uint8_t NRF_GetIoError(void)
+{
+    return nrf_io_error;
+}
+
+static void NRF_IoFault(uint8_t error)
+{
+    if(nrf_io_error == 0U) nrf_io_error = error;
+    nrf_tx_active = 0U;
+    nrf_tx_enabled = 0U;
+    NRF_CE_LOW();
+}
+
+static void NRF_ResetState(void)
+{
+    nrf_io_error = 0U;
+    nrf_tx_active = 0U;
+    nrf_tx_enabled = 0U;
+    nrf_tx_started = 0U;
+    NRF_CE_LOW();
+}
 
 void Delay(__IO u32 nCount)
 {
@@ -77,6 +107,10 @@ void NRF_SPI_Init(void)
   GPIO_InitStructure.GPIO_Pin = NRF_SPI_MOSI_PIN;
   GPIO_Init(NRF_SPI_MOSI_GPIO_PORT, &GPIO_InitStructure);  
 
+    nrf_config_generation++;
+
+  NRF_ResetState();
+
   /* Keep the radio deselected and out of RX/TX while SPI is configured. */
   NRF_CE_LOW();
   NRF_CSN_HIGH();
@@ -97,6 +131,7 @@ void NRF_SPI_Init(void)
 
   /* 使能 NRF_SPI  */
   SPI_Cmd(NRF_SPI, ENABLE);
+  NRF_PowerDown();
 }
 
 /**
@@ -106,18 +141,18 @@ void NRF_SPI_Init(void)
   * @retval  读取得的数据
   */
 u8 SPI_NRF_RW(u8 dat)
-{  	
-   /* 当 SPI发送缓冲器非空时等待 */
-  while (SPI_I2S_GetFlagStatus(NRF_SPI, SPI_I2S_FLAG_TXE) == RESET);
-  
-   /* 通过 NRF2_SPI发送一字节数据 */
-  SPI_I2S_SendData(NRF_SPI, dat);		
- 
-   /* 当SPI接收缓冲器为空时等待 */
-  while (SPI_I2S_GetFlagStatus(NRF_SPI, SPI_I2S_FLAG_RXNE) == RESET);
-
-  /* Return the byte read from the SPI bus */
-  return SPI_I2S_ReceiveData(NRF_SPI);
+{
+    uint32_t remaining = NRF_TIMEOUT;
+    if(nrf_io_error != 0U) return 0xffU;
+    while(SPI_I2S_GetFlagStatus(NRF_SPI, SPI_I2S_FLAG_TXE) == RESET) {
+        if(remaining-- == 0U) { NRF_IoFault(1U); return 0xffU; }
+    }
+    SPI_I2S_SendData(NRF_SPI, dat);
+    remaining = NRF_TIMEOUT;
+    while(SPI_I2S_GetFlagStatus(NRF_SPI, SPI_I2S_FLAG_RXNE) == RESET) {
+        if(remaining-- == 0U) { NRF_IoFault(2U); return 0xffU; }
+    }
+    return (uint8_t)SPI_I2S_ReceiveData(NRF_SPI);
 }
 
 /**
@@ -184,6 +219,8 @@ u8 SPI_NRF_ReadReg(u8 reg)
 u8 SPI_NRF_ReadBuf(u8 reg,u8 *pBuf,u8 bytes)
 {
  	u8 status, byte_cnt;
+    if(pBuf == 0 || bytes > 32U) { NRF_IoFault(4U); return 0xffU; }
+
 
 	  NRF_CE_LOW();
 	/*置低CSN，使能SPI传输*/
@@ -213,6 +250,8 @@ u8 SPI_NRF_ReadBuf(u8 reg,u8 *pBuf,u8 bytes)
 u8 SPI_NRF_WriteBuf(u8 reg ,u8 *pBuf,u8 bytes)
 {
 	 u8 status,byte_cnt;
+    if(pBuf == 0 || bytes > 32U) { NRF_IoFault(4U); return 0xffU; }
+
 	 NRF_CE_LOW();
    	 /*置低CSN，使能SPI传输*/
 	 NRF_CSN_LOW();			
@@ -236,8 +275,12 @@ u8 SPI_NRF_WriteBuf(u8 reg ,u8 *pBuf,u8 bytes)
   * @retval 无
   */
 void NRF_RX_Mode(void)
-
 {
+    SPI_NRF_WriteReg(NRF_WRITE_REG + CONFIG, 0x0cU);
+
+    nrf_config_generation++;
+    NRF_TxCancel();
+    nrf_tx_enabled = 0U;
 	NRF_CE_LOW();	
 
 	SPI_NRF_WriteBuf(NRF_WRITE_REG+RX_ADDR_P0,RX_ADDRESS,RX_ADR_WIDTH);//写RX节点地址
@@ -246,16 +289,16 @@ void NRF_RX_Mode(void)
 	
 	SPI_NRF_WriteReg(NRF_WRITE_REG+EN_RXADDR,0x01);//使能通道0的接收地址    
 	
-	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_CH,nrf_channel);      //设置RF通信频率    
+	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_CH,nrf_channel);      //设置RF通信频率
 	
 	SPI_NRF_WriteReg(NRF_WRITE_REG+RX_PW_P0,RX_PLOAD_WIDTH);//选择通道0的有效数据宽度      
 	
-	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_SETUP,nrf_rf_setup); //设置TX发射功率和空中速率   
+	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_SETUP,nrf_rf_setup); //设置TX发射功率和空中速率
 	
 	SPI_NRF_WriteReg(NRF_WRITE_REG+CONFIG, 0x0f);  //配置基本工作模式的参数;PWR_UP,EN_CRC,16BIT_CRC,接收模式 
 
 	/*CE拉高，进入接收模式*/	
-	NRF_CE_HIGH();
+	if(nrf_io_error == 0U) { Delay_us(1600U); NRF_CE_HIGH(); }
 }    
 
 /**
@@ -264,7 +307,12 @@ void NRF_RX_Mode(void)
   * @retval 无
   */
 void NRF_TX_Mode(void)
-{  
+{
+    SPI_NRF_WriteReg(NRF_WRITE_REG + CONFIG, 0x0cU);
+
+    nrf_config_generation++;
+    NRF_TxCancel();
+    nrf_tx_enabled = 0U;
 	NRF_CE_LOW();		
 
 	SPI_NRF_WriteBuf(NRF_WRITE_REG+TX_ADDR,TX_ADDRESS,TX_ADR_WIDTH);    //写TX节点地址 
@@ -279,19 +327,20 @@ void NRF_TX_Mode(void)
 	
 	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_CH,nrf_channel);       //设置RF通道
 	
-	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_SETUP,nrf_rf_setup);  //设置TX发射功率和空中速率   
+	SPI_NRF_WriteReg(NRF_WRITE_REG+RF_SETUP,nrf_rf_setup);  //设置TX发射功率和空中速率
 		
 	SPI_NRF_WriteReg(NRF_WRITE_REG+CONFIG,0x0e);    //配置基本工作模式的参数;PWR_UP,EN_CRC,16BIT_CRC,发射模式,开启所有中断
 
 	SPI_NRF_WriteReg(NRF_WRITE_REG+RX_PW_P0,RX_PLOAD_WIDTH);//选择通道0的有效数据宽度
 	
-	/*CE拉高，进入发送模式*/	
-	NRF_CE_HIGH();
-    Delay(0xffff); //CE要拉高一段时间才进入发送模式
+    /* Standby-I after power-up settling; Start supplies the CE pulse. */
+    if(nrf_io_error == 0U) { Delay_us(1600U); nrf_tx_enabled = 1U; }
 }
 
 void NRF_SetRFConfig(uint8_t channel, uint8_t rf_setup)
 {
+
+    nrf_config_generation++;
 	if(channel > 125U)
 	{
 		channel = 125U;
@@ -303,12 +352,15 @@ void NRF_SetRFConfig(uint8_t channel, uint8_t rf_setup)
 
 void NRF_PowerDown(void)
 {
-	uint8_t config;
+    SPI_NRF_WriteReg(NRF_WRITE_REG + CONFIG, 0x0cU);
 
-	NRF_CE_LOW();
-	config = SPI_NRF_ReadReg(CONFIG);
-	config &= (uint8_t)~0x02U;
-	SPI_NRF_WriteReg(NRF_WRITE_REG + CONFIG, config);
+    nrf_config_generation++;
+    NRF_TxCancel();
+    nrf_tx_enabled = 0U;
+    SPI_NRF_WriteReg(NRF_WRITE_REG + RF_CH, nrf_channel);
+    SPI_NRF_WriteReg(NRF_WRITE_REG + RF_SETUP, nrf_rf_setup);
+    /* Preserve the CRC contract even if disabled immediately after reset. */
+    SPI_NRF_WriteReg(NRF_WRITE_REG + CONFIG, 0x0cU);
 }
 
 /**
@@ -335,7 +387,7 @@ u8 NRF_Check(void)
 	SPI_NRF_WriteReg(NRF_WRITE_REG + RF_CH, saved_channel & 0x7fU);
 	if(readback != 0x55U || SPI_NRF_ReadReg(RF_CH) != (saved_channel & 0x7fU))
 		return ERROR;
-	return SUCCESS;
+	return nrf_io_error == 0U ? SUCCESS : ERROR;
 }
 
 /**
@@ -344,38 +396,69 @@ u8 NRF_Check(void)
   *		@arg txBuf：存储了将要发送的数据的数组，外部定义	
   * @retval  发送结果，成功返回TXDS,失败返回MAXRT或ERROR
   */
+void NRF_TxCancel(void)
+{
+    NRF_CE_LOW();
+    nrf_tx_active = 0U;
+    SPI_NRF_WriteReg(NRF_WRITE_REG + STATUS, TX_DS | MAX_RT);
+    SPI_NRF_WriteReg(FLUSH_TX, NOP);
+}
+
+uint8_t NRF_TxStart(uint8_t *txbuf)
+{
+    uint8_t status;
+    if(txbuf == 0 || nrf_io_error != 0U || nrf_tx_enabled == 0U || nrf_tx_active)
+        return 0U;
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    nrf_tx_started = DWT->CYCCNT;
+    NRF_TxCancel(); /* Never send an old MAX_RT payload after a newer command. */
+    status = SPI_NRF_ReadReg(STATUS);
+    if(nrf_io_error != 0U || status == 0xffU) {
+        NRF_IoFault(3U);
+        return 0U;
+    }
+    SPI_NRF_WriteBuf(WR_TX_PLOAD, txbuf, TX_PLOAD_WIDTH);
+    if(nrf_io_error != 0U) return 0U;
+    nrf_tx_active = 1U;
+    NRF_CE_HIGH();
+    Delay_us(20U);
+    NRF_CE_LOW();
+    return 1U;
+}
+
+uint8_t NRF_TxPoll(void)
+{
+    uint8_t status, result;
+    if(nrf_tx_active == 0U || nrf_io_error != 0U) return ERROR;
+    if((uint32_t)(DWT->CYCCNT - nrf_tx_started) >=
+       (SystemCoreClock / 1000U) * NRF_TX_TIMEOUT_MS) {
+        NRF_TxCancel();
+        return ERROR;
+    }
+    status = SPI_NRF_ReadReg(STATUS);
+    if(nrf_io_error != 0U || status == 0xffU) {
+        NRF_IoFault(3U);
+        return ERROR;
+    }
+    if((status & (TX_DS | MAX_RT)) == 0U) return NRF_TX_PENDING;
+    result = (status & MAX_RT) ? MAX_RT : TX_DS;
+    NRF_TxCancel();
+    return nrf_io_error == 0U ? result : ERROR;
+}
+
 u8 NRF_Tx_Dat(u8 *txbuf)
 {
-	u8 state;  
-
-	 /*ce为低，进入待机模式1*/
-	NRF_CE_LOW();
-
-	/*写数据到TX BUF 最大 32个字节*/						
-   SPI_NRF_WriteBuf(WR_TX_PLOAD,txbuf,TX_PLOAD_WIDTH);
-
-      /*CE为高，txbuf非空，发送数据包 */   
- 	 NRF_CE_HIGH();
-	  	
-	  /*等待发送完成中断 */                            
-	while(NRF_Read_IRQ()!=0); 	
-	
-	/*读取状态寄存器的值 */                              
-	state = SPI_NRF_ReadReg(STATUS);
-
-	 /*清除TX_DS或MAX_RT中断标志*/                  
-	SPI_NRF_WriteReg(NRF_WRITE_REG+STATUS,state); 	
-
-	SPI_NRF_WriteReg(FLUSH_TX,NOP);    //清除TX FIFO寄存器 
-
-	 /*判断中断类型*/    
-	if(state&MAX_RT)                     //达到最大重发次数
-			 return MAX_RT; 
-
-	else if(state&TX_DS)                  //发送完成
-		 	return TX_DS;
-	 else						  
-			return ERROR;                 //其他原因发送失败
+    uint16_t polls;
+    uint8_t status;
+    if(!NRF_TxStart(txbuf)) return ERROR;
+    for(polls = 0U; polls < 300U; polls++) {
+        status = NRF_TxPoll();
+        if(status != NRF_TX_PENDING) return status;
+        Delay_us(100U);
+    }
+    NRF_TxCancel();
+    return ERROR;
 } 
 
 /**
@@ -387,30 +470,22 @@ u8 NRF_Tx_Dat(u8 *txbuf)
   */
 u8 NRF_Rx_Dat(u8 *rxbuf)
 {
-	u8 state; 
-	NRF_CE_HIGH();	 //进入接收状态
-	 /*等待接收中断*/
-	while(NRF_Read_IRQ()==0)
-  {
-    NRF_CE_LOW();  	 //进入待机状态
-    /*读取status寄存器的值  */               
-    state=SPI_NRF_ReadReg(STATUS);
-     
-    /* 清除中断标志*/      
-    SPI_NRF_WriteReg(NRF_WRITE_REG+STATUS,state);
-
-    /*判断是否接收到数据*/
-    if(state&RX_DR)                                 //接收到数据
-    {
-      SPI_NRF_ReadBuf(RD_RX_PLOAD,rxbuf,RX_PLOAD_WIDTH);//读取数据
-         SPI_NRF_WriteReg(FLUSH_RX,NOP);          //清除RX FIFO寄存器
-      return RX_DR; 
+    uint8_t state;
+    if(rxbuf == 0 || nrf_io_error != 0U) return ERROR;
+    NRF_CE_HIGH();
+    if(NRF_Read_IRQ() != 0U) return ERROR;
+    state = SPI_NRF_ReadReg(STATUS);
+    if(nrf_io_error != 0U || state == 0xffU) {
+        NRF_IoFault(3U);
+        return ERROR;
     }
-    else    
-      return ERROR;                    //没收到任何数据
-  }
-  
-  return ERROR;                    //没收到任何数据
+    if((state & RX_DR) == 0U) return ERROR;
+    SPI_NRF_ReadBuf(RD_RX_PLOAD, rxbuf, RX_PLOAD_WIDTH);
+    SPI_NRF_WriteReg(NRF_WRITE_REG + STATUS, RX_DR);
+    SPI_NRF_WriteReg(FLUSH_RX, NOP);
+    if(nrf_io_error != 0U) return ERROR;
+    NRF_CE_HIGH();
+    return RX_DR;
 }
 
 

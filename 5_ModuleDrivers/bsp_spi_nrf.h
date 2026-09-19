@@ -2,7 +2,11 @@
 #define __BSP_SPI_NRF_H
 #include "stm32f4xx.h"
 
-#define NRF_TIMEOUT     0XFFFFFF
+#ifndef NRF_TIMEOUT
+#define NRF_TIMEOUT     10000UL
+#endif
+#define NRF_TX_PENDING  1U
+#define NRF_TX_TIMEOUT_MS 30U
 
 #define TX_ADR_WIDTH 	5  	    	//发射地址宽度
 #define TX_PLOAD_WIDTH  32      //发射数据通道有效数据宽度0~32Byte 
@@ -96,6 +100,11 @@
 #define NRF_Read_IRQ()		    	GPIO_ReadInputDataBit(NRF_IRQ_GPIO_PORT, NRF_IRQ_PIN)       //中断引脚
 
 void NRF_SPI_Init(void);
+uint8_t NRF_GetIoError(void);
+uint32_t NRF_GetConfigGeneration(void);
+void NRF_TxCancel(void);
+uint8_t NRF_TxStart(uint8_t *txbuf);
+uint8_t NRF_TxPoll(void);
 uint8_t SPI_NRF_RW(uint8_t dat);
 uint8_t SPI_NRF_ReadReg(uint8_t reg );
 uint8_t SPI_NRF_WriteReg(uint8_t reg,uint8_t dat);

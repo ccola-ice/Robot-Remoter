@@ -8,7 +8,6 @@
 static void NVIC_EXPAND_USART_Configuration(void)
 {
   NVIC_InitTypeDef NVIC_InitStructure;
-  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
   
   NVIC_InitStructure.NVIC_IRQChannel = EXPAND_USART_IRQ;
   NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;

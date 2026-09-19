@@ -8,8 +8,8 @@
 #define  FLASH_ID                       0XEF4018       //W25Q128 ID
 #define  DUMMY_BYTE                      0xFF
 
-#define FLASH_PageSize                  4096
-#define FLASH_PerWritePageSize          4096
+#define FLASH_PageSize                  256
+#define FLASH_PerWritePageSize          256
 #define FLASH_SECTOR_SIZE  				4096
 
 /*�����-��ͷ*******************************/

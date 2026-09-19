@@ -31,6 +31,7 @@ void nrf24l01_apply_settings(uint8_t enabled, uint8_t channel,
         rf_setup |= 0x08U;       /* 2Mbps */
     }
 
+    NRF_TxCancel();
     NRF_SetRFConfig(channel, rf_setup);
     if(enabled != 0U)
     {
@@ -45,20 +46,20 @@ void nrf24l01_apply_settings(uint8_t enabled, uint8_t channel,
 uint8_t nrf24l01_read_runtime(uint8_t *enabled, uint8_t *channel,
                              uint8_t *power_register, uint8_t *data_rate)
 {
-    uint8_t old_ce = GPIO_ReadOutputDataBit(NRF_CE_GPIO_PORT, NRF_CE_PIN);
-    uint8_t config = SPI_NRF_ReadReg(CONFIG);
-    uint8_t rf_channel = SPI_NRF_ReadReg(RF_CH);
-    uint8_t rf_setup = SPI_NRF_ReadReg(RF_SETUP);
-
-    /* Legacy register reads lower CE. Runtime inspection must not silently
-     * leave an enabled radio in standby. */
-    if(old_ce != 0U) NRF_CE_HIGH();
-
-    /* 本项目始终开启CRC；该位异常或频道越界表示寄存器回读无效。 */
-    if(((config & 0x0cU) != 0x0cU) || (rf_channel > 125U))
-    {
+    uint8_t old_ce, config, rf_channel, rf_setup;
+    if(enabled == 0 || channel == 0 || power_register == 0 || data_rate == 0)
+        return 1U;
+    if(NRF_GetIoError() != 0U) { NRF_CE_LOW(); return 1U; }
+    old_ce = GPIO_ReadOutputDataBit(NRF_CE_GPIO_PORT, NRF_CE_PIN);
+    config = SPI_NRF_ReadReg(CONFIG);
+    rf_channel = SPI_NRF_ReadReg(RF_CH);
+    rf_setup = SPI_NRF_ReadReg(RF_SETUP);
+    if(NRF_GetIoError() != 0U || ((config & 0x0cU) != 0x0cU) ||
+       config == 0xffU || rf_channel > 125U || (rf_setup & 0x28U) == 0x28U) {
+        NRF_CE_LOW();
         return 1U;
     }
+    if(old_ce != 0U && (config & 0x03U) == 0x03U) NRF_CE_HIGH();
 
     *enabled = ((config & 0x02U) != 0U) ? 1U : 0U;
     *channel = rf_channel;

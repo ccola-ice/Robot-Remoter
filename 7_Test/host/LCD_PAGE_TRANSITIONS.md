@@ -6,6 +6,11 @@ after `gui_clock_overlay()`. Presentation writes one complete RGB565 image,
 without a visible white clear, backlight toggle or interleaved widget drawing.
 Regular live updates still draw directly to the LCD after presentation.
 
+If the SRAM buffer is disabled, `LCD_BeginPage()` clears the entire visible
+page to the requested background before direct rendering. This fallback also
+clears unpainted gaps and old text. `LCD_BlitRGB565()` supports both buffered
+and direct drawing, clipping right/bottom edges while preserving source stride.
+
 Hardware Test and EEPROM service screens now begin composition in
 `diag_screen()` and present the complete page before `diag_key()` or
 `diag_release()` polls input. Their initial layout is drawn before waiting

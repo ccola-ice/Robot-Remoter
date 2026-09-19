@@ -190,6 +190,9 @@ extern uint8_t LCD_SCAN_MODE;
 void LCD_PageBuffer_Enable(uint8_t enabled);
 void LCD_BeginPage(uint16_t background);
 void LCD_EndPage(void);
+/* RGB565 pixels are row-major with source stride == width; clips to the LCD. */
+void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
+                    const uint16_t *pixels);
 
 void                     	ILI9806G_Init                    ( void );
 void                    	ILI9806G_Rst                     ( void );

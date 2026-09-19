@@ -36,6 +36,8 @@ void nmea_trace(const char *str, ...)
         size = NMEA_POSIX(vsnprintf)(&buff[0], NMEA_DEF_PARSEBUFF - 1, str, arg_list);
         va_end(arg_list);
 
+        if(size >= NMEA_DEF_PARSEBUFF - 1)
+            size = NMEA_DEF_PARSEBUFF - 2;
         if(size > 0)
             (*func)(&buff[0], size);
     }
@@ -61,6 +63,8 @@ void nmea_error(const char *str, ...)
         size = NMEA_POSIX(vsnprintf)(&buff[0], NMEA_DEF_PARSEBUFF - 1, str, arg_list);
         va_end(arg_list);
 
+        if(size >= NMEA_DEF_PARSEBUFF - 1)
+            size = NMEA_DEF_PARSEBUFF - 2;
         if(size > 0)
             (*func)(&buff[0], size);
     }
@@ -80,6 +84,8 @@ void nmea_info(const char *str, ...)
         size = NMEA_POSIX(vsnprintf)(&buff[0], NMEA_DEF_PARSEBUFF - 1, str, arg_list);
         va_end(arg_list);
 
+        if(size >= NMEA_DEF_PARSEBUFF - 1)
+            size = NMEA_DEF_PARSEBUFF - 2;
         if(size > 0)
             (*func)(&buff[0], size);
     }

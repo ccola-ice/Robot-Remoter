@@ -49,6 +49,7 @@
 #include "inv_mpu_dmp_motion_driver.h" 
 #include "gui.h"
 #include "menu.h"
+#include "control_link.h"
 #include "multi_button.h"
 #include "multi_button_user.h"
 #include "common.h"
@@ -80,11 +81,11 @@ short aacx,aacy,aacz;		//���ٶȴ�����ԭʼ����
 short gyrox,gyroy,gyroz;	//������ԭʼ����
 short temp;					//�¶�
 uint8_t imu_data_valid;
-static uint8_t imu_read_failures;
+static unsigned long imu_last_sample_ms;
 static uint8_t imu_dmp_ready;
 float yaw_new;
 
-u8 finish_1hz=0,finish_2hz=0,finish_5hz=0,finish_10hz=0,finish_20hz=0,finish_33hz=0,finish_50hz=0,finish_100hz=0;
+volatile u8 finish_1hz=0,finish_2hz=0,finish_5hz=0,finish_10hz=0,finish_20hz=0,finish_33hz=0,finish_50hz=0,finish_100hz=0;
 volatile u8 finish_button_10ms=0;
 
 static BootReport boot_report;
@@ -333,6 +334,7 @@ void setup(void)
             Delay_ms(25U);
         }
         imu_data_valid = ok;
+        get_tick_count(&imu_last_sample_ms);
         boot_done(BOOT_MPU_SAMPLE, ok ? BOOT_PASS : BOOT_FAIL,
                   "Wait up to 500 ms for a decoded DMP FIFO sample");
     } else boot_skip(BOOT_MPU_SAMPLE, "Blocked: MPU6050 initialization failed");
@@ -460,93 +462,62 @@ static void boot_show_result(void)
     }
 }
 
+/* Atomically consume a coalescing event before doing the work. A new IRQ
+ * during processing remains pending for the next loop. */
+static uint8_t take_tick(volatile uint8_t *pending)
+{
+    uint32_t mask = __get_PRIMASK();
+    uint8_t ready;
+    __disable_irq();
+    ready = *pending;
+    *pending = 0U;
+    __set_PRIMASK(mask);
+    return ready;
+}
+
 int main(void)
 {
-	setup();
-
-	boot_show_result();
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetColors(GREEN,BLACK);	
-	ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
-	menu_init();
-	menu_process();
-
-    while(1)
-    {
-		if(finish_button_10ms == 1)
-		{
-			finish_button_10ms = 0;
-			button_ticks();
-			digital_channel_update_10ms();
-			menu_tick_10ms();
-		}
-        /* Handle navigation before slower IMU/GPS/serial work. */
+    unsigned long now;
+    setup();
+    boot_show_result();
+    LCD_SetFont(&Font16x32);
+    LCD_SetColors(GREEN,BLACK);
+    ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
+    menu_init();
+    control_link_init(
+        boot_report.items[BOOT_CLOCK].state == BOOT_PASS &&
+        boot_report.items[BOOT_INTERNAL_MEMORY].state == BOOT_PASS &&
+        boot_report.items[BOOT_ADC1].state == BOOT_PASS &&
+        boot_report.items[BOOT_PARAMS].state == BOOT_PASS &&
+        boot_report.items[BOOT_NRF_CONFIG].state == BOOT_PASS &&
+        boot_report.items[BOOT_TIMERS].state == BOOT_PASS);
+    menu_process();
+    while(1) {
+        control_link_service(menu_control_active());
+        if(take_tick(&finish_button_10ms)) {
+            button_ticks();
+            digital_channel_update_10ms();
+            menu_tick_10ms();
+        }
         menu_process();
         GTP_Service();
-		if(finish_1hz == 1)
-		{
-			if(imu_dmp_ready != 0U)
-			{
-				temp = MPU_Get_Temperature();
-				MPU_Get_Accelerometer(&aacx,&aacy,&aacz);
-				MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);
-			}
-			finish_1hz = 0;
-		}
-		
-		if(finish_2hz == 1)
-		{
-			nmea_decode_test();
-			finish_2hz = 0;
-		}
-
-		if(finish_5hz == 1)
-		{
-			//printf("finish_5hz = %d\n\r",finish_5hz);
-			finish_5hz = 0;
-		}
-
-		if(finish_10hz == 1)
-		{
-			if((imu_dmp_ready != 0U) &&
-			   (mpu_dmp_get_data(&pitch,&roll,&yaw) == 0U))
-			{
-				imu_data_valid = 1U;
-				imu_read_failures = 0U;
-			}
-			else if(imu_dmp_ready != 0U)
-			{
-				if(imu_read_failures < 10U)
-				{
-					imu_read_failures++;
-				}
-				if(imu_read_failures >= 10U)
-				{
-					imu_data_valid = 0U;
-				}
-			}
-			else
-			{
-				imu_data_valid = 0U;
-			}
-			RTC_TimeAndDate_Show();
-			finish_10hz = 0;
-		}
-
-		finish_10hz = 0;
-
-		if(finish_50hz == 1)
-		{
-			finish_50hz = 0;
-		}
-
-		if(finish_100hz == 1)
-		{
-
-			finish_100hz = 0;
-		}
-
-		menu_process();
-	}
+        /* Drain completed GPS input promptly, independently of UI cadence. */
+        nmea_decode_test();
+        if(take_tick(&finish_1hz) && imu_dmp_ready) {
+            temp = MPU_Get_Temperature();
+            MPU_Get_Accelerometer(&aacx,&aacy,&aacz);
+            MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);
+        }
+        if(take_tick(&finish_100hz)) {
+            get_tick_count(&now);
+            if(imu_dmp_ready && mpu_dmp_get_data(&pitch,&roll,&yaw) == 0U) {
+                imu_data_valid = 1U;
+                imu_last_sample_ms = now;
+            } else if(!imu_dmp_ready || (uint32_t)(now - imu_last_sample_ms) >= 1000U) {
+                imu_data_valid = 0U;
+            }
+        }
+        if(take_tick(&finish_10hz)) RTC_TimeAndDate_Show();
+        menu_process();
+    }
 }

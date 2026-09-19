@@ -2,9 +2,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <float.h>
 #include "fonts.h"
 #include "gui.h"
 #include "gui_analog_filter.h"
+#include "gui_robot_filter.h"
 #include "diagnostics.h"
 #include "hardware_tests.h"
 #include "menu.h"
@@ -35,6 +37,11 @@ static uint32_t SystemCoreClock = 168000000UL;
 static uint32_t bus_writes, pixel_writes, memory_commands;
 static uint16_t command, x0, x1, y0, y1, cursor_x, cursor_y, coord;
 static unsigned parameter;
+static uint8_t watch_overlap;
+static uint16_t watch_old_x, watch_old_y, watch_new_x, watch_new_y;
+static unsigned overlap_writes;
+static uint32_t fake_ms;
+static int get_tick_count(unsigned long *count) { *count = fake_ms; return 0; }
 
 static void ILI9806G_Write_Cmd(uint16_t cmd)
 {
@@ -48,6 +55,17 @@ static void ILI9806G_Write_Data(uint16_t data)
     bus_writes++;
     if(command == CMD_SetPixel)
     {
+        if(watch_overlap) {
+            int32_t old_dx = (int32_t)cursor_x - watch_old_x;
+            int32_t old_dy = (int32_t)cursor_y - watch_old_y;
+            int32_t new_dx = (int32_t)cursor_x - watch_new_x;
+            int32_t new_dy = (int32_t)cursor_y - watch_new_y;
+            if(old_dx * old_dx + old_dy * old_dy <= 64L &&
+               new_dx * new_dx + new_dy * new_dy <= 64L) {
+                assert(data == BLUE2); /* No transient clearing of shared dot pixels. */
+                overlap_writes++;
+            }
+        }
         if(cursor_x < LCD_X_LENGTH && cursor_y < LCD_Y_LENGTH)
             panel[(uint32_t)cursor_y * LCD_X_LENGTH + cursor_x] = data;
         pixel_writes++;
@@ -69,7 +87,8 @@ static uint16_t ILI9806G_Read_PixelData(void) { return 0U; }
 static uint8_t display_flag, clock_force_redraw;
 static uint16_t ADC1_Value[7] = {2047, 2047, 2047, 2047, 2047, 2047, 2047};
 static uint16_t ADC3_Value[3] = {1024, 2048, 3072};
-static struct { uint16_t chLower[7], chMiddle[7], chUpper[7]; uint8_t chReverse[7]; } param;
+static struct { uint16_t chLower[7], chMiddle[7], chUpper[7]; uint8_t chReverse[7]; int PWMadjustValue[7]; } param;
+static const char *control_link_status(void) { return "DISARMED"; }
 static char displayBuffer[100];
 static void GTP_IRQ_Disable(void) {}
 static void gui_boot_menu_badge(void) {}
@@ -207,6 +226,14 @@ static void test_transitions(void)
                         lcd_page_width, lcd_page_height, lcd_page_active);
             assert(memory_commands == 1U && pixel_writes == 800U * 480U);
             assert(memcmp(panel, expected, sizeof(panel)) == 0);
+            /* A missing SRAM buffer must also clear every old-page pixel. */
+            LCD_PageBuffer_Enable(0U);
+            memcpy(panel, old_frame, sizeof(panel));
+            gui_prepare_page();
+            draw_page(page);
+            LCD_EndPage();
+            assert(memcmp(panel, expected, sizeof(panel)) == 0);
+            LCD_PageBuffer_Enable(1U);
             memcpy(old_frame, panel, sizeof(panel));
             for(i = 800U * 480U; i < sizeof(sram) / sizeof(sram[0]); i++) assert(sram[i] == 0x1234U);
             bus_writes = 0U;
@@ -240,10 +267,17 @@ static void test_edges_and_fallback(void)
     assert(ILI9806G_GetPointPixel(12U, 12U) == BLUE);
     LCD_EndPage();
     LCD_PageBuffer_Enable(0U);
-    bus_writes = 0U;
+    for(i = 0U; i < 800U * 480U; i++) panel[i] = RED;
+    LCD_SetFont(&Font16x32); LCD_SetBackColor(RED); LCD_SetTextColor(BLACK);
+    ILI9806G_DispString_EN(288U, 320U, "OLD PAGE TEXT");
+    bus_writes = pixel_writes = memory_commands = 0U;
     LCD_BeginPage(WHITE);
+    assert(lcd_page_active == 0U);
     LCD_EndPage();
-    assert(bus_writes == 0U);
+    assert(memory_commands == 1U && pixel_writes == 800U * 480U);
+    for(i = 0U; i < 800U * 480U; i++) assert(panel[i] == WHITE);
+    assert(CurrentBackColor == RED && CurrentTextColor == BLACK);
+    assert(LCD_Currentfonts == &Font16x32);
     ILI9806G_DrawPoint(2U, 2U, GREEN);
     assert(panel[2U * 800U + 2U] == GREEN);
     LCD_PageBuffer_Enable(1U);
@@ -253,6 +287,60 @@ static void test_edges_and_fallback(void)
     LCD_EndPage();
     assert(panel[800U * 480U - 1U] == BLUE);
     LCD_X_LENGTH = 800U; LCD_Y_LENGTH = 480U;
+}
+
+static void test_rgb565_blit(void)
+{
+    static const uint16_t pixels[] = {
+        RED, GREEN, BLUE, BLACK,
+        BLUE2, YELLOW, GREY, RED,
+        BLACK, BLUE, GREEN, YELLOW
+    };
+    unsigned buffered, row, column, i;
+    for(buffered = 0U; buffered < 2U; buffered++)
+    {
+        LCD_PageBuffer_Enable((uint8_t)buffered);
+        for(i = 0U; i < 800U * 480U; i++) panel[i] = WHITE;
+        if(buffered != 0U) LCD_BeginPage(WHITE);
+        bus_writes = pixel_writes = memory_commands = 0U;
+        LCD_BlitRGB565(798U, 478U, 4U, 3U, pixels);
+        LCD_BlitRGB565(10U, 20U, 4U, 3U, pixels);
+        if(buffered != 0U)
+        {
+            assert(bus_writes == 0U);
+            assert(panel[478U * 800U + 798U] == WHITE);
+            LCD_EndPage();
+        }
+        else
+        {
+            assert(memory_commands == 2U && pixel_writes == 16U);
+        }
+        assert(panel[478U * 800U + 798U] == RED);
+        assert(panel[478U * 800U + 799U] == GREEN);
+        assert(panel[479U * 800U + 798U] == BLUE2);
+        assert(panel[479U * 800U + 799U] == YELLOW);
+        assert(panel[478U * 800U + 797U] == WHITE);
+        for(row = 0U; row < 3U; row++)
+            for(column = 0U; column < 4U; column++)
+                assert(panel[(20U + row) * 800U + 10U + column] == pixels[row * 4U + column]);
+        for(i = 800U * 480U; i < sizeof(sram) / sizeof(sram[0]); i++) assert(sram[i] == 0x1234U);
+
+        if(buffered != 0U) LCD_BeginPage(WHITE);
+        memcpy(expected, panel, sizeof(panel));
+        bus_writes = 0U;
+        LCD_BlitRGB565(0U, 0U, 1U, 1U, 0);
+        LCD_BlitRGB565(0U, 0U, 0U, 3U, pixels);
+        LCD_BlitRGB565(0U, 0U, 4U, 0U, pixels);
+        LCD_BlitRGB565(800U, 0U, 4U, 3U, pixels);
+        LCD_BlitRGB565(0U, 480U, 4U, 3U, pixels);
+        LCD_BlitRGB565(65535U, 65535U, 4U, 3U, pixels);
+        assert(bus_writes == 0U && memcmp(panel, expected, sizeof(panel)) == 0);
+        if(buffered != 0U)
+        {
+            for(i = 0U; i < 800U * 480U; i++) assert(sram[i] == WHITE);
+            LCD_EndPage();
+        }
+    }
 }
 
 static void test_ascii_fast_path(void)
@@ -279,13 +367,111 @@ static void test_ascii_fast_path(void)
     }
 }
 
+static void check_stick_pixels(uint16_t dot_x, uint16_t dot_y)
+{
+    uint16_t x, y, wanted;
+    for(y = 300U; y <= 412U; y++)
+        for(x = 78U; x <= 190U; x++) {
+            int32_t dx = (int32_t)x - dot_x, dy = (int32_t)y - dot_y;
+            wanted = dx * dx + dy * dy <= 64L ? BLUE2 : expected[y * 800U + x];
+            if(panel[y * 800U + x] != wanted)
+                fprintf(stderr, "Marker trail/outline mismatch at %u,%u (dot %u,%u): %04x != %04x\n",
+                        x,y,dot_x,dot_y,panel[y * 800U + x],wanted);
+            assert(panel[y * 800U + x] == wanted);
+        }
+}
+
+static void test_robot_marker_pixels(void)
+{
+    uint16_t dot_x = 0U, dot_y = 0U, raw_x = 0U, raw_y = 0U, x, y;
+    int control_x, control_y;
+    unsigned i;
+    LCD_PageBuffer_Enable(0U);
+    for(i = 0U; i < 800U * 480U; i++) panel[i] = GREY;
+    gui_robot_draw_stick(134U,356U,2047U,2047U,0,0,BLUE2,
+                         &dot_x,&dot_y,&raw_x,&raw_y,1U,1U);
+    memcpy(expected,panel,sizeof(panel));
+    /* Independent reference keeps the actual static outline and axes only. */
+    for(y = 348U; y <= 364U; y++)
+        for(x = 126U; x <= 142U; x++)
+            expected[y * 800U + x] = (x == 134U || y == 356U) ? WHITE : GREY;
+    watch_old_x = dot_x; watch_old_y = dot_y;
+    watch_new_x = 145U; watch_new_y = 356U;
+    watch_overlap = 1U; overlap_writes = 0U;
+    memory_commands = pixel_writes = 0U;
+    gui_robot_draw_stick(134U,356U,2500U,2047U,250,0,BLUE2,
+                         &dot_x,&dot_y,&raw_x,&raw_y,0U,0U);
+    watch_overlap = 0U;
+    assert(dot_x == 145U && dot_y == 356U && overlap_writes > 0U);
+    assert(memory_commands == 2U && pixel_writes == 2U * 17U * 17U);
+    check_stick_pixels(dot_x,dot_y);
+    /* Repeated diagonal/full travel must preserve every static outline pixel. */
+    for(control_x = -1000; control_x <= 1000; control_x += 250)
+        for(control_y = -1000; control_y <= 1000; control_y += 250) {
+            gui_robot_draw_stick(134U,356U,2500U,2500U,
+                (int16_t)control_x,(int16_t)control_y,BLUE2,
+                &dot_x,&dot_y,&raw_x,&raw_y,0U,0U);
+            check_stick_pixels(dot_x,dot_y);
+        }
+    gui_robot_draw_stick(134U,356U,2047U,2047U,0,0,BLUE2,
+                         &dot_x,&dot_y,&raw_x,&raw_y,0U,0U);
+    assert(dot_x == 134U && dot_y == 356U);
+    check_stick_pixels(dot_x,dot_y);
+}
+
+static void render_robot_fresh(const GuiRobotTelemetry *telemetry)
+{
+    unsigned i;
+    for(i = 0U; i < 7U; i++) ADC1_Value[i] = 2047U;
+    LCD_PageBuffer_Enable(1U);
+    gui_prepare_page(); robot_control_page(telemetry); LCD_EndPage();
+}
+
+static void test_robot_telemetry_pixels(void)
+{
+    GuiRobotTelemetry telemetry = {0};
+    unsigned i;
+    telemetry.link_online = 1U;
+    telemetry.speed_mps = FLT_MAX; telemetry.position_x_m = -FLT_MAX;
+    telemetry.position_y_m = FLT_MAX; telemetry.position_z_m = -FLT_MAX;
+    telemetry.acceleration_x_mps2 = FLT_MAX; telemetry.acceleration_y_mps2 = -FLT_MAX;
+    telemetry.acceleration_z_mps2 = FLT_MAX;
+    telemetry.roll_deg = FLT_MAX; telemetry.pitch_deg = -FLT_MAX; telemetry.yaw_deg = FLT_MAX;
+    telemetry.latitude_deg = DBL_MAX; telemetry.longitude_deg = -DBL_MAX;
+    telemetry.voltage_v = FLT_MAX; telemetry.gps_altitude_m = -FLT_MAX;
+    telemetry.packet_count = UINT32_MAX; telemetry.packet_age_ms = UINT16_MAX;
+    telemetry.battery_percent = telemetry.satellites = telemetry.gps_fix = UINT8_MAX;
+    fake_ms = 0U;
+    render_robot_fresh(&telemetry); memcpy(expected,panel,sizeof(panel));
+    telemetry.link_online = 0U;
+    render_robot_fresh(&telemetry); memcpy(old_frame,panel,sizeof(panel));
+    telemetry.link_online = 1U;
+    render_robot_fresh(&telemetry);
+    assert(memcmp(panel,expected,sizeof(panel)) == 0);
+    for(i = 0U; i < 4U; i++) {
+        fake_ms++;
+        telemetry.link_online = 0U; robot_control_page(&telemetry);
+        assert(memcmp(panel,old_frame,sizeof(panel)) == 0);
+        fake_ms++;
+        telemetry.link_online = 1U; robot_control_page(&telemetry);
+        assert(memcmp(panel,expected,sizeof(panel)) == 0);
+    }
+    /* A different page must not affect subsequent robot content or margins. */
+    gui_prepare_page(); main_menu(0U); LCD_EndPage();
+    render_robot_fresh(&telemetry);
+    assert(memcmp(panel,expected,sizeof(panel)) == 0);
+}
+
 int main(void)
 {
     test_transitions();
     test_edges_and_fallback();
+    test_rgb565_blit();
     test_ascii_fast_path();
     test_diagnostics();
     test_diagnostics();
-    puts("LCD page tests passed: menu/channel/robot transitions, Hardware Test entry while OK held, exit while BACK held, debounce, complete transfers, edges, portrait, fallback and live updates.");
+    test_robot_marker_pixels();
+    test_robot_telemetry_pixels();
+    puts("LCD page tests passed: menu/channel/robot transitions, Hardware Test entry while OK held, exit while BACK held, debounce, complete transfers, edges, portrait, fallback, RGB565 clipping, final marker pixels, intact outline and telemetry transitions.");
     return 0;
 }

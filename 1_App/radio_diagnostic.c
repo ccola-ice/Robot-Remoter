@@ -58,6 +58,7 @@ HwResult hardware_radio_test(uint8_t receive)
     uint8_t old[sizeof(regs)], tx[5], rx[5], packet[32], received[32];
     uint8_t address[5] = {0xd7U, 0x43U, 0x44U, 0x47U, 0x31U};
     uint8_t i, count = 0U, status, fifo, old_ce, retry = 0U;
+    uint8_t restore_ce = 0U;
     uint16_t ms = 0U;
     HwResult result = HW_FAIL;
     io_error = 0U;
@@ -69,6 +70,7 @@ HwResult hardware_radio_test(uint8_t receive)
     if(io_error || status == 0xffU) goto no_change;
     i = reg_read(SETUP_AW);
     if(io_error || i < 1U || i > 3U) goto no_change;
+    restore_ce = 1U;
     if((status & 0x11U) != 0x11U) { result = HW_BLOCKED; goto no_change; }
     for(i = 0; i < sizeof(regs); i++) old[i] = reg_read(regs[i]);
     transaction(TX_ADDR, tx, 5U, 0U);
@@ -139,12 +141,16 @@ cleanup:
     for(i = 1U; i < sizeof(regs); i++) reg_write(regs[i], old[i]);
     reg_write(CONFIG, old[0]);
     Delay_ms(2U);
-    for(i = 0; i < sizeof(regs); i++) if(reg_read(regs[i]) != old[i]) result = HW_FAIL;
+    for(i = 0; i < sizeof(regs); i++) if(reg_read(regs[i]) != old[i]) {
+        result = HW_FAIL; restore_ce = 0U;
+    }
     transaction(TX_ADDR, packet, 5U, 0U);
     transaction(RX_ADDR_P0, packet + 5, 5U, 0U);
-    if(memcmp(packet, tx, 5U) || memcmp(packet + 5, rx, 5U) || io_error) result = HW_FAIL;
+    if(memcmp(packet, tx, 5U) || memcmp(packet + 5, rx, 5U) || io_error) {
+        result = HW_FAIL; restore_ce = 0U;
+    }
 no_change:
-    if(old_ce) NRF_CE_HIGH();
+    if(old_ce && restore_ce && !io_error) NRF_CE_HIGH();
     printf("[DIAG] radio %s: packets=%u/8 ms=%u retries=%u result=%s\r\n",
            receive ? "RX" : "TX+ACK", count, ms, retry, hardware_result_name(result));
     return result;

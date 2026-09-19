@@ -54,6 +54,8 @@ extern volatile param_Config param;
 unsigned char set_default_param(void);
 unsigned char write_default_param(void);
 void param_load_defaults(volatile param_Config *config);
+/* Repair invalid values and refresh runtime pointers; return 1 if repaired. */
+uint8_t param_sanitize(volatile param_Config *config);
 
 uint8_t write_param(void);
 

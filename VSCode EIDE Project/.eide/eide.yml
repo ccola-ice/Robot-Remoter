@@ -13,6 +13,7 @@ virtualFolder:
         - path: ../1_App/main.c
         - path: ../1_App/gui.c
         - path: ../1_App/menu.c
+        - path: ../1_App/control_link.c
         - path: ../1_App/param.c
         - path: ../1_App/boot_status.c
         - path: ../1_App/hardware_tests.c

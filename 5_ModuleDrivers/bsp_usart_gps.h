@@ -50,6 +50,10 @@ extern volatile uint8_t GPS_HalfTransferEnd;
 
 void GPS_USART_Config(void);
 void GPS_DMA_Config(void);
+void GPS_DMA_ReceiveIRQ(void);
+/* Reads one complete half (256 bytes), 0 for empty, -1 after loss/error. */
+int GPS_DMA_ReadBlock(uint8_t *data, uint32_t *received_ms);
+uint32_t gps_rx_overrun_count(void);
 
 void trace(const char *str, int str_size);
 void error(const char *str, int str_size);

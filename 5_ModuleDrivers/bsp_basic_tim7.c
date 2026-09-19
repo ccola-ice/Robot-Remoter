@@ -8,7 +8,6 @@
 static void BASIC_TIM7_NVIC_Configuration(void)
 {
     NVIC_InitTypeDef NVIC_InitStructure; 
-    NVIC_PriorityGroupConfig(NVIC_PriorityGroup_0);	// 设置中断组为0		
     NVIC_InitStructure.NVIC_IRQChannel = BASIC_TIM7_IRQn;// 设置中断来源 		
     NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;// 设置抢占优先级	   
     NVIC_InitStructure.NVIC_IRQChannelSubPriority = 2;// 设置子优先级	

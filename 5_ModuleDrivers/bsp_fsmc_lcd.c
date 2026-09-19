@@ -1,7 +1,7 @@
 #include "bsp_fsmc_lcd.h"
 #include "bsp_fsmc_sram.h"
 #include "bsp_SysTick.h"
-#include "fonts.h"	
+#include "fonts.h"
 
 //根据液晶扫描方向而变化的XY像素宽度
 //调用ILI9806G_GramScan函数设置方向时会自动更改
@@ -115,8 +115,21 @@ void LCD_PageBuffer_Enable(uint8_t enabled)
 void LCD_BeginPage(uint16_t background)
 {
     uint32_t count = (uint32_t)LCD_X_LENGTH * LCD_Y_LENGTH;
-    if(lcd_page_enabled == 0U || count == 0U || count > LCD_PAGE_PIXEL_CAPACITY)
+    if(count == 0U)
+    {
+        lcd_page_active = 0U;
+        lcd_page_window_valid = 0U;
         return;
+    }
+    if(lcd_page_enabled == 0U || count > LCD_PAGE_PIXEL_CAPACITY)
+    {
+        /* A failed/disabled SRAM buffer must not leave the old page behind. */
+        lcd_page_active = 0U;
+        lcd_page_window_valid = 0U;
+        ILI9806G_OpenWindow(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
+        ILI9806G_FillColor(count, background);
+        return;
+    }
     lcd_page_started_cycles = DWT->CYCCNT;
     lcd_page_width = LCD_X_LENGTH;
     lcd_page_height = LCD_Y_LENGTH;
@@ -160,6 +173,43 @@ static __inline void lcd_write_pixel(uint16_t color)
     {
         lcd_page_x = lcd_page_x0;
         if(++lcd_page_y >= lcd_page_y1) lcd_page_y = lcd_page_y0;
+    }
+}
+
+/* Write final widget pixels as one rectangle; clipped rows keep source stride. */
+void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
+                    const uint16_t *pixels)
+{
+    uint16_t target_width = lcd_page_active ? lcd_page_width : LCD_X_LENGTH;
+    uint16_t target_height = lcd_page_active ? lcd_page_height : LCD_Y_LENGTH;
+    uint16_t visible_width, visible_height;
+    uint32_t row, column;
+    const uint16_t *source;
+    volatile uint16_t *dest;
+    if(pixels == 0 || width == 0U || height == 0U ||
+       x >= target_width || y >= target_height) return;
+    visible_width = width;
+    visible_height = height;
+    if(visible_width > target_width - x) visible_width = target_width - x;
+    if(visible_height > target_height - y) visible_height = target_height - y;
+    if(lcd_page_active != 0U)
+    {
+        for(row = 0U; row < visible_height; row++)
+        {
+            source = pixels + row * width;
+            dest = lcd_page_pixels + ((uint32_t)y + row) * target_width + x;
+            for(column = 0U; column < visible_width; column++)
+                dest[column] = source[column];
+        }
+        return;
+    }
+    ILI9806G_OpenWindow(x, y, visible_width, visible_height);
+    ILI9806G_Write_Cmd(CMD_SetPixel);
+    for(row = 0U; row < visible_height; row++)
+    {
+        source = pixels + row * width;
+        for(column = 0U; column < visible_width; column++)
+            ILI9806G_Write_Data(source[column]);
     }
 }
 
@@ -558,9 +608,9 @@ static void ILI9806G_REG_Config ( void )
 	ILI9806G_Write_Cmd(0x3A);
 	ILI9806G_Write_Data(0x55);
 
-	ILI9806G_Write_Cmd(0x11); //Exit Sleep 
+	ILI9806G_Write_Cmd(0x11); //Exit Sleep
 	Delay_ms(120U);
-	ILI9806G_Write_Cmd(0x29); // Display On 
+	ILI9806G_Write_Cmd(0x29); // Display On
 	Delay_ms(20U);
 
 //#if 1

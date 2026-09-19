@@ -12,6 +12,7 @@
 #include "spi_flash_layout.h"
 #include "bsp_sdio_sd.h"
 #include "string.h"
+#include <stdint.h>
 
 //定义逻辑设备号
 #define SD_CARD     0
@@ -19,6 +20,32 @@
 
 #define SD_BLOCKSIZE     512
 extern  SD_CardInfo SDCardInfo;
+static DSTATUS sd_disk_status = STA_NOINIT;
+
+/* Validate before address arithmetic; FatFs must not reach reserved flash. */
+static DRESULT disk_check_request(BYTE pdrv, const void *buff, DWORD sector, UINT count)
+{
+    uint64_t sectors;
+    if (buff == 0 || count == 0U) return RES_PARERR;
+    if (pdrv == SD_CARD) {
+        if (sd_disk_status & STA_NOINIT) return RES_NOTRDY;
+        if (count > 0x01ffffffUL / SD_BLOCKSIZE) return RES_PARERR;
+        sectors = SDCardInfo.CardCapacity / SD_BLOCKSIZE;
+    } else if (pdrv == SPI_FLASH) {
+        if (FLASH_GetIoError() != 0U) return RES_NOTRDY;
+        sectors = SPI_FLASH_FATFS_SECTOR_COUNT;
+    } else return RES_PARERR;
+    if (sector >= sectors || count > sectors - sector) return RES_PARERR;
+    return RES_OK;
+}
+
+static DRESULT disk_sd_result(SD_Error error)
+{
+    if (error == SD_OK) return RES_OK;
+    SD_AbortTransfer();
+    sd_disk_status = STA_NOINIT;
+    return RES_ERROR;
+}
 /*-----------------------------------------------------------------------*/
 /* Get Drive Status                                                      */
 /*-----------------------------------------------------------------------*/
@@ -35,13 +62,15 @@ DSTATUS disk_status (
 		case SD_CARD :
 			//SD 卡状态返回分支
 			// translate the reslut code here
-			stat &= ~STA_NOINIT;
+            if (sd_disk_status == 0U && SD_GetStatus() == SD_TRANSFER_ERROR)
+                sd_disk_status = STA_NOINIT;
+            stat = sd_disk_status;
 			break;
 
 		case SPI_FLASH :
 			//SPI FLASH 状态返回分支
 			spi_result = FLASH_Read_FlashID();
-			if(spi_result == FLASH_ID)
+			if(spi_result == FLASH_ID && FLASH_GetIoError() == 0U)
 			{
 				stat &= ~STA_NOINIT; //stat最低位为0，表示SPI FLASH为正常状态
 			}
@@ -69,7 +98,7 @@ DSTATUS disk_initialize (
 	BYTE pdrv				/* Physical drive nmuber to identify the drive */
 )
 {
-	DSTATUS stat;
+	DSTATUS stat = STA_NOINIT;
 
 	switch (pdrv) 
 	{
@@ -78,12 +107,14 @@ DSTATUS disk_initialize (
 			//SD 初始化分支
 			if(SD_Init()==SD_OK)
 			{
-				stat &= ~STA_NOINIT;
+				stat = 0U;
 			}
 			else 
 			{
 				stat = STA_NOINIT;
+                SD_AbortTransfer();
 			}
+            sd_disk_status = stat;
 			break;
 		}
 		
@@ -116,13 +147,15 @@ DRESULT disk_read (
 {
 	DRESULT stat = RES_PARERR;
 	SD_Error SD_state = SD_OK;
+    DRESULT request = disk_check_request(pdrv, buff, sector, count);
+    if (request != RES_OK) return request;
 	
 	switch (pdrv) 
 	{
 		case SD_CARD :
 		{
 			//SD 读取分支
-			if((DWORD)buff & 3)
+			if((uintptr_t)buff & 3)
 			{
 				DRESULT res = RES_OK;
 				DWORD scratch[SD_BLOCKSIZE / 4];
@@ -141,19 +174,16 @@ DRESULT disk_read (
 				return res;
 			}
 			
-			SD_state=SD_ReadMultiBlocks(buff,sector*SD_BLOCKSIZE,SD_BLOCKSIZE,count);
+			SD_state=SD_ReadMultiBlocks(buff,(uint64_t)sector*SD_BLOCKSIZE,SD_BLOCKSIZE,count);
 			
 			if(SD_state==SD_OK)
 			{
 				/* Check if the Transfer is finished */
 				SD_state=SD_WaitReadOperation();
-				while(SD_GetStatus() != SD_TRANSFER_OK);
+				if (SD_state == SD_OK) SD_state = SD_WaitReady();
 			}
 			
-			if(SD_state!=SD_OK)
-				stat = RES_PARERR;
-			else
-				stat = RES_OK;	
+			stat = disk_sd_result(SD_state);
 
 			break;
 		}
@@ -164,7 +194,13 @@ DRESULT disk_read (
 			//扇区偏移6MB，外部Flash文件系统空间放在SPI Flash后面10MB空间
 			sector += SPI_FLASH_FATFS_FIRST_SECTOR;
 		
-			FLASH_Read_Data(buff,sector*FLASH_SECTOR_SIZE, count*FLASH_SECTOR_SIZE);
+            /* FLASH_Read_Data has a 16-bit byte count: read one 4 KiB sector. */
+            while (count-- != 0U) {
+                FLASH_Read_Data(buff, sector * FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+                if (FLASH_GetIoError() != 0U) return RES_ERROR;
+                sector++;
+                buff += FLASH_SECTOR_SIZE;
+            }
 
 			//默认每次都能正常读取
 			stat = RES_OK;
@@ -193,6 +229,8 @@ DRESULT disk_write (
 {
 	DRESULT stat = RES_PARERR;
 	SD_Error SD_state = SD_OK;
+    DRESULT request = disk_check_request(pdrv, buff, sector, count);
+    if (request != RES_OK) return request;
 	
 	if (!count) 
 	{
@@ -204,7 +242,7 @@ DRESULT disk_write (
 		case SD_CARD :
 		{
 			//SD 写入分支
-			if((DWORD)buff&3)
+			if((uintptr_t)buff&3)
 			{
 				DRESULT res = RES_OK;
 				DWORD scratch[SD_BLOCKSIZE / 4];
@@ -222,7 +260,7 @@ DRESULT disk_write (
 				return res;
 			}		
 		
-			SD_state=SD_WriteMultiBlocks((uint8_t *)buff,sector*SD_BLOCKSIZE,SD_BLOCKSIZE,count);
+			SD_state=SD_WriteMultiBlocks((uint8_t *)buff,(uint64_t)sector*SD_BLOCKSIZE,SD_BLOCKSIZE,count);
 			
 			if(SD_state==SD_OK)
 			{
@@ -230,13 +268,10 @@ DRESULT disk_write (
 				SD_state=SD_WaitWriteOperation();
 
 				/* Wait until end of DMA transfer */
-				while(SD_GetStatus() != SD_TRANSFER_OK);			
+				if (SD_state == SD_OK) SD_state = SD_WaitReady();
 			}
 			
-			if(SD_state!=SD_OK)
-				stat = RES_PARERR;
-			else
-				stat = RES_OK;
+			stat = disk_sd_result(SD_state);
 			
 			break;
 		}
@@ -250,9 +285,11 @@ DRESULT disk_write (
 			{
 				//写入前先擦除
 				FLASH_Erase_Sectors(sector*FLASH_SECTOR_SIZE);
+                if (FLASH_GetIoError() != 0U) return RES_ERROR;
 			
 				//把要写入的扇区号转换成地址
 				FLASH_Write_Data((u8*)buff, sector*FLASH_SECTOR_SIZE, FLASH_SECTOR_SIZE);
+                if (FLASH_GetIoError() != 0U) return RES_ERROR;
 				
 				sector++;
 				buff += FLASH_SECTOR_SIZE;
@@ -281,75 +318,28 @@ DRESULT disk_ioctl (
 	void *buff		/* Buffer to send/receive control data */
 )
 {
-	DRESULT stat = RES_PARERR;
-
-	switch(pdrv)
-	{
-		case SD_CARD :
-		//SD 分支
-		{
-			switch (cmd) 
-			{
-				// Get R/W sector size (WORD) 
-				case GET_SECTOR_SIZE :    
-					*(WORD * )buff = SD_BLOCKSIZE;
-					break;
-				
-				// Get erase block size in unit of sector (DWORD)
-				case GET_BLOCK_SIZE :      
-					*(DWORD * )buff = 1;//SDCardInfo.CardBlockSize;
-					break;
-
-				case GET_SECTOR_COUNT:
-					*(DWORD * )buff = SDCardInfo.CardCapacity/SDCardInfo.CardBlockSize;
-					break;
-				
-				case CTRL_SYNC :
-					break;
-			}
-			stat = RES_OK;
-			
-			break;
-		}
-		
-		case SPI_FLASH :
-			//SPI_FLASH 分支
-			switch(cmd)
-			{
-				//存储介质有多少个sector，文件系统通过该值获得存储介质的容量
-				case GET_SECTOR_COUNT:
-					*(DWORD *)buff = SPI_FLASH_FATFS_SECTOR_COUNT;
-					stat = RES_OK;
-					break;
-				
-				//每个扇区的个数
-				case GET_SECTOR_SIZE:
-					*(WORD  *)buff = FLASH_SECTOR_SIZE;
-					stat = RES_OK;
-					break;
-				
-				//获取擦除的最小个数， 以sector为单位
-				case GET_BLOCK_SIZE:
-					*(DWORD  *)buff = 1;
-					stat = RES_OK;
-					break;
-				
-				//写入同步在disk_write函数已经完成，这里默认返回ok
-				case CTRL_SYNC:
-					stat = RES_OK;
-					break;
-				
-				default:
-					stat = RES_PARERR;	
-					break;
-			}
-			break;
-		
-			default:
-					stat = RES_PARERR;
-	}
-
-	return stat;
+    if (pdrv != SD_CARD && pdrv != SPI_FLASH) return RES_PARERR;
+    if (cmd != CTRL_SYNC && buff == 0) return RES_PARERR;
+    if (pdrv == SD_CARD) {
+        if (sd_disk_status & STA_NOINIT) return RES_NOTRDY;
+        switch (cmd) {
+        case GET_SECTOR_SIZE: *(WORD *)buff = SD_BLOCKSIZE; return RES_OK;
+        case GET_BLOCK_SIZE: *(DWORD *)buff = 1U; return RES_OK;
+        case GET_SECTOR_COUNT:
+            *(DWORD *)buff = (DWORD)(SDCardInfo.CardCapacity / SD_BLOCKSIZE);
+            return RES_OK;
+        case CTRL_SYNC: return disk_sd_result(SD_WaitReady());
+        default: return RES_PARERR;
+        }
+    }
+    if (FLASH_GetIoError() != 0U) return RES_ERROR;
+    switch (cmd) {
+    case GET_SECTOR_COUNT: *(DWORD *)buff = SPI_FLASH_FATFS_SECTOR_COUNT; return RES_OK;
+    case GET_SECTOR_SIZE: *(WORD *)buff = FLASH_SECTOR_SIZE; return RES_OK;
+    case GET_BLOCK_SIZE: *(DWORD *)buff = 1U; return RES_OK;
+    case CTRL_SYNC: return RES_OK; /* Writes complete synchronously. */
+    default: return RES_PARERR;
+    }
 }
 #endif
 

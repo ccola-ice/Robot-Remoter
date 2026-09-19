@@ -1,5 +1,7 @@
 #include "bsp_usart_gps.h"
 #include "bsp_usart_debug.h"
+#include "bsp_SysTick.h"
+#include <string.h>
 
 //DMA接收缓冲
 uint8_t gps_rbuff[GPS_RBUFF_SIZE];
@@ -7,6 +9,96 @@ uint8_t gps_rbuff[GPS_RBUFF_SIZE];
 //DMA传输结束标志
 volatile uint8_t GPS_TransferEnd = 0;
 volatile uint8_t GPS_HalfTransferEnd = 0;
+
+/* Copy completed DMA halves promptly; parsing never reads live DMA memory. */
+#define GPS_RX_QUEUE_BLOCKS 4U
+static uint8_t gps_rx_blocks[GPS_RX_QUEUE_BLOCKS][HALF_GPS_RBUFF_SIZE];
+static uint32_t gps_rx_ticks[GPS_RX_QUEUE_BLOCKS];
+static volatile uint8_t gps_rx_head, gps_rx_tail, gps_rx_count, gps_rx_lost;
+static volatile uint32_t gps_rx_overruns;
+
+static void GPS_RX_Discontinuity(void)
+{
+    gps_rx_head = gps_rx_tail = gps_rx_count = 0;
+    gps_rx_lost = 1;
+    ++gps_rx_overruns;
+}
+
+uint32_t gps_rx_overrun_count(void)
+{
+    return gps_rx_overruns;
+}
+
+void GPS_DMA_ReceiveIRQ(void)
+{
+    uint8_t half, ht, tc;
+    uint16_t remaining;
+    unsigned long now;
+    ht = DMA_GetITStatus(GPS_USART_DMA_STREAM, GPS_DMA_IT_HT) != RESET;
+    tc = DMA_GetITStatus(GPS_USART_DMA_STREAM, GPS_DMA_IT_TC) != RESET;
+    if(DMA_GetITStatus(GPS_USART_DMA_STREAM, DMA_IT_TEIF1) != RESET ||
+       DMA_GetITStatus(GPS_USART_DMA_STREAM, DMA_IT_DMEIF1) != RESET ||
+       DMA_GetITStatus(GPS_USART_DMA_STREAM, DMA_IT_FEIF1) != RESET)
+    {
+        DMA_ClearITPendingBit(GPS_USART_DMA_STREAM,
+            DMA_IT_TEIF1 | DMA_IT_DMEIF1 | DMA_IT_FEIF1 | GPS_DMA_IT_HT | GPS_DMA_IT_TC);
+        GPS_RX_Discontinuity();
+        return;
+    }
+    if(!ht && !tc)
+        return;
+    DMA_ClearITPendingBit(GPS_USART_DMA_STREAM, GPS_DMA_IT_HT | GPS_DMA_IT_TC);
+    if(ht)
+        GPS_HalfTransferEnd = 1;
+    if(tc)
+        GPS_TransferEnd = 1;
+    remaining = DMA_GetCurrDataCounter(GPS_USART_DMA_STREAM);
+    /* Both flags mean the oldest half has already been reused by DMA. */
+    if(ht && tc)
+        GPS_RX_Discontinuity();
+    half = remaining > HALF_GPS_RBUFF_SIZE ? 1U : 0U;
+    if(gps_rx_count == GPS_RX_QUEUE_BLOCKS)
+        GPS_RX_Discontinuity();
+    get_tick_count(&now);
+    memcpy(gps_rx_blocks[gps_rx_head],
+           gps_rbuff + half * HALF_GPS_RBUFF_SIZE, HALF_GPS_RBUFF_SIZE);
+    /* If DMA crossed the half boundary during the copy, reject the copy. */
+    remaining = DMA_GetCurrDataCounter(GPS_USART_DMA_STREAM);
+    if((remaining > HALF_GPS_RBUFF_SIZE ? 1U : 0U) != half)
+    {
+        GPS_RX_Discontinuity();
+        return;
+    }
+    gps_rx_ticks[gps_rx_head] = (uint32_t)now;
+    gps_rx_head = (uint8_t)((gps_rx_head + 1U) % GPS_RX_QUEUE_BLOCKS);
+    ++gps_rx_count;
+}
+
+int GPS_DMA_ReadBlock(uint8_t *data, uint32_t *received_ms)
+{
+    uint32_t mask;
+    int result = 0;
+    if(!data || !received_ms)
+        return 0;
+    mask = __get_PRIMASK();
+    __disable_irq();
+    if(gps_rx_lost)
+    {
+        gps_rx_lost = 0;
+        result = -1;
+    }
+    else if(gps_rx_count)
+    {
+        memcpy(data, gps_rx_blocks[gps_rx_tail], HALF_GPS_RBUFF_SIZE);
+        *received_ms = gps_rx_ticks[gps_rx_tail];
+        gps_rx_tail = (uint8_t)((gps_rx_tail + 1U) % GPS_RX_QUEUE_BLOCKS);
+        --gps_rx_count;
+        result = HALF_GPS_RBUFF_SIZE;
+    }
+    __set_PRIMASK(mask);
+    return result;
+}
+
 
  /**
   * @brief  GPS_USART GPIO 配置,工作模式配置。115200 8-N-1 ，中断接收模式
@@ -71,7 +163,7 @@ void GPS_USART_Config(void)
 static void GPS_DMA_Interrupt_Config(void)
 {
 	NVIC_InitTypeDef NVIC_InitStructure;
-	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_1);
+
 
 	//DMA Channel Interrupt ENABLE
 	NVIC_InitStructure.NVIC_IRQChannel = GPS_DMA_IRQn; 
@@ -89,6 +181,10 @@ static void GPS_DMA_Interrupt_Config(void)
 void GPS_DMA_Config(void)
 {
     DMA_InitTypeDef DMA_InitStructure;
+
+    gps_rx_head = gps_rx_tail = gps_rx_count = gps_rx_lost = 0;
+    gps_rx_overruns = 0;
+    GPS_HalfTransferEnd = GPS_TransferEnd = 0;
 
     /* 开启DMA时钟 */ 
     RCC_AHB1PeriphClockCmd(GPS_USART_DMA_CLK, ENABLE); 
@@ -134,7 +230,7 @@ void GPS_DMA_Config(void)
     /*配置中断优先级*/
     GPS_DMA_Interrupt_Config();
     
-    DMA_ITConfig(GPS_USART_DMA_STREAM,DMA_IT_HT|DMA_IT_TC,ENABLE);  //配置DMA发送完成后产生中断
+    DMA_ITConfig(GPS_USART_DMA_STREAM,DMA_IT_HT|DMA_IT_TC|DMA_IT_TE|DMA_IT_DME,ENABLE);  //配置DMA发送完成后产生中断
       
      /*使能DMA*/
      DMA_Cmd(GPS_USART_DMA_STREAM, ENABLE);
@@ -206,7 +302,7 @@ void gps_info(const char *str, int str_size)
 static uint8_t IsLeapYear(uint8_t iYear) 
 { 
     uint16_t    Year; 
-    Year    =    2000+iYear; 
+    Year    =    1900+iYear;
     if((Year&3)==0) 
     { 
         return ((Year%400==0) || (Year%100!=0)); 
@@ -225,6 +321,7 @@ void GMTconvert(nmeaTIME *SourceTime, nmeaTIME *ConvertTime, uint8_t GMT,uint8_t
 { 
     uint32_t    YY,MM,DD,hh,mm,ss;        //年月日时分秒暂存变量 
      
+    *ConvertTime = *SourceTime;
     if(GMT==0)    return;                //如果处于0时区直接返回 
     if(GMT>12)    return;                //时区最大为12 超过则返回         
 
@@ -311,7 +408,7 @@ void GMTconvert(nmeaTIME *SourceTime, nmeaTIME *ConvertTime, uint8_t GMT,uint8_t
                     DD    =    28; 
                     MM    --; 
                 } 
-                else    DD--; 
+                else if(DD==1) { DD=29; MM--; } else DD--;
             } 
             else if(MM==1)    //处理1月份 
             { 

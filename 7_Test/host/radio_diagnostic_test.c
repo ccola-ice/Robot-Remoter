@@ -10,6 +10,7 @@ static uint8_t command, offset, selected, response, ce, pending;
 static unsigned fail_spi, absent, nack, bad_payload, cancel, busy, misconfigure;
 static unsigned packets, elapsed, restored;
 static unsigned quiet;
+static unsigned corrupt_restore, power_downs;
 #define SPI_I2S_FLAG_TXE 1U
 #define SPI_I2S_FLAG_RXNE 2U
 #define RESET 0U
@@ -51,7 +52,12 @@ static void SPI_I2S_SendData(unsigned spi, uint8_t data)
     } else if(command <= 0x3fU) {
         uint8_t reg=command&0x1fU;
         if(reg == STATUS) regs[reg][0] &= ~data;
-        else if(!(misconfigure && reg == RF_CH)) regs[reg][offset-2U]=data;
+        else {
+            if(reg == CONFIG && data == 0x0cU) power_downs++;
+            if(!(misconfigure && reg == RF_CH) &&
+               !(corrupt_restore && power_downs >= 2U && reg == RF_CH))
+                regs[reg][offset-2U]=data;
+        }
     } else if(command == WR_TX_PLOAD) {
         payload[offset-2U]=data;
         if(offset == 33U) pending=1U;
@@ -86,6 +92,7 @@ static void reset(void)
     command=offset=selected=response=pending=0U; ce=1U;
     fail_spi=absent=nack=bad_payload=cancel=busy=misconfigure=packets=elapsed=restored=0U;
     quiet=0U;
+    corrupt_restore=power_downs=0U;
 }
 static void check_restored(void)
 {
@@ -104,8 +111,11 @@ int main(void)
     reset(); bad_payload=1U; assert(hardware_radio_test(1U) == HW_FAIL); check_restored();
     reset(); cancel=1U; assert(hardware_radio_test(1U) == HW_CANCELLED); check_restored();
     reset(); misconfigure=1U; assert(hardware_radio_test(0U) == HW_FAIL); check_restored();
-    reset(); absent=1U; assert(hardware_radio_test(0U) == HW_FAIL && !restored); check_restored();
-    reset(); fail_spi=1U; assert(hardware_radio_test(0U) == HW_FAIL && !restored); check_restored();
+    reset(); absent=1U; assert(hardware_radio_test(0U) == HW_FAIL && !restored); assert(!ce && !selected && memcmp(before,regs,sizeof(regs)) == 0);
+    reset(); fail_spi=1U; assert(hardware_radio_test(0U) == HW_FAIL && !restored); assert(!ce && !selected && memcmp(before,regs,sizeof(regs)) == 0);
+    reset(); corrupt_restore=1U;
+    assert(hardware_radio_test(0U) == HW_FAIL && !ce && !selected);
+    assert(regs[RF_CH][0] == 40U); /* Do not enable a wrongly restored radio. */
     reset(); quiet=1U; assert(hardware_radio_test(0U) == HW_FAIL && elapsed < 5100U); check_restored();
     reset(); quiet=1U; assert(hardware_radio_test(1U) == HW_FAIL && elapsed < 20100U); check_restored();
     reset(); regs[FIFO_STATUS][0]=0U;

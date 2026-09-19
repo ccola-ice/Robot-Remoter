@@ -9,7 +9,6 @@ static void BASIC_TIM6_NVIC_Config(void)
 {
     NVIC_InitTypeDef NVIC_InitStructure; 
     // 设置中断组为0
-    NVIC_PriorityGroupConfig(NVIC_PriorityGroup_0);		
     // 设置中断来源
     NVIC_InitStructure.NVIC_IRQChannel = BASIC_TIM_IRQn; 	
     // 设置抢占优先级

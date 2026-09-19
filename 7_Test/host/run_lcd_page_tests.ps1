@@ -27,13 +27,13 @@ try {
         'ILI9806G_GetPointPixel', 'ILI9806G_DrawLine', 'ILI9806G_DrawRectangle', 'ILI9806G_Fill',
         'ILI9806G_DrawCircle', 'ILI9806G_DispChar_EN', 'ILI9806G_DispString_EN',
         'LCD_SetFont', 'LCD_SetTextColor', 'LCD_SetBackColor')
-    $forward = 'void ILI9806G_OpenWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h);'
+    $forward = 'void ILI9806G_OpenWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h); static __inline void ILI9806G_FillColor(uint32_t count, uint16_t color);'
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_driver.inc'), ($forward + [Environment]::NewLine + $block + $drawFunctions))
     $gui = [IO.File]::ReadAllText((Join-Path $repo '1_App/gui.c'), $enc)
     $mapping = ([regex]::Matches($gui, '(?m)^#define ROBOT_\w+[^\r\n]*') | ForEach-Object { $_.Value }) -join [Environment]::NewLine
     $guiFunctions = Get-Functions $gui @('gui_prepare_page', 'gui_clear_page_band', 'gui_clear_page_content',
         'gui_update_progress_bar', 'gui_draw_channel_card', 'main_menu', 'channel_monitor_page',
-        'gui_robot_card', 'gui_robot_stick_value', 'gui_robot_draw_stick', 'robot_control_page')
+        'gui_robot_card', 'gui_robot_stick_value', 'gui_robot_text', 'gui_robot_dot_patch', 'gui_robot_draw_stick', 'robot_control_page')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_gui.inc'), ($mapping + [Environment]::NewLine + $guiFunctions))
     $diag = [IO.File]::ReadAllText((Join-Path $repo '1_App/diagnostics.c'), $enc)
     $start = $diag.IndexOf('#define DIAG_LINE_CACHE_COUNT')

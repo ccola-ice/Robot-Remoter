@@ -56,7 +56,7 @@
 #include "bsp_gpio_stick.h"
 #include "nmea_decode_test.h"
 
-extern void TimingDelay_Decrement(void);
+extern void TimeStamp_Increment(void);
 
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
 extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
@@ -64,7 +64,7 @@ extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 extern uint8_t txbuf[32];
 extern uint8_t rxbuf[32];
 
-extern uint8_t finish_1hz,finish_2hz,finish_5hz,finish_10hz,finish_20hz,finish_33hz,finish_50hz,finish_100hz;
+extern volatile uint8_t finish_1hz,finish_2hz,finish_5hz,finish_10hz,finish_20hz,finish_33hz,finish_50hz,finish_100hz;
 extern volatile uint8_t finish_button_10ms;
 
 volatile uint8_t ADC_Value1_High, ADC_Value1_Low;
@@ -178,7 +178,7 @@ void PendSV_Handler(void)
   */
 void SysTick_Handler(void)
 {
-  TimingDelay_Decrement();
+  TimeStamp_Increment();
 }
 
 /******************************************************************************/
@@ -229,47 +229,15 @@ void GENERAL_TIM2_IRQHandler(void)
 {
   if (TIM_GetITStatus(GENERAL_TIM2, TIM_IT_Update) != RESET)
   {
-    ADC_Value1_High = (ADC1_Value[0] >> 8) & 0xFF;
-    ADC_Value1_Low = ADC1_Value[0] & 0xFF;
-    ADC_Value2_High = (ADC1_Value[1] >> 8) & 0xFF;
-    ADC_Value2_Low = ADC1_Value[1] & 0xFF;
-    ADC_Value3_High = (ADC1_Value[2] >> 8) & 0xFF;
-    ADC_Value3_Low = ADC1_Value[2] & 0xFF;
-    ADC_Value4_High = (ADC1_Value[3] >> 8) & 0xFF;
-    ADC_Value4_Low = ADC1_Value[3] & 0xFF;
-    ADC_Value5_High = (ADC1_Value[4] >> 8) & 0xFF;
-    ADC_Value5_Low = ADC1_Value[4] & 0xFF;
-    ADC_Value6_High = (ADC1_Value[5] >> 8) & 0xFF;
-    ADC_Value6_Low = ADC1_Value[5] & 0xFF;
-    ADC_Value7_High = (ADC1_Value[6] >> 8) & 0xFF;
-    ADC_Value7_Low = ADC1_Value[6] & 0xFF;
-    ADC_Value8_High = (ADC3_Value[0] >> 8) & 0xFF;
-    ADC_Value8_Low = ADC3_Value[0] & 0xFF;
-    ADC_Value9_High = (ADC3_Value[1] >> 8) & 0xFF;
-    ADC_Value9_Low = ADC3_Value[1] & 0xFF;
-    ADC_Value10_High = (ADC3_Value[2] >> 8) & 0xFF;
-    ADC_Value10_Low = ADC3_Value[2] & 0xFF;
-
-    txbuf[0] = ADC_Value1_High;
-    txbuf[1] = ADC_Value1_Low;
-    txbuf[2] = ADC_Value2_High;
-    txbuf[3] = ADC_Value2_Low;
-    txbuf[4] = ADC_Value3_High;
-    txbuf[5] = ADC_Value3_Low;
-    txbuf[6] = ADC_Value4_High;
-    txbuf[7] = ADC_Value4_Low;
-    txbuf[8] = ADC_Value5_High;
-    txbuf[9] = ADC_Value5_Low;
-    txbuf[10] = ADC_Value6_High;
-    txbuf[11] = ADC_Value6_Low;
-    txbuf[12] = ADC_Value7_High;
-    txbuf[13] = ADC_Value7_Low;
-    txbuf[14] = ADC_Value8_High;
-    txbuf[15] = ADC_Value8_Low;
-    txbuf[16] = ADC_Value9_High;
-    txbuf[17] = ADC_Value9_Low;
-    txbuf[18] = ADC_Value10_High;
-    txbuf[19] = ADC_Value10_Low;
+    uint8_t channel;
+    uint16_t sample;
+    /* Read each DMA value once before splitting it into bytes. */
+    for(channel = 0U; channel < 10U; channel++) {
+      sample = channel < NUM_OF_ADC1CHANNEL ? ADC1_Value[channel] :
+               ADC3_Value[channel - NUM_OF_ADC1CHANNEL];
+      txbuf[channel * 2U] = (uint8_t)(sample >> 8);
+      txbuf[channel * 2U + 1U] = (uint8_t)sample;
+    }
 
     // nrf24l01_send();
 
@@ -299,45 +267,21 @@ void TIM4_IRQHandler(void)
 // 定时器5中断服务函数：
 void GENERAL_TIM5_IRQHandler(void)
 {
-  static uint8_t tim5_count=0;
-
-  if (TIM_GetITStatus(GENERAL_TIM5, TIM_IT_Update) != RESET) // 检查指定的TIM中断发生与否:TIM 中断源
-  {
-    finish_100hz = 1;
+  static uint16_t tim5_count;
+  if(TIM_GetITStatus(GENERAL_TIM5, TIM_IT_Update) != RESET) {
+    /* TIM5 is configured for a 1 ms interrupt. */
     tim5_count++;
-
-    if(tim5_count % 2 == 0)
-    {
-      finish_50hz = 1;
+    if(tim5_count % 10U == 0U) finish_100hz = 1U;
+    if(tim5_count % 20U == 0U) finish_50hz = 1U;
+    if(tim5_count % 50U == 0U) finish_20hz = 1U;
+    if(tim5_count % 100U == 0U) finish_10hz = 1U;
+    if(tim5_count % 200U == 0U) finish_5hz = 1U;
+    if(tim5_count % 500U == 0U) finish_2hz = 1U;
+    if(tim5_count == 1000U) {
+      tim5_count = 0U;
+      finish_1hz = 1U;
     }
-
-    if(tim5_count % 5 == 0)
-    {
-      finish_20hz = 1;
-    }
-
-    if(tim5_count % 10 == 0)
-    {
-      finish_10hz = 1;
-    }
-
-    if(tim5_count % 20 == 0)
-    {
-      finish_5hz = 1;
-    }
-
-    if(tim5_count % 50 == 0)
-    {
-      finish_2hz = 1;
-    }
-
-    if(tim5_count  == 100)
-    {
-      tim5_count = 0;
-      finish_1hz = 1;
-    }
-
-    TIM_ClearITPendingBit(GENERAL_TIM5, TIM_IT_Update); // 清除TIMx的中断待处理位:TIM 中断源
+    TIM_ClearITPendingBit(GENERAL_TIM5, TIM_IT_Update);
   }
 }
 
@@ -364,17 +308,7 @@ void GENERAL_TIM7_IRQHandler(void)
 //GPS DMA中断服务函数：
 void GPS_DMA_IRQHANDLER(void)
 {
-    if(DMA_GetITStatus(GPS_USART_DMA_STREAM,GPS_DMA_IT_HT) )         /* DMA 半传输完成 */
-    {
-      GPS_HalfTransferEnd = 1;                //设置半传输完成标志位
-      DMA_ClearITPendingBit (GPS_USART_DMA_STREAM,GPS_DMA_IT_HT);
-    }
-
-    else if(DMA_GetITStatus(GPS_USART_DMA_STREAM,GPS_DMA_IT_TC))     /* DMA 传输完成 */
-    {
-      GPS_TransferEnd = 1;                    //设置传输完成标志位
-      DMA_ClearITPendingBit(GPS_USART_DMA_STREAM,GPS_DMA_IT_TC);
-    }
+    GPS_DMA_ReceiveIRQ();
 }
 
 /**

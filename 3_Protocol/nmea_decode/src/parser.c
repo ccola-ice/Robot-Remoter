@@ -167,7 +167,7 @@ int nmea_parser_real_push(nmeaPARSER *parser, const char *buff, int buff_sz)
         */
 
     /* add */
-    if(parser->buff_use + buff_sz >= parser->buff_size)
+    if(parser->buff_use + buff_sz > parser->buff_size)
         nmea_parser_buff_clear(parser);
 
     memcpy(parser->buffer + parser->buff_use, buff, buff_sz);
@@ -183,7 +183,7 @@ int nmea_parser_real_push(nmeaPARSER *parser, const char *buff, int buff_sz)
         if(!sen_sz)
         {
             if(nparsed)
-                memcpy(
+                memmove(
                 parser->buffer,
                 parser->buffer + nparsed,
                 parser->buff_use -= nparsed);
@@ -514,22 +514,24 @@ mem_fail:
  */
 int nmea_parser_push(nmeaPARSER *parser, const char *buff, int buff_sz)
 {
-    int nparse, nparsed = 0;
+    int chunk, parsed, nparsed = 0;
 
-    do
+    if(!parser || !parser->buffer || !buff || buff_sz <= 0)
+        return 0;
+    while(buff_sz > 0)
     {
-        if(buff_sz > parser->buff_size)
-            nparse = parser->buff_size;
-        else
-            nparse = buff_sz;
-
-        nparsed += nmea_parser_real_push(
-            parser, buff, nparse);
-
-        buff_sz -= nparse;
-
-    } while(buff_sz);
-
+        if(parser->buff_use >= parser->buff_size)
+            nmea_parser_buff_clear(parser);
+        chunk = parser->buff_size - parser->buff_use;
+        if(chunk > buff_sz)
+            chunk = buff_sz;
+        parsed = nmea_parser_real_push(parser, buff, chunk);
+        if(parsed < 0)
+            return -1;
+        nparsed += parsed;
+        buff += chunk;
+        buff_sz -= chunk;
+    }
     return nparsed;
 }
 

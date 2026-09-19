@@ -1,12 +1,14 @@
 #include "diagnostics.h"
 #include "bsp_fsmc_lcd.h"
 #include "menu.h"
+#include "control_link.h"
 #include "multi_button_user.h"
 #include "gui.h"
 #include "param.h"
 #include "platform_nrf.h"
 #include "bsp_gpio_digital_channel.h"
 #include "ff.h"
+#include "bsp_SysTick.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -113,37 +115,36 @@ static uint8_t param_dirty_before_edit;
 static uint16_t param_revision;
 static GuiRobotTelemetry robot_telemetry;
 
+static unsigned long robot_last_receive_ms;
+static uint8_t robot_telemetry_received;
+
 void menu_robot_telemetry_update(const GuiRobotTelemetry *telemetry)
 {
-    if(telemetry != 0)
-    {
+    if(telemetry != 0) {
         robot_telemetry = *telemetry;
+        robot_telemetry_received = telemetry->link_online != 0U;
+        get_tick_count(&robot_last_receive_ms);
     }
 }
 
-static void menu_robot_telemetry_demo_init(void)
+static void menu_robot_telemetry_reset(void)
 {
     memset(&robot_telemetry, 0, sizeof(robot_telemetry));
-    robot_telemetry.speed_mps = 1.25f;
-    robot_telemetry.position_x_m = 12.3f;
-    robot_telemetry.position_y_m = -4.8f;
-    robot_telemetry.position_z_m = 0.2f;
-    robot_telemetry.acceleration_x_mps2 = 0.08f;
-    robot_telemetry.acceleration_y_mps2 = -0.04f;
-    robot_telemetry.acceleration_z_mps2 = 9.79f;
-    robot_telemetry.roll_deg = 1.8f;
-    robot_telemetry.pitch_deg = -0.7f;
-    robot_telemetry.yaw_deg = 128.6f;
-    robot_telemetry.voltage_v = 24.6f;
-    robot_telemetry.latitude_deg = 31.230416;
-    robot_telemetry.longitude_deg = 121.473701;
-    robot_telemetry.gps_altitude_m = 12.8f;
-    robot_telemetry.packet_count = 1248UL;
-    robot_telemetry.packet_age_ms = 42U;
-    robot_telemetry.battery_percent = 82U;
-    robot_telemetry.satellites = 18U;
-    robot_telemetry.gps_fix = 3U;
-    robot_telemetry.link_online = 1U;
+    robot_telemetry.packet_age_ms = 65535U;
+    robot_telemetry_received = 0U;
+}
+
+static void menu_robot_telemetry_service(void)
+{
+    unsigned long now;
+    uint32_t age;
+    uint8_t was_online = robot_telemetry.link_online;
+    get_tick_count(&now);
+    age = (uint32_t)(now - robot_last_receive_ms);
+    if(!robot_telemetry_received) age = 65535U;
+    robot_telemetry.packet_age_ms = age > 65535U ? 65535U : (uint16_t)age;
+    if(age >= 1000U) robot_telemetry.link_online = 0U;
+    if(was_online != robot_telemetry.link_online) refresh_due = 1U;
 }
 
 static uint8_t menu_nrf_power_index(uint8_t power_register)
@@ -295,7 +296,11 @@ static void menu_handle_nrf_key(MenuKey key)
                 nrf24l01_apply_settings(param.NRF_Mode, param.NRF_Channel,
                                         param.NRF_Power, param.NRF_DataRate);
                 menu_nrf_refresh_runtime();
-                nrf_status = (nrf_runtime_valid != 0U) ? 1U : 4U;
+                nrf_status = (nrf_runtime_valid != 0U &&
+                    nrf_runtime_enabled == nrf_enabled &&
+                    nrf_runtime_channel == nrf_channel &&
+                    nrf_runtime_power_index == nrf_power_index &&
+                    nrf_runtime_data_rate == nrf_data_rate) ? 1U : 4U;
             }
             else
             {
@@ -357,6 +362,13 @@ static void menu_param_adjust_window(void)
     }
 }
 
+static uint8_t menu_param_supported(uint8_t item)
+{
+    return !(item == 2U || item == 4U || item == 5U || item == 6U || item == 7U ||
+             item == 8U || item == 9U || item == 10U || item == 11U ||
+             item == 12U || item == 13U);
+}
+
 static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
 {
     static const char * const on_off_text[2] = {"OFF", "ON"};
@@ -375,19 +387,19 @@ static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
     {
         case 0U:
             strcpy(row->label, "Firmware");
-            sprintf(row->value, "%s / %s", FM_VERSION, FM_TIME);
+            snprintf(row->value, sizeof(row->value), "%s / %s", FM_VERSION, FM_TIME);
             break;
         case 1U:
-            strcpy(row->label, "TX battery warning");
-            sprintf(row->value, "%.1f V", param_edit.warnBatVolt);
+            strcpy(row->label, "TX low voltage cutoff");
+            snprintf(row->value, sizeof(row->value), "%.1f V", param_edit.warnBatVolt);
             break;
         case 2U:
             strcpy(row->label, "RX battery warning");
-            sprintf(row->value, "%.1f V", param_edit.RecWarnBatVolt);
+            snprintf(row->value, sizeof(row->value), "%.1f V", param_edit.RecWarnBatVolt);
             break;
         case 3U:
             strcpy(row->label, "Battery calibration");
-            sprintf(row->value, "%u", param_edit.batVoltAdjust);
+            snprintf(row->value, sizeof(row->value), "%u", param_edit.batVoltAdjust);
             break;
         case 4U:
             strcpy(row->label, "Throttle hand");
@@ -400,7 +412,7 @@ static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
             break;
         case 6U:
             strcpy(row->label, "Trim step");
-            sprintf(row->value, "%u", param_edit.PWMadjustUnit);
+            snprintf(row->value, sizeof(row->value), "%u", param_edit.PWMadjustUnit);
             break;
         case 7U:
             strcpy(row->label, "Key sound");
@@ -416,7 +428,7 @@ static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
             break;
         case 10U:
             strcpy(row->label, "Alarm time");
-            sprintf(row->value, "%u x 5 min", param_edit.clockTime);
+            snprintf(row->value, sizeof(row->value), "%u x 5 min", param_edit.clockTime);
             break;
         case 11U:
             strcpy(row->label, "Startup throttle check");
@@ -424,7 +436,7 @@ static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
             break;
         case 12U:
             strcpy(row->label, "Throttle protect");
-            sprintf(row->value, "%u %%", param_edit.throttleProtect);
+            snprintf(row->value, sizeof(row->value), "%u %%", param_edit.throttleProtect);
             break;
         case 13U:
             strcpy(row->label, "PPM output");
@@ -436,13 +448,13 @@ static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
             break;
         case 15U:
             strcpy(row->label, "NRF channel");
-            sprintf(row->value, "%u / %u MHz", param_edit.NRF_Channel,
+            snprintf(row->value, sizeof(row->value), "%u / %u MHz", param_edit.NRF_Channel,
                     (uint16_t)(2400U + param_edit.NRF_Channel));
             break;
         case 16U:
             strcpy(row->label, "NRF TX power");
             power_index = menu_nrf_power_index(param_edit.NRF_Power);
-            sprintf(row->value, "%d dBm", power_dbm[power_index]);
+            snprintf(row->value, sizeof(row->value), "%d dBm", power_dbm[power_index]);
             break;
         case 17U:
             strcpy(row->label, "NRF air rate");
@@ -460,19 +472,19 @@ static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
                 {
                     case 0U:
                         sprintf(row->label, "CH%u lower limit", channel + 1U);
-                        sprintf(row->value, "%u", param_edit.chLower[channel]);
+                        snprintf(row->value, sizeof(row->value), "%u", param_edit.chLower[channel]);
                         break;
                     case 1U:
                         sprintf(row->label, "CH%u center", channel + 1U);
-                        sprintf(row->value, "%u", param_edit.chMiddle[channel]);
+                        snprintf(row->value, sizeof(row->value), "%u", param_edit.chMiddle[channel]);
                         break;
                     case 2U:
                         sprintf(row->label, "CH%u upper limit", channel + 1U);
-                        sprintf(row->value, "%u", param_edit.chUpper[channel]);
+                        snprintf(row->value, sizeof(row->value), "%u", param_edit.chUpper[channel]);
                         break;
                     case 3U:
                         sprintf(row->label, "CH%u trim", channel + 1U);
-                        sprintf(row->value, "%d", param_edit.PWMadjustValue[channel]);
+                        snprintf(row->value, sizeof(row->value), "%d", param_edit.PWMadjustValue[channel]);
                         break;
                     default:
                         sprintf(row->label, "CH%u reverse", channel + 1U);
@@ -498,6 +510,8 @@ static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
             }
             break;
     }
+    if(!menu_param_supported(item_index))
+        strcpy(row->value, "UNAVAILABLE");
 }
 
 static void menu_param_adjust_float(void *packed_field, int8_t direction,
@@ -820,6 +834,11 @@ static void menu_handle_param_key(MenuKey key)
                 menu_param_set_status("Firmware information is read-only");
                 param_revision++;
             }
+            else if(!menu_param_supported(param_selected_item))
+            {
+                menu_param_set_status("Unavailable; control safety is always enabled");
+                param_revision++;
+            }
             else if(param_selected_item < PARAM_ACTION_START)
             {
                 memcpy(&param_edit_backup, &param_edit, sizeof(param_edit));
@@ -830,6 +849,11 @@ static void menu_handle_param_key(MenuKey key)
             }
             else if(param_selected_item == PARAM_ACTION_START)
             {
+                if(param_sanitize(&param_edit)) {
+                    menu_param_set_status("Invalid values repaired; review before saving");
+                    param_revision++;
+                    break;
+                }
                 param_edit.writeFlag = FM_FLAG;
                 param_edit.version = FM_VERSION;
                 param_edit.version_time = FM_TIME;
@@ -1335,7 +1359,7 @@ void menu_init(void)
     clock_refresh_due = 1U;
     refresh_due = 0;
     current_page = MENU_PAGE_HOME;
-    menu_robot_telemetry_demo_init();
+    menu_robot_telemetry_reset();
     page_dirty = 1;
     page_changed = 1;
 }
@@ -1374,6 +1398,7 @@ void menu_process(void)
 {
     MenuKey key;
 
+    menu_robot_telemetry_service();
     while(menu_get_key(&key))
     {
         if(current_page == MENU_PAGE_HOME)
@@ -1382,6 +1407,7 @@ void menu_process(void)
         }
         else
         {
+            if(current_page == MENU_PAGE_ROBOT_CONTROL) control_link_inhibit();
             menu_handle_page_key(key);
         }
     }
@@ -1406,4 +1432,9 @@ void menu_process(void)
         clock_refresh_due = 0U;
         gui_clock_overlay();
     }
+}
+
+uint8_t menu_control_active(void)
+{
+    return current_page == MENU_PAGE_ROBOT_CONTROL;
 }

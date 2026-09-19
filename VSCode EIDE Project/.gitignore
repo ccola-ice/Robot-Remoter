@@ -13,3 +13,12 @@
 # eide template
 *.ept
 *.eide-template
+
+# Verified repair staging, local build products and rollback copies
+/.repair/
+/.repair-build/
+/.repair-config/
+/.repair-receiver/
+/.repair-receiver-build/
+/.repair-backup/
+/.ui-repair/

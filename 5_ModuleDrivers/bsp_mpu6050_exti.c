@@ -10,7 +10,6 @@ static void NVIC_Configuration(void)
   NVIC_InitTypeDef NVIC_InitStructure;
   
   /* Configure one bit for preemption priority */
-  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_1);
   
   /* ≈‰÷√÷–∂œ‘¥ */
   NVIC_InitStructure.NVIC_IRQChannel = MPU_INT_EXTI_IRQ;

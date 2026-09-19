@@ -12,7 +12,6 @@ static void NVIC_DEBUG_USART_Configuration(void)
   NVIC_InitTypeDef NVIC_InitStructure;
   
   /* 嵌套向量中断控制器组选择 */
-  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
   
   /* 配置UART为中断源 */
   NVIC_InitStructure.NVIC_IRQChannel = DEBUG_USART_IRQ;

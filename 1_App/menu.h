@@ -15,6 +15,7 @@ typedef struct GuiRobotTelemetry GuiRobotTelemetry;
 
 /* Initialize the menu after the LCD is ready. */
 void menu_init(void);
+uint8_t menu_control_active(void);
 
 /* Called by the button callbacks. The event is queued and handled later. */
 void menu_post_key(MenuKey key);

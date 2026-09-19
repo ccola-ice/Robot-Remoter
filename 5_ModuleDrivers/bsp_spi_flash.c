@@ -105,6 +105,7 @@ void FLASH_SPI_Init(void)
 static uint8_t FLASH_Send_Byte(uint8_t byte)
 {
     uint8_t return_data;
+    if(flash_io_error != 0U) return 0xffU;
     
     flash_count_wait =  FLASH_TIME_OUT;
     /* 等待发送缓冲区为空，TXE事件 */
@@ -206,35 +207,24 @@ uint32_t FLASH_Read_FlashID(void)
   * @param  SectorAddr,必须对齐到要擦除的扇区的首地址 0,4096,......
   * @retval 无
   */
-void FLASH_Erase_Sectors(uint32_t SectorAddr)
+void FLASH_Erase_Sectors(uint32_t address)
 {
-    uint8_t addr_low,addr_mid,addr_high;
-    
-    addr_low  = (SectorAddr >> 0)  & 0x000000FF;
-    addr_mid  = (SectorAddr >> 8)  & 0x000000FF;
-    addr_high = (SectorAddr >> 16) & 0x000000FF;
-    
-    /* 写使能 */
+    if(flash_io_error != 0U) return;
+    if(address >= SPI_FLASH_LAYOUT_TOTAL_SIZE ||
+       address % SPI_FLASH_LAYOUT_SECTOR_SIZE != 0UL) {
+        FLASH_Error_CallBack(4U);
+        return;
+    }
+    if(Flash_Wait_For_Standby(3000U) != 0U) return;
     Flash_Write_Enable();
-	if(Flash_Wait_For_Standby(3000U) != 0U) return;
-    
-    /* 擦除扇区 */
-    //拉低CS信号，开始通信
+    if(flash_io_error != 0U) return;
     FLASH_SPI_CS_LOW;
-    
-    //发送擦除扇区指令代码W25X_SectorErase
     FLASH_Send_Byte(W25X_SectorErase);
-    
-    //发送要擦除的地址
-    FLASH_Send_Byte(addr_high);
-    FLASH_Send_Byte(addr_mid);
-    FLASH_Send_Byte(addr_low);
-
-    //拉高CS信号，停止通信
+    FLASH_Send_Byte((uint8_t)(address >> 16));
+    FLASH_Send_Byte((uint8_t)(address >> 8));
+    FLASH_Send_Byte((uint8_t)address);
     FLASH_SPI_CS_HIGH;
-    
-    //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-    if(Flash_Wait_For_Standby(3000U) != 0U) return;    
+    (void)Flash_Wait_For_Standby(3000U);
 }
 
  /**
@@ -245,7 +235,9 @@ void FLASH_Erase_Sectors(uint32_t SectorAddr)
 void FLASH_Erase_Bulk(void)
 {
 	/* 写使能 */
+	if(Flash_Wait_For_Standby(3000U) != 0U) return;
 	Flash_Write_Enable();
+	if(flash_io_error != 0U) return;
 
 	/* 整块 Erase */
 	//拉低CS信号，开始通信
@@ -269,33 +261,22 @@ void FLASH_Erase_Bulk(void)
             size：要读取的数据长度，以字节为单位（最多能读0xFFFFFF=16,777,215个字节）
   * @retval 无
   */
-void FLASH_Read_Data(uint8_t * data,uint32_t ReadAddr,uint16_t size)
+void FLASH_Read_Data(uint8_t *data, uint32_t address, uint16_t size)
 {
-    uint8_t addr_low,addr_mid,addr_high;
-    
-    addr_low  = (ReadAddr >> 0)  & 0x000000FF;
-    addr_mid  = (ReadAddr >> 8)  & 0x000000FF;
-    addr_high = (ReadAddr >> 16) & 0x000000FF;
-    
-    //拉低CS信号，开始通信
-    FLASH_SPI_CS_LOW;
-    
-    //发送指令代码W25X_ReadData
-    FLASH_Send_Byte(W25X_ReadData);
-    
-    //发送要读取数据的地址
-    FLASH_Send_Byte(addr_high);
-    FLASH_Send_Byte(addr_mid);
-    FLASH_Send_Byte(addr_low);
-
-    while(size--)
-    {
-        *data = FLASH_Receive_Byte();
-        data++;
+    if(flash_io_error != 0U || size == 0U) return;
+    if(data == 0 || address >= SPI_FLASH_LAYOUT_TOTAL_SIZE ||
+       (uint32_t)size > SPI_FLASH_LAYOUT_TOTAL_SIZE - address) {
+        FLASH_Error_CallBack(4U);
+        return;
     }
-    
-    //拉高CS信号，停止通信
-    FLASH_SPI_CS_HIGH;     
+    if(Flash_Wait_For_Standby(3000U) != 0U) return;
+    FLASH_SPI_CS_LOW;
+    FLASH_Send_Byte(W25X_ReadData);
+    FLASH_Send_Byte((uint8_t)(address >> 16));
+    FLASH_Send_Byte((uint8_t)(address >> 8));
+    FLASH_Send_Byte((uint8_t)address);
+    while(size-- != 0U && flash_io_error == 0U) *data++ = FLASH_Receive_Byte();
+    FLASH_SPI_CS_HIGH;
 }
 
 
@@ -306,40 +287,26 @@ void FLASH_Read_Data(uint8_t * data,uint32_t ReadAddr,uint16_t size)
             size：要写入的数据长度，以字节为单位 不超过256
   * @retval
   */
-void FLASH_Write_Page_v1(uint32_t addr,uint8_t * data,uint16_t size)
+void FLASH_Write_Page_v1(uint32_t address, uint8_t *data, uint16_t size)
 {
-    uint8_t addr_low,addr_mid,addr_high;
-    
-    addr_low  = (addr >> 0)  & 0x000000FF;
-    addr_mid  = (addr >> 8)  & 0x000000FF;
-    addr_high = (addr >> 16) & 0x000000FF;
-    
-    /* 写使能 */
-    Flash_Write_Enable();
-    
-    //拉低CS信号，开始通信
-    FLASH_SPI_CS_LOW;
-    
-    //发送指令代码W25X_PageProgram
-    FLASH_Send_Byte(W25X_PageProgram);
-    
-    //发送要写入Flash的地址
-    FLASH_Send_Byte(addr_high);
-    FLASH_Send_Byte(addr_mid);
-    FLASH_Send_Byte(addr_low);
-
-    //发送要写入的数据 
-    while(size--)
-    {
-       FLASH_Send_Byte(*data);
-       data++;
+    if(flash_io_error != 0U || size == 0U) return;
+    if(data == 0 || address >= SPI_FLASH_LAYOUT_TOTAL_SIZE ||
+       (uint32_t)size > SPI_FLASH_LAYOUT_TOTAL_SIZE - address ||
+       size > FLASH_PageSize - (address % FLASH_PageSize)) {
+        FLASH_Error_CallBack(4U);
+        return;
     }
-    
-    //拉高CS信号，停止通信
+    if(Flash_Wait_For_Standby(3000U) != 0U) return;
+    Flash_Write_Enable();
+    if(flash_io_error != 0U) return;
+    FLASH_SPI_CS_LOW;
+    FLASH_Send_Byte(W25X_PageProgram);
+    FLASH_Send_Byte((uint8_t)(address >> 16));
+    FLASH_Send_Byte((uint8_t)(address >> 8));
+    FLASH_Send_Byte((uint8_t)address);
+    while(size-- != 0U && flash_io_error == 0U) FLASH_Send_Byte(*data++);
     FLASH_SPI_CS_HIGH;
-    
-    //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-    if(Flash_Wait_For_Standby(3000U) != 0U) return;   
+    (void)Flash_Wait_For_Standby(3000U);
 }
 
 
@@ -350,43 +317,9 @@ void FLASH_Write_Page_v1(uint32_t addr,uint8_t * data,uint16_t size)
             size：要写入的数据长度，长度不受限制，最大4096
   * @retval
   */
-void FLASH_Write_Page_v2(uint32_t addr,uint8_t * data,uint16_t size)
+void FLASH_Write_Page_v2(uint32_t address, uint8_t *data, uint16_t size)
 {
-    uint8_t addr_low,addr_mid,addr_high;
-    
-    while(size--)
-    {
-        addr_low  = (addr >> 0)  & 0x000000FF;
-        addr_mid  = (addr >> 8)  & 0x000000FF;
-        addr_high = (addr >> 16) & 0x000000FF;
-        
-        /* 写使能 */
-        Flash_Write_Enable();
-        
-        //拉低CS信号，开始通信
-        FLASH_SPI_CS_LOW;
-        
-        //发送指令代码W25X_PageProgram
-        FLASH_Send_Byte(W25X_PageProgram);
-        
-        //发送要写入Flash的地址
-        FLASH_Send_Byte(addr_high);
-        FLASH_Send_Byte(addr_mid);
-        FLASH_Send_Byte(addr_low);
-
-        //发送要写入的数据 
-        FLASH_Send_Byte(*data);
-        data++;
-        
-        //因为现在的逻辑是每发送一个字节的数据都先发送该字节的存储单元地址，所以存储单元地址要自增
-        addr++;
-        
-        //拉高CS信号，停止通信
-        FLASH_SPI_CS_HIGH;
-        
-        //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-        if(Flash_Wait_For_Standby(3000U) != 0U) return;
-    }      
+    FLASH_Write_Data(data, address, size);
 }
 
 
@@ -397,65 +330,9 @@ void FLASH_Write_Page_v2(uint32_t addr,uint8_t * data,uint16_t size)
             size：要写入的数据长度，长度不受限制，最大4096
   * @retval
   */
-void FLASH_Write_Page_v3(uint8_t * data,uint32_t WriteAddr,uint16_t size)
+void FLASH_Write_Page_v3(uint8_t *data, uint32_t address, uint16_t size)
 {
-    uint8_t addr_low,addr_mid,addr_high;
-    uint32_t count = 0 ;
-	
-    Flash_Write_Enable();
-    
-	while(size--)
-    {
-        addr_low  = (WriteAddr >> 0)  & 0x000000FF;
-        addr_mid  = (WriteAddr >> 8)  & 0x000000FF;
-        addr_high = (WriteAddr >> 16) & 0x000000FF;
-        
-        count ++;
-        
-		if(size > FLASH_PerWritePageSize)
-		{
-			size = FLASH_PerWritePageSize;
-			FLASH_ERROR("SPI_FLASH_PageWrite too large!");
-		}	
-		
-        //分别在第1,256*1+1,256*2+1,256*3+1...以及addr地址4096对齐时进入if 进行一次W25X_PageProgram操作
-        //其中，除了第一次之外， 后面每次进入if都要先等待内部时序完成，因为Flash规定每写入/擦除256个字节就要等待写入完成，再发送下一次256个字节的命令和首地址。
-        if(count == 1 || (count%256) == 1 || (WriteAddr%4096) == 0)
-        {            
-            /*结束上一次的页写入指令(256个字节)*/
-            //拉高CS信号，停止通信
-            FLASH_SPI_CS_HIGH;
-            
-            /*这里还要加入一次等待写入时序完成，等待上一次256个数据写入的内部时序完成*/
-            //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-            if(Flash_Wait_For_Standby(3000U) != 0U) return;
-            
-            /* 写使能 */
-            Flash_Write_Enable();
-        
-            //拉低CS信号，开始通信
-            FLASH_SPI_CS_LOW;
-        
-            //发送指令代码W25X_PageProgram
-            FLASH_Send_Byte(W25X_PageProgram);
-            
-            //发送要写入Flash的地址
-            FLASH_Send_Byte(addr_high);
-            FLASH_Send_Byte(addr_mid);
-            FLASH_Send_Byte(addr_low);   
-        }
-        
-        //发送要写入的数据 
-        FLASH_Send_Byte(*data);
-        data++;
-        //因为现在的逻辑是每发送一个字节的数据都先发送该字节的存储单元地址，所以存储单元地址要自增
-        WriteAddr++;
-    
-    }
-    //拉高CS信号，停止通信
-    FLASH_SPI_CS_HIGH;
-    //等待内部时序完成 ，W25Q128要求在写入/擦除/其他动作前，需要看W25Q128是否为空闲状态，只有空闲状态才能进行操作。
-    if(Flash_Wait_For_Standby(3000U) != 0U) return;     
+    FLASH_Write_Data(data, address, size);
 }
 
  /**
@@ -465,91 +342,26 @@ void FLASH_Write_Page_v3(uint8_t * data,uint32_t WriteAddr,uint16_t size)
   * @param  size，写入数据长度
   * @retval 无
   */
-void FLASH_Write_Data(uint8_t * data, uint32_t WriteAddr, uint16_t size)
+void FLASH_Write_Data(uint8_t *data, uint32_t address, uint16_t size)
 {
-	  uint8_t NumOfPage = 0, NumOfSingle = 0, Addr = 0, count = 0, temp = 0;
-		
-		/*mod运算求余，若writeAddr是FLASH_PageSize整数倍，运算结果Addr值为0*/
-	  Addr = WriteAddr % FLASH_PageSize;
-		
-		/*差count个数据值，刚好可以对齐到页地址*/
-	  count = FLASH_PageSize - Addr;	
-		/*计算出要写多少整数页*/
-	  NumOfPage =  size / FLASH_PageSize;
-		/*mod运算求余，计算出剩余不满一页的字节数*/
-	  NumOfSingle = size % FLASH_PageSize;
-
-		 /* Addr=0,则WriteAddr 刚好按页对齐 aligned  */
-	  if (Addr == 0) 
-	  {
-			/* size < FLASH_PageSize */
-		if (NumOfPage == 0) 
-		{
-		  FLASH_Write_Page_v3(data, WriteAddr, size);
-		}
-		else /* size > FLASH_PageSize */
-		{
-				/*先把整数页都写了*/
-		  while (NumOfPage--)
-		  {
-			FLASH_Write_Page_v3(data, WriteAddr, FLASH_PageSize);
-			WriteAddr +=  FLASH_PageSize;
-			data += FLASH_PageSize;
-		  }
-				
-				/*若有多余的不满一页的数据，把它写完*/
-		  FLASH_Write_Page_v3(data, WriteAddr, NumOfSingle);
-		}
-	  }
-		/* 若地址与 FLASH_PageSize 不对齐  */
-	  else 
-	  {
-			/* size < FLASH_PageSize */
-		if (NumOfPage == 0) 
-		{
-				/*当前页剩余的count个位置比NumOfSingle小，写不完*/
-		  if (NumOfSingle > count) 
-		  {
-			temp = NumOfSingle - count;
-					
-					/*先写满当前页*/
-			FLASH_Write_Page_v3(data, WriteAddr, count);
-			WriteAddr +=  count;
-			data += count;
-					
-					/*再写剩余的数据*/
-			FLASH_Write_Page_v3(data, WriteAddr, temp);
-		  }
-		  else /*当前页剩余的count个位置能写完NumOfSingle个数据*/
-		  {				
-			FLASH_Write_Page_v3(data, WriteAddr, size);
-		  }
-		}
-		else /* size > FLASH_PageSize */
-		{
-				/*地址不对齐多出的count分开处理，不加入这个运算*/
-		  size -= count;
-		  NumOfPage =  size / FLASH_PageSize;
-		  NumOfSingle = size % FLASH_PageSize;
-
-		  FLASH_Write_Page_v3(data, WriteAddr, count);
-		  WriteAddr +=  count;
-		  data += count;
-				
-				/*把整数页都写了*/
-		  while (NumOfPage--)
-		  {
-			FLASH_Write_Page_v3(data, WriteAddr, FLASH_PageSize);
-			WriteAddr +=  FLASH_PageSize;
-			data += FLASH_PageSize;
-		  }
-				/*若有多余的不满一页的数据，把它写完*/
-		  if (NumOfSingle != 0)
-		  {
-			FLASH_Write_Page_v3(data, WriteAddr, NumOfSingle);
-		  }
-		}
-	  }
+    uint16_t chunk;
+    if(flash_io_error != 0U || size == 0U) return;
+    if(data == 0 || address >= SPI_FLASH_LAYOUT_TOTAL_SIZE ||
+       (uint32_t)size > SPI_FLASH_LAYOUT_TOTAL_SIZE - address) {
+        FLASH_Error_CallBack(4U);
+        return;
+    }
+    while(size != 0U) {
+        /* W25Q128 Page Program wraps within 256 bytes, regardless of the
+         * 4 KiB erase-sector size. Chunk by physical address, not count. */
+        chunk = (uint16_t)(FLASH_PageSize - (address % FLASH_PageSize));
+        if(chunk > size) chunk = size;
+        FLASH_Write_Page_v1(address, data, chunk);
+        if(flash_io_error != 0U) return;
+        address += chunk;
+        data += chunk;
+        size = (uint16_t)(size - chunk);
+    }
 }
 
 //进入掉电模式
@@ -586,14 +398,16 @@ void FLASH_Wakeup(void)
   */
 static void Flash_Write_Enable(void)
 {
-    //拉低CS信号，开始通信
+    uint8_t status;
+    if(flash_io_error != 0U) return;
     FLASH_SPI_CS_LOW;
-    
-    //指令代码W25X_WriteEnable
     FLASH_Send_Byte(W25X_WriteEnable);
-
-    //拉高CS信号，停止通信
     FLASH_SPI_CS_HIGH;
+    FLASH_SPI_CS_LOW;
+    FLASH_Send_Byte(W25X_ReadStatusReg);
+    status = FLASH_Receive_Byte();
+    FLASH_SPI_CS_HIGH;
+    if(flash_io_error == 0U && (status & 0x02U) == 0U) FLASH_Error_CallBack(5U);
 }
 
 

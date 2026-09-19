@@ -376,6 +376,8 @@ SD_Error SD_SendStatus(uint32_t *pcardstatus);
 SD_Error SD_SendSDStatus(uint32_t *psdstatus);
 SD_Error SD_ProcessIRQSrc(void);
 void SD_ProcessDMAIRQ(void);
+void SD_AbortTransfer(void);
+SD_Error SD_WaitReady(void);
 SD_Error SD_WaitReadOperation(void);
 SD_Error SD_WaitWriteOperation(void);
 SD_Error SD_HighSpeed(void);
