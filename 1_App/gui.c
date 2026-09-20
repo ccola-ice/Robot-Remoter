@@ -1,4 +1,5 @@
 #include "gui.h"
+#include "menu_catalog.h"
 #include "gui_analog_filter.h"
 #include "gui_robot_filter.h"
 #include "nmea_decode_test.h"
@@ -352,7 +353,9 @@ static void gui_draw_channel_card(uint16_t x, uint16_t y, uint8_t channel,
 		ILI9806G_DrawRectangle(x, y, 392U, 46U, 1U);
 		LCD_SetBackColor(GREY);
 		LCD_SetTextColor(BLACK);
-		snprintf(displayBuffer, sizeof(displayBuffer), "CH%02u", (uint16_t)(channel + 1U));
+		if(channel == 6U) strcpy(displayBuffer, "BAT");
+        else snprintf(displayBuffer, sizeof(displayBuffer), "A%02u",
+                      (unsigned)(channel < 6U ? channel + 1U : channel));
 		ILI9806G_DispString_EN(x + 8U, y + 7U, displayBuffer);
 	}
 
@@ -507,136 +510,125 @@ void system_basic_information(void)
 	ILI9806G_DispString_EN(4U, LINE(14), "Live values from current linker image");
 }
 
+void menu_group_page(uint8_t selected_group)
+{
+    static const char * const titles[3] = {"CONTROL", "SETUP", "TOOLS"};
+    static const char * const hints[3] = {
+        "Robot control / channel monitor / digital inputs",
+        "Parameters / calibration values / wireless settings",
+        "System / IMU / GPS / files / hardware tests / EEPROM"
+    };
+    static uint8_t previous = 0xffU;
+    uint8_t i, first = display_flag != 0U;
+    uint16_t y;
+    if(selected_group >= MENU_GROUP_COUNT) selected_group = 0U;
+    if(first) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        LCD_SetTextColor(BLUE);
+        ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
+        LCD_SetFont(&Font16x32);
+        LCD_SetBackColor(BLUE);
+        LCD_SetTextColor(WHITE);
+        ILI9806G_DispString_EN(20U, 0U, "ROBOT REMOTE");
+        LCD_SetFont(&Font8x16);
+        ILI9806G_DispString_EN(20U, 40U, "Select a category to open its functions");
+        gui_clear_page_content();
+    }
+    for(i = 0U; i < MENU_GROUP_COUNT; i++) {
+        y = 80U + (uint16_t)i * 104U;
+        if(first) {
+            LCD_SetTextColor(GREY);
+            ILI9806G_DrawRectangle(4U, y, 792U, 92U, 1U);
+            LCD_SetFont(&Font16x32);
+            LCD_SetBackColor(GREY);
+            LCD_SetTextColor(BLACK);
+            snprintf(displayBuffer, sizeof(displayBuffer), "%02u  %s", i + 1U, titles[i]);
+            ILI9806G_DispString_EN(28U, y + 8U, displayBuffer);
+            LCD_SetFont(&Font8x16);
+            ILI9806G_DispString_EN(92U, y + 54U, (char *)hints[i]);
+            snprintf(displayBuffer, sizeof(displayBuffer), "%u functions", menu_group_count(i));
+            ILI9806G_DispString_EN(676U, y + 14U, displayBuffer);
+        }
+        if(first || i == selected_group || i == previous) {
+            LCD_SetTextColor(i == selected_group ? BLUE : GREY);
+            ILI9806G_DrawRectangle(8U, y + 4U, 8U, 84U, 1U);
+            LCD_SetTextColor(i == selected_group ? BLUE : BLACK);
+            ILI9806G_DrawRectangle(4U, y, 792U, 92U, 0U);
+        }
+    }
+    if(first) {
+        LCD_SetFont(&Font16x32);
+        LCD_SetBackColor(WHITE);
+        LCD_SetTextColor(BLUE);
+        ILI9806G_DispString_EN(12U, 400U, "LEFT/RIGHT: Select    OK: Open");
+        gui_boot_menu_badge();
+    }
+    LCD_SetBackColor(WHITE);
+    LCD_SetTextColor(BLACK);
+    previous = selected_group;
+}
+
 void main_menu(uint8_t selected_item)
 {
-	static uint8_t last_selected_item = 0xffU;
-	static const char *menu_text[11] =
-	{
-		"System Information",
-		"Channel Monitor",
-		"Digital Inputs",
-		"IMU / MPU6050",
-		"GPS / BDS",
-		"NRF Wireless",
-		"File Browser",
-		"Parameter Settings",
-        "Hardware Tests",
-        "EEPROM",
-        "Robot Control"
-	};
-	static const char *menu_hint[11] =
-	{
-		"Memory / firmware",
-		"10 analog channels",
-		"6 buttons / toggle channels",
-		"Live attitude / motion",
-		"Position / satellites",
-		"Radio setup / status",
-		"Browse SD card files",
-		"View / edit / save settings",
-        "Run operator / fixture tests",
-        "Read / edit AT24C08 safe window",
-        "Live NRF robot telemetry"
-	};
-	uint8_t i;
-	uint16_t card_x;
-	uint16_t card_y;
-	uint16_t card_width;
-	uint16_t card_height;
-	uint8_t first_draw = 0U;
-
-	if(selected_item >= 11U)
-	{
-		selected_item = 0U;
-	}
-
-	if(display_flag == 1 || last_selected_item / 10U != selected_item / 10U)
-	{
-		display_flag = 0;
-		GTP_IRQ_Disable();
-		first_draw = 1U;
-		last_selected_item = 0xffU;
-	}
-	
-	LCD_SetFont(&Font16x32);
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(BLUE);
-		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-		LCD_SetBackColor(BLUE);
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DispString_EN(20U, 0U, "REMOTER CONTROL CENTER");
-		ILI9806G_DispString_EN(20U, 32U, "LEFT/RIGHT: Select     OK: Enter");
-		gui_clear_page_content();
-	}
-
-	for(i = (selected_item / 10U) * 10U; i < 11U && i < (selected_item / 10U + 1U) * 10U; i++)
-	{
-		card_x = ((i & 1U) == 0U) ? 4U : 404U;
-		card_y = 72U + (uint16_t)((i % 10U) / 2U) * 66U;
-		card_width = 392U;
-		card_height = 60U;
-
-		if(first_draw != 0U)
-		{
-			LCD_SetTextColor(GREY);
-			ILI9806G_DrawRectangle(card_x, card_y, card_width, card_height, 1U);
-			LCD_SetBackColor(GREY);
-			LCD_SetTextColor(BLACK);
-			LCD_SetFont(&Font16x32);
-			snprintf(displayBuffer, sizeof(displayBuffer), "%u. %-18.18s",
-					(uint16_t)(i + 1U), menu_text[i]);
-			ILI9806G_DispString_EN(card_x + 20U, card_y, displayBuffer);
-			LCD_SetFont(&Font8x16);
-			snprintf(displayBuffer, sizeof(displayBuffer), "%-40.40s", menu_hint[i]);
-			ILI9806G_DispString_EN(card_x + 20U, card_y + 38U, displayBuffer);
-		}
-
-		if((first_draw != 0U) || (i == selected_item) ||
-		   (i == last_selected_item))
-		{
-			/* A narrow indicator and outline avoid tearing from full-card fills. */
-			LCD_SetTextColor((i == selected_item) ? BLUE : GREY);
-			ILI9806G_DrawRectangle(card_x + 4U, card_y + 4U,
-							  8U, card_height - 8U, 1U);
-			LCD_SetTextColor((i == selected_item) ? BLUE : BLACK);
-			ILI9806G_DrawRectangle(card_x, card_y, card_width, card_height, 0U);
-		}
-	}
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DrawRectangle(396U, 72U, 8U, 324U, 1U);
-		if(selected_item < 10U)
-		{
-			for(i = 0U; i < 4U; i++)
-			{
-				ILI9806G_DrawRectangle(4U, 132U + (uint16_t)i * 66U,
-								  792U, 6U, 1U);
-			}
-		}
-		else
-		{
-			ILI9806G_DrawRectangle(404U, 72U, 392U, 60U, 1U);
-			ILI9806G_DrawRectangle(4U, 138U, 792U, 258U, 1U);
-		}
-		ILI9806G_DrawRectangle(4U, 396U, 792U, 20U, 1U);
-		ILI9806G_DrawRectangle(4U, 448U, 792U, 32U, 1U);
-	}
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetBackColor(WHITE);
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DrawRectangle(4U, 416U, 792U, 32U, 1U);
-	}
-	LCD_SetTextColor(BLUE);
-	snprintf(displayBuffer, sizeof(displayBuffer), "Selected: %2u / 11    Page %u/2",
-			(uint16_t)(selected_item + 1U), (uint16_t)(selected_item / 10U + 1U));
-	ILI9806G_DispString_EN(4U, 416U, displayBuffer);
-	if(first_draw != 0U) gui_boot_menu_badge();
-	last_selected_item = selected_item;
+#define MENU_LABEL(page, label, hint) label,
+    static const char * const labels[] = { MENU_ENTRY_LIST(MENU_LABEL) };
+#undef MENU_LABEL
+#define MENU_HINT(page, label, hint) hint,
+    static const char * const hints[] = { MENU_ENTRY_LIST(MENU_HINT) };
+#undef MENU_HINT
+    static const char * const groups[3] = {"CONTROL", "SETUP", "TOOLS"};
+    static uint8_t previous = 0xffU;
+    uint8_t group, first_entry, count, i, entry, first;
+    uint16_t x, y;
+    if(selected_item >= MENU_ENTRY_COUNT) selected_item = 0U;
+    group = menu_entry_group(selected_item);
+    first_entry = menu_group_first(group);
+    count = menu_group_count(group);
+    first = display_flag != 0U || previous == 0xffU || menu_entry_group(previous) != group;
+    if(first) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        LCD_SetTextColor(BLUE);
+        ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
+        LCD_SetBackColor(BLUE);
+        LCD_SetFont(&Font16x32);
+        LCD_SetTextColor(WHITE);
+        snprintf(displayBuffer, sizeof(displayBuffer), "REMOTER / %s", groups[group]);
+        ILI9806G_DispString_EN(20U, 0U, displayBuffer);
+        LCD_SetFont(&Font8x16);
+        ILI9806G_DispString_EN(20U, 40U, "LEFT/RIGHT: Select   OK: Enter   BACK: Categories");
+        gui_clear_page_band(64U, 416U);
+    }
+    for(i = 0U; i < count; i++) {
+        entry = first_entry + i;
+        x = (i & 1U) ? 404U : 4U;
+        y = 80U + (uint16_t)(i / 2U) * 104U;
+        if(first) {
+            LCD_SetTextColor(GREY);
+            ILI9806G_DrawRectangle(x, y, 392U, 92U, 1U);
+            LCD_SetBackColor(GREY);
+            LCD_SetTextColor(BLACK);
+            LCD_SetFont(&Font16x32);
+            ILI9806G_DispString_EN(x + 24U, y + 8U, (char *)labels[entry]);
+            LCD_SetFont(&Font8x16);
+            snprintf(displayBuffer, sizeof(displayBuffer), "%-45.45s", hints[entry]);
+            ILI9806G_DispString_EN(x + 24U, y + 56U, displayBuffer);
+        }
+        if(first || entry == selected_item || entry == previous) {
+            LCD_SetTextColor(entry == selected_item ? BLUE : GREY);
+            ILI9806G_DrawRectangle(x + 4U, y + 4U, 8U, 84U, 1U);
+            LCD_SetTextColor(entry == selected_item ? BLUE : BLACK);
+            ILI9806G_DrawRectangle(x, y, 392U, 92U, 0U);
+        }
+    }
+    LCD_SetFont(&Font16x32);
+    LCD_SetBackColor(WHITE);
+    LCD_SetTextColor(BLUE);
+    snprintf(displayBuffer, sizeof(displayBuffer), "Selected: %u / %u    BACK: Categories", selected_item - first_entry + 1U, count);
+    ILI9806G_DispString_EN(12U, 400U, displayBuffer);
+    if(first) gui_boot_menu_badge();
+    previous = selected_item;
 }
 
 void digital_channel_monitor_page(const uint8_t *raw_values,
@@ -1797,7 +1789,7 @@ void channel_monitor_page(void)
 		LCD_SetBackColor(BLUE);
 		LCD_SetTextColor(WHITE);
 		ILI9806G_DispString_EN(20U, 0U, "CHANNEL MONITOR");
-		ILI9806G_DispString_EN(20U, 32U, "10 analog inputs / filtered live view");
+		ILI9806G_DispString_EN(20U, 32U, "RAW: A01..A09 + BAT / A09 is a button");
 		gui_clear_page_content();
 	}
 
@@ -1825,11 +1817,118 @@ void channel_monitor_page(void)
 		LCD_SetTextColor(BLUE);
 		LCD_SetFont(&Font16x32);
 		ILI9806G_DispString_EN(4U, 424U,
-			"0..4095  Red=center 2048  BACK=Exit");
+			"LEFT/RIGHT/OK: Output view  BACK: Up");
 	}
 
 	LCD_SetBackColor(WHITE);
 	LCD_SetTextColor(BLACK);
+}
+
+/* Input values come from the same sample and normalization as the control task.
+ * TX fields show the last packet queued to the radio, never a GUI reconstruction. */
+void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
+{
+    static const char * const names[6] = {"A1", "A2 Y", "A3 X", "A4", "A5", "A6 YAW"};
+    static ControlLinkSnapshot previous;
+    static uint8_t previous_reverse[6];
+    static uint16_t bar_width[6];
+    static uint32_t text_ms;
+    unsigned long now;
+    uint8_t first = display_flag != 0U, i, update_text;
+    uint16_t y;
+    int16_t value;
+    if(!snapshot) return;
+    get_tick_count(&now);
+    update_text = first || (uint32_t)(now - text_ms) >= 100U;
+    if(first) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        LCD_SetTextColor(BLUE);
+        ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
+        LCD_SetFont(&Font16x32);
+        LCD_SetBackColor(BLUE);
+        LCD_SetTextColor(WHITE);
+        ILI9806G_DispString_EN(20U, 0U, "CHANNEL MONITOR / OUTPUT");
+        LCD_SetFont(&Font8x16);
+        ILI9806G_DispString_EN(20U, 40U, "LEFT/RIGHT/OK: Raw view   BACK: Up");
+        gui_clear_page_content();
+        LCD_SetTextColor(GREY);
+        ILI9806G_DrawRectangle(4U, 80U, 448U, 300U, 1U);
+        ILI9806G_DrawRectangle(468U, 80U, 328U, 300U, 1U);
+        LCD_SetBackColor(GREY);
+        LCD_SetTextColor(BLUE);
+        ILI9806G_DispString_EN(16U, 86U, "INPUT      RAW     CALIBRATED   REV");
+        ILI9806G_DispString_EN(480U, 86U, "LAST QUEUED RC v1 FRAME");
+        LCD_SetBackColor(WHITE);
+        LCD_SetTextColor(BLACK);
+        ILI9806G_DispString_EN(12U, 420U, "Input: endpoints -> trim -> reverse -> clamp -> 5% deadband");
+        ILI9806G_DispString_EN(12U, 444U, "TX: X=-A3  Y=A2  Heading=-A6(%) x 1.8 deg    Radio ACK is not execution feedback");
+        ILI9806G_DispString_EN(12U, 464U, "A7/A8/A9 and battery are in RAW view. This monitor cannot arm the robot.");
+    }
+    LCD_SetFont(&Font8x16);
+    for(i = 0U; i < 6U; i++) {
+        y = 112U + (uint16_t)i * 44U;
+        value = snapshot->calibrated[i];
+        if(value > 1000) value = 1000;
+        if(value < -1000) value = -1000;
+        LCD_SetBackColor(GREY);
+        LCD_SetTextColor(BLACK);
+        if(first) ILI9806G_DispString_EN(16U, y, (char *)names[i]);
+        if(update_text && (first || snapshot->raw[i] != previous.raw[i] ||
+           value != previous.calibrated[i] || param.chReverse[i] != previous_reverse[i])) {
+            snprintf(displayBuffer, sizeof(displayBuffer), "%4u    %c%3u.%u%%      %s",
+                snapshot->raw[i], value < 0 ? '-' : '+',
+                (unsigned)(value < 0 ? -value : value) / 10U,
+                (unsigned)(value < 0 ? -value : value) % 10U,
+                param.chReverse[i] ? "ON " : "OFF");
+            ILI9806G_DispString_EN(104U, y, displayBuffer);
+            previous.raw[i] = snapshot->raw[i];
+            previous.calibrated[i] = value;
+            previous_reverse[i] = param.chReverse[i];
+        }
+        gui_update_progress_bar(104U, y + 20U, 328U, 12U,
+            (uint32_t)(value + 1000) / 2U, BLUE2, &bar_width[i], first);
+        LCD_SetTextColor(RED);
+        ILI9806G_DrawLine(268U, y + 18U, 268U, y + 33U);
+    }
+    if(update_text) {
+        LCD_SetBackColor(GREY);
+        LCD_SetTextColor(snapshot->sent && snapshot->tx_age_ms <= 100U ? BLUE : RED);
+        snprintf(displayBuffer, sizeof(displayBuffer), "%-36s", !snapshot->sent ? "NOT SENT" :
+            snapshot->tx_age_ms > 100U ? "STALE / LAST PACKET ONLY" :
+            snapshot->transmitted.armed ? "ARMED IN LAST PACKET" : "DISARMED / ZERO MOTION");
+        ILI9806G_DispString_EN(480U, 112U, displayBuffer);
+        LCD_SetTextColor(BLACK);
+        snprintf(displayBuffer, sizeof(displayBuffer), "Seq:%5u     age:%5u ms   ",
+            snapshot->transmitted.sequence, snapshot->tx_age_ms);
+        ILI9806G_DispString_EN(480U, 144U, displayBuffer);
+        snprintf(displayBuffer, sizeof(displayBuffer), "X:%+5d   Y:%+5d             ",
+            snapshot->transmitted.x, snapshot->transmitted.y);
+        ILI9806G_DispString_EN(480U, 176U, displayBuffer);
+        snprintf(displayBuffer, sizeof(displayBuffer), "Heading:%+5d x0.1 deg       ", snapshot->transmitted.heading);
+        ILI9806G_DispString_EN(480U, 208U, displayBuffer);
+        snprintf(displayBuffer, sizeof(displayBuffer), "Limit:%4u  DCH:0x%02X       ",
+            snapshot->transmitted.limit, snapshot->transmitted.digital);
+        ILI9806G_DispString_EN(480U, 240U, displayBuffer);
+        if(snapshot->ack_seen)
+            snprintf(displayBuffer, sizeof(displayBuffer), "Radio ACK age: %5u ms       ", snapshot->ack_age_ms);
+        else snprintf(displayBuffer, sizeof(displayBuffer), "%-36s", "Radio ACK: NONE");
+        ILI9806G_DispString_EN(480U, 272U, displayBuffer);
+        snprintf(displayBuffer, sizeof(displayBuffer), "Sent:%10lu ACK:%10lu",
+            (unsigned long)snapshot->tx_started, (unsigned long)snapshot->tx_acked);
+        ILI9806G_DispString_EN(480U, 304U, displayBuffer);
+        snprintf(displayBuffer, sizeof(displayBuffer), "Failed:%10lu                 ", (unsigned long)snapshot->tx_failed);
+        ILI9806G_DispString_EN(480U, 336U, displayBuffer);
+        LCD_SetBackColor(WHITE);
+        LCD_SetTextColor(snapshot->sampled && snapshot->input_fresh && snapshot->sample_age_ms <= 100U ? BLUE : RED);
+        snprintf(displayBuffer, sizeof(displayBuffer), "Input: %-10s age:%5u ms   %-40.40s",
+            !snapshot->sampled ? "NO SAMPLE" : !snapshot->input_fresh || snapshot->sample_age_ms > 100U ? "STALE" : "LIVE",
+            snapshot->sample_age_ms, control_link_status());
+        ILI9806G_DispString_EN(12U, 394U, displayBuffer);
+        text_ms = (uint32_t)now;
+    }
+    LCD_SetBackColor(WHITE);
+    LCD_SetTextColor(BLACK);
 }
 
 void imu6050_information(void)

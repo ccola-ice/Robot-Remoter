@@ -22,6 +22,7 @@ static struct { uint32_t CR; } dma = {1U};
 #define DUAL_ADC1_DMA_STREAM (&dma)
 static uint32_t mock_now, mock_flags = 1U;
 static uint8_t mock_button = 1U, mock_raw = 1U, mock_result = TX_DS, mock_error;
+static uint8_t mock_start = 1U;
 static uint8_t sent[32];
 static unsigned sent_count;
 static uint32_t mock_generation;
@@ -32,7 +33,7 @@ static uint8_t NRF_GetIoError(void) { return mock_error; }
 static uint32_t NRF_GetConfigGeneration(void) { return mock_generation; }
 static void NRF_TxCancel(void) {}
 static uint8_t NRF_TxPoll(void) { return mock_result; }
-static uint8_t NRF_TxStart(uint8_t *p) { memcpy(sent,p,32); sent_count++; return 1U; }
+static uint8_t NRF_TxStart(uint8_t *p) { if(!mock_start) return 0U; memcpy(sent,p,32); sent_count++; return 1U; }
 #define DMA_GetFlagStatus(stream, flags) ((mock_flags & (flags)) != 0U)
 #define DMA_ClearFlag(stream, flags) (mock_flags &= ~(flags))
 static uint8_t digital_channel_get_stable(uint8_t i) { return i ? 1U : mock_button; }
@@ -42,9 +43,15 @@ static uint8_t GPIO_ReadInputDataBit(unsigned p, unsigned pin) { (void)p;(void)p
 static RobotControlCommand step(uint32_t delta, uint8_t page)
 {
     RobotControlCommand decoded;
+    ControlLinkSnapshot snapshot;
+    uint8_t observed[ROBOT_PACKET_SIZE];
     mock_now += delta; mock_flags = 1U;
     control_link_service(page);
     assert(robot_packet_decode(sent,&decoded));
+    control_link_get_snapshot(&snapshot);
+    assert(snapshot.sent);
+    robot_packet_encode(observed, &snapshot.transmitted);
+    assert(memcmp(observed, sent, sizeof(observed)) == 0);
     return decoded;
 }
 static void neutral_ready(void)
@@ -58,6 +65,89 @@ static void arm(void)
 {
     neutral_ready(); mock_button = mock_raw = 0U;
     assert(step(20,1).armed);
+}
+
+static void test_monitor_snapshot(void)
+{
+    ControlLinkSnapshot snapshot;
+    unsigned i, sends;
+    uint32_t flags;
+    mock_now = 100U;
+    mock_error = 0U;
+    mock_result = TX_DS;
+    mock_button = mock_raw = 1U;
+    param.NRF_Mode = 1U;
+    for(i = 0U; i < 8U; i++) {
+        param.chLower[i] = 0U; param.chMiddle[i] = 2000U; param.chUpper[i] = 4000U;
+        param.PWMadjustValue[i] = 0; param.chReverse[i] = 0U;
+    }
+    ADC1_Value[0] = 1000U;
+    ADC1_Value[1] = 2010U; /* Inside the control deadband. */
+    ADC1_Value[2] = 4000U;
+    ADC1_Value[3] = 0U;
+    ADC1_Value[4] = 4095U; /* Clamp beyond calibrated endpoint. */
+    ADC1_Value[5] = 2500U;
+    ADC1_Value[6] = 2600U; /* Battery is excluded from calibrated axes. */
+    param.PWMadjustValue[2] = -100;
+    param.chReverse[2] = 1U;
+    param.chMiddle[5] = 1000U; /* Asymmetric travel. */
+    control_link_init(1U);
+    control_link_get_snapshot(&snapshot);
+    assert(!snapshot.sampled && !snapshot.sent && !snapshot.ack_seen);
+    assert(snapshot.sample_age_ms == 65535U && snapshot.tx_age_ms == 65535U && snapshot.ack_age_ms == 65535U);
+    mock_start = 0U;
+    mock_now += 20U; mock_flags = 1U; control_link_service(0U);
+    control_link_get_snapshot(&snapshot);
+    assert(!snapshot.sent && snapshot.tx_started == 0U && snapshot.tx_age_ms == 65535U);
+    mock_start = 1U;
+    step(20U, 0U); /* Monitor is never a control page. */
+    control_link_get_snapshot(&snapshot);
+    assert(snapshot.sampled && snapshot.input_fresh && snapshot.sent && !snapshot.ack_seen);
+    assert(snapshot.calibrated[0] == -500 && snapshot.calibrated[1] == 0);
+    assert(snapshot.calibrated[2] == -900 && snapshot.calibrated[3] == -1000);
+    assert(snapshot.calibrated[4] == 1000 && snapshot.calibrated[5] == 500);
+    assert(snapshot.raw[5] == 2500U && snapshot.tx_started == 1U);
+    assert(!snapshot.transmitted.armed && !snapshot.transmitted.x && !snapshot.transmitted.heading);
+    sends = sent_count;
+    flags = mock_flags;
+    mock_now += 7U;
+    for(i = 0U; i < 10U; i++) control_link_get_snapshot(&snapshot);
+    control_link_get_snapshot(0);
+    assert(sent_count == sends && mock_flags == flags && !safety.armed);
+    assert(snapshot.sample_age_ms == 7U && snapshot.tx_age_ms == 7U && snapshot.tx_acked == 0U);
+    step(20U, 0U);
+    control_link_get_snapshot(&snapshot);
+    assert(snapshot.ack_seen && snapshot.ack_age_ms == 0U && snapshot.tx_acked == 1U && snapshot.tx_started == 2U);
+    mock_result = 0U;
+    step(20U, 0U);
+    control_link_get_snapshot(&snapshot);
+    assert(snapshot.tx_failed == 1U && snapshot.tx_acked == 1U);
+    mock_start = 0U;
+    step(20U, 0U);
+    control_link_get_snapshot(&snapshot);
+    assert(snapshot.tx_started == 3U && snapshot.tx_age_ms == 20U);
+    mock_start = 1U;
+    mock_now += 20U; mock_flags = 0U; control_link_service(0U);
+    control_link_get_snapshot(&snapshot);
+    assert(!snapshot.input_fresh && snapshot.sample_age_ms == 0U);
+    param.NRF_Mode = 0U;
+    mock_now++; control_link_service(0U);
+    control_link_get_snapshot(&snapshot);
+    assert(!snapshot.ack_seen && snapshot.ack_age_ms == 65535U);
+    mock_now += 70000U;
+    control_link_get_snapshot(&snapshot);
+    assert(snapshot.sample_age_ms == 65535U && snapshot.tx_age_ms == 65535U);
+    mock_now = UINT32_MAX - 10U;
+    param.NRF_Mode = 1U;
+    control_link_init(1U);
+    step(20U, 0U);
+    mock_now += 25U;
+    control_link_get_snapshot(&snapshot);
+    assert(snapshot.sample_age_ms == 25U && snapshot.tx_age_ms == 25U);
+    /* Invalid calibration never appears as a valid deflection. */
+    assert(channel_input_normalize(65535U, 0U, 2000U, 4000U, 0, 0U) == 0);
+    assert(channel_input_normalize(2000U, 2000U, 2000U, 4000U, 0, 0U) == 0);
+    assert(channel_input_normalize(2000U, 0U, 2000U, 4000U, INT32_MAX, 0U) == 0);
 }
 int main(void)
 {
@@ -106,6 +196,8 @@ int main(void)
     control_link_init(0U); neutral_ready();mock_button=mock_raw=0U;assert(!step(20,1).armed);
     mock_now=UINT32_MAX-300U;control_link_init(1U); arm();assert(safety.armed);
     assert(sent_count>0U);
+    test_monitor_snapshot();
     puts("control protocol/arming/ACK loss/DMA freeze/battery/stall/rollover: PASS");
+    puts("monitor snapshot: exact transmitted bytes, normalization, read-only access, stale input, ACKs and rollover: PASS");
     return 0;
 }

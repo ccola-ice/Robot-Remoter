@@ -1,4 +1,4 @@
-param([string]$Compiler = 'gcc')
+param([string]$Compiler = 'gcc', [string]$PreviewDirectory = '')
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('remoter-lcd-page-' + [guid]::NewGuid().ToString('N'))
@@ -28,11 +28,13 @@ try {
         'ILI9806G_DrawCircle', 'ILI9806G_DispChar_EN', 'ILI9806G_DispString_EN',
         'LCD_SetFont', 'LCD_SetTextColor', 'LCD_SetBackColor')
     $forward = 'void ILI9806G_OpenWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h); static __inline void ILI9806G_FillColor(uint32_t count, uint16_t color);'
+    $drawFunctions = $drawFunctions.Replace('ILI9806G_DispString_EN', 'lcd_real_DispString_EN')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_driver.inc'), ($forward + [Environment]::NewLine + $block + $drawFunctions))
     $gui = [IO.File]::ReadAllText((Join-Path $repo '1_App/gui.c'), $enc)
     $mapping = ([regex]::Matches($gui, '(?m)^#define ROBOT_\w+[^\r\n]*') | ForEach-Object { $_.Value }) -join [Environment]::NewLine
     $guiFunctions = Get-Functions $gui @('gui_prepare_page', 'gui_clear_page_band', 'gui_clear_page_content',
-        'gui_update_progress_bar', 'gui_draw_channel_card', 'main_menu', 'channel_monitor_page',
+        'gui_update_progress_bar', 'gui_draw_channel_card', 'menu_group_page', 'main_menu',
+        'channel_monitor_page', 'channel_output_monitor_page',
         'gui_robot_card', 'gui_robot_stick_value', 'gui_robot_text', 'gui_robot_dot_patch', 'gui_robot_draw_stick', 'robot_control_page')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_gui.inc'), ($mapping + [Environment]::NewLine + $guiFunctions))
     $diag = [IO.File]::ReadAllText((Join-Path $repo '1_App/diagnostics.c'), $enc)
@@ -55,7 +57,10 @@ static void FLASH_Read_Data(uint8_t *buffer, unsigned address, unsigned size)
     $exe = Join-Path $temp 'lcd-page-test.exe'
     & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-finput-charset=GBK' '-fexec-charset=GBK' '-I' $temp '-I' (Join-Path $repo '1_App') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') '-o' $exe
     if($LASTEXITCODE -ne 0) { throw 'LCD page test compilation failed.' }
-    & $exe
+    if ($PreviewDirectory) {
+        [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($PreviewDirectory)) | Out-Null
+        & $exe ([IO.Path]::GetFullPath($PreviewDirectory))
+    } else { & $exe }
     if($LASTEXITCODE -ne 0) { throw 'LCD page tests failed.' }
 } finally {
     $resolved = [IO.Path]::GetFullPath($temp)

@@ -1,5 +1,6 @@
 #include "control_link.h"
 #include "control_safety.h"
+#include "channel_input.h"
 #include "robot_control_protocol.h"
 #include "param.h"
 #include "bsp_spi_nrf.h"
@@ -14,22 +15,14 @@ static uint32_t radio_generation;
 static uint16_t sequence;
 static uint8_t boot_ok, busy, ack_seen;
 static const char *status_text = "BOOT LOCK";
+static ControlLinkSnapshot monitor;
+static uint32_t monitor_sample_ms, monitor_tx_ms;
 
 static int16_t control_axis(uint16_t raw, uint8_t channel)
 {
-    int32_t value;
-    uint16_t lower = param.chLower[channel], middle = param.chMiddle[channel];
-    uint16_t upper = param.chUpper[channel];
-    if(raw > 4095U || lower >= middle || middle >= upper || upper > 4095U)
-        return 0;
-    if(raw >= middle) value = ((int32_t)raw - middle) * 1000L / (upper - middle);
-    else value = -((int32_t)middle - raw) * 1000L / (middle - lower);
-    value += param.PWMadjustValue[channel]; /* normalized trim, 1000 = full scale */
-    if(param.chReverse[channel]) value = -value;
-    if(value > 1000) value = 1000;
-    if(value < -1000) value = -1000;
-    if(value >= -50 && value <= 50) value = 0;
-    return (int16_t)value;
+    return channel_input_normalize(raw, param.chLower[channel],
+        param.chMiddle[channel], param.chUpper[channel],
+        param.PWMadjustValue[channel], param.chReverse[channel]);
 }
 
 void control_link_init(uint8_t boot_permitted)
@@ -37,12 +30,32 @@ void control_link_init(uint8_t boot_permitted)
     unsigned long now;
     get_tick_count(&now);
     memset(&safety, 0, sizeof(safety));
+    memset(&monitor, 0, sizeof(monitor));
+    status_text = "BOOT LOCK";
     last_send = last_service = (uint32_t)now;
     sequence = 0U; busy = ack_seen = 0U; boot_ok = boot_permitted;
     radio_generation = NRF_GetConfigGeneration();
 }
 
 const char *control_link_status(void) { return status_text; }
+
+static uint16_t control_monitor_age(uint32_t now, uint32_t then, uint8_t valid)
+{
+    uint32_t age = now - then;
+    return !valid || age > 65535UL ? 65535U : (uint16_t)age;
+}
+
+void control_link_get_snapshot(ControlLinkSnapshot *snapshot)
+{
+    unsigned long now;
+    if(!snapshot) return;
+    get_tick_count(&now);
+    *snapshot = monitor;
+    snapshot->sample_age_ms = control_monitor_age((uint32_t)now, monitor_sample_ms, monitor.sampled);
+    snapshot->tx_age_ms = control_monitor_age((uint32_t)now, monitor_tx_ms, monitor.sent);
+    snapshot->ack_age_ms = control_monitor_age((uint32_t)now, last_ack, ack_seen);
+    snapshot->ack_seen = ack_seen;
+}
 
 void control_link_inhibit(void)
 {
@@ -77,7 +90,8 @@ void control_link_service(uint8_t control_page)
         result = NRF_TxPoll();
         if(result != NRF_TX_PENDING) {
             busy = 0U;
-            if(result == TX_DS) { last_ack = now; ack_seen = 1U; }
+            if(result == TX_DS) { last_ack = now; ack_seen = 1U; monitor.tx_acked++; }
+            else monitor.tx_failed++;
         }
     }
     if((uint32_t)(now - last_send) < 20U) return;
@@ -90,6 +104,13 @@ void control_link_service(uint8_t control_page)
     for(channel = 0U; channel < NUM_OF_ADC1CHANNEL; channel++) {
         sample[channel] = ADC1_Value[channel];
         if(sample[channel] > 4095U) fresh = 0U;
+    }
+    monitor.sampled = 1U;
+    monitor.input_fresh = fresh;
+    monitor_sample_ms = now;
+    for(channel = 0U; channel < 6U; channel++) {
+        monitor.raw[channel] = sample[channel];
+        monitor.calibrated[channel] = control_axis(sample[channel], channel);
     }
     memset(&command, 0, sizeof(command));
     command.x = -control_axis(sample[2], 2U);
@@ -123,5 +144,12 @@ void control_link_service(uint8_t control_page)
         command.sequence = sequence++;
         robot_packet_encode(packet, &command);
         busy = NRF_TxStart(packet);
+        if(busy) {
+            /* Decode the encoded packet: disarmed wire values are all zero. */
+            (void)robot_packet_decode(packet, &monitor.transmitted);
+            monitor.sent = 1U;
+            monitor_tx_ms = now;
+            monitor.tx_started++;
+        }
     }
 }

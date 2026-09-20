@@ -50,6 +50,8 @@ typedef struct GuiRobotTelemetry
     uint8_t link_online;
 } GuiRobotTelemetry;
 
+typedef struct ControlLinkSnapshot ControlLinkSnapshot;
+
 void gui_prepare_page(void);
 
 void gui_clock_overlay(void);
@@ -63,6 +65,8 @@ void gui_boot_finish(const BootReport *report);
 void system_basic_information(void);
 
 void channel_monitor_page(void);
+void channel_output_monitor_page(const ControlLinkSnapshot *snapshot);
+void menu_group_page(uint8_t selected_group);
 
 void digital_channel_monitor_page(const uint8_t *raw_values,
                                   const uint8_t *stable_values);

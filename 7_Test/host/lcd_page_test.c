@@ -10,6 +10,8 @@
 #include "diagnostics.h"
 #include "hardware_tests.h"
 #include "menu.h"
+#include "menu_catalog.h"
+#include "control_link.h"
 
 #define WHITE 0xffffU
 #define GREY 0xf7deU
@@ -84,11 +86,23 @@ static uint16_t ILI9806G_Read_PixelData(void) { return 0U; }
 
 #include "lcd_page_driver.inc"
 
+static uint8_t checking_ui_text;
+static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
+{
+    if(checking_ui_text) {
+        unsigned right = x + strlen(text) * LCD_Currentfonts->Width;
+        if(right > LCD_X_LENGTH || y + LCD_Currentfonts->Height > LCD_Y_LENGTH)
+            fprintf(stderr, "Text outside display: %u,%u: %s\n", x, y, text);
+        assert(right <= LCD_X_LENGTH && y + LCD_Currentfonts->Height <= LCD_Y_LENGTH);
+    }
+    lcd_real_DispString_EN(x, y, text);
+}
+
 static uint8_t display_flag, clock_force_redraw;
 static uint16_t ADC1_Value[7] = {2047, 2047, 2047, 2047, 2047, 2047, 2047};
 static uint16_t ADC3_Value[3] = {1024, 2048, 3072};
 static struct { uint16_t chLower[7], chMiddle[7], chUpper[7]; uint8_t chReverse[7]; int PWMadjustValue[7]; } param;
-static const char *control_link_status(void) { return "DISARMED"; }
+const char *control_link_status(void) { return "DISARMED"; }
 static char displayBuffer[100];
 static void GTP_IRQ_Disable(void) {}
 static void gui_boot_menu_badge(void) {}
@@ -187,9 +201,13 @@ static void test_diagnostics(void)
 static void draw_page(unsigned page)
 {
     GuiRobotTelemetry telemetry = {0};
-    if(page == 1U) channel_monitor_page();
-    else if(page == 3U) robot_control_page(&telemetry);
-    else main_menu(page == 2U ? 1U : 0U);
+    ControlLinkSnapshot snapshot = {0};
+    checking_ui_text = 1U;
+    if(page == 0U) channel_monitor_page();
+    else if(page == 1U) robot_control_page(&telemetry);
+    else if(page < 5U) menu_group_page((uint8_t)(page - 2U));
+    else if(page < 16U) main_menu((uint8_t)(page - 5U));
+    else channel_output_monitor_page(&snapshot);
     /* A late overlay must be included in the presented image as well. */
     LCD_SetTextColor(BLACK);
     ILI9806G_DrawRectangle(700U, 4U, 92U, 24U, 1U);
@@ -197,6 +215,7 @@ static void draw_page(unsigned page)
     LCD_SetTextColor(WHITE);
     LCD_SetBackColor(BLACK);
     ILI9806G_DispString_EN(714U, 8U, "12:34:56");
+    checking_ui_text = 0U;
 }
 
 static void test_transitions(void)
@@ -204,7 +223,7 @@ static void test_transitions(void)
     unsigned page, repeat, i;
     for(i = 800U * 480U; i < sizeof(sram) / sizeof(sram[0]); i++) sram[i] = 0x1234U;
     for(repeat = 0U; repeat < 4U; repeat++)
-        for(page = 0U; page < 4U; page++)
+        for(page = 0U; page < 17U; page++)
         {
             /* Independent reference: existing direct rendering onto a clean panel. */
             LCD_PageBuffer_Enable(0U);
@@ -462,7 +481,108 @@ static void test_robot_telemetry_pixels(void)
     assert(memcmp(panel,expected,sizeof(panel)) == 0);
 }
 
-int main(void)
+static void test_catalog_pixels(void)
+{
+    unsigned entry;
+    checking_ui_text = 1U;
+    LCD_PageBuffer_Enable(0U);
+    for(entry = 0U; entry < MENU_ENTRY_COUNT; entry++) {
+        gui_prepare_page(); main_menu((uint8_t)entry);
+        memcpy(expected, panel, sizeof(panel));
+        gui_prepare_page(); main_menu((uint8_t)((entry + MENU_ENTRY_COUNT - 1U) % MENU_ENTRY_COUNT));
+        main_menu((uint8_t)entry);
+        assert(memcmp(panel, expected, sizeof(panel)) == 0);
+        /* The card's selection rail is visible and every unused row stays clear. */
+        assert(panel[(84U + ((entry - menu_group_first(menu_entry_group(entry))) / 2U) * 104U) * 800U +
+                     (8U + ((entry - menu_group_first(menu_entry_group(entry))) & 1U) * 400U)] == BLUE);
+    }
+    for(entry = 0U; entry < MENU_GROUP_COUNT; entry++) {
+        gui_prepare_page(); menu_group_page((uint8_t)entry);
+        memcpy(expected, panel, sizeof(panel));
+        gui_prepare_page(); menu_group_page((uint8_t)((entry + 2U) % 3U));
+        menu_group_page((uint8_t)entry);
+        assert(memcmp(panel, expected, sizeof(panel)) == 0);
+    }
+    checking_ui_text = 0U;
+}
+
+static void render_output_fresh(const ControlLinkSnapshot *snapshot)
+{
+    LCD_PageBuffer_Enable(1U);
+    gui_prepare_page(); channel_output_monitor_page(snapshot); LCD_EndPage();
+}
+
+static void test_output_pixels(void)
+{
+    ControlLinkSnapshot states[4];
+    unsigned i, before, after;
+    memset(states, 0, sizeof(states));
+    states[1].sampled = states[1].input_fresh = states[1].sent = states[1].ack_seen = 1U;
+    states[1].transmitted.armed = 1U;
+    states[1].transmitted.sequence = UINT16_MAX;
+    states[1].transmitted.x = -1000; states[1].transmitted.y = 1000;
+    states[1].transmitted.heading = -1800; states[1].transmitted.limit = 1000U;
+    states[1].transmitted.digital = UINT8_MAX;
+    states[1].tx_started = states[1].tx_acked = states[1].tx_failed = UINT32_MAX;
+    states[1].sample_age_ms = states[1].tx_age_ms = states[1].ack_age_ms = UINT16_MAX;
+    for(i = 0U; i < 6U; i++) {
+        states[1].raw[i] = i & 1U ? 0U : 4095U;
+        states[1].calibrated[i] = i & 1U ? -1000 : 1000;
+    }
+    states[2] = states[1];
+    states[2].sample_age_ms = states[2].tx_age_ms = states[2].ack_age_ms = 0U;
+    states[2].transmitted.armed = 0U;
+    states[2].transmitted.x = states[2].transmitted.y = states[2].transmitted.heading = 0;
+    states[2].transmitted.sequence = states[2].transmitted.limit = 0U;
+    states[2].tx_started = states[2].tx_acked = states[2].tx_failed = 0U;
+    states[3] = states[2];
+    states[3].input_fresh = 0U;
+    states[3].ack_seen = 0U;
+    for(i = 0U; i < 6U; i++) {
+        states[3].raw[i] = 2047U;
+        states[3].calibrated[i] = 0;
+    }
+    checking_ui_text = 1U;
+    for(after = 0U; after < 4U; after++) {
+        render_output_fresh(&states[after]); memcpy(expected, panel, sizeof(panel));
+        for(before = 0U; before < 4U; before++) {
+            render_output_fresh(&states[before]);
+            fake_ms += 100U; channel_output_monitor_page(&states[after]);
+            if(memcmp(panel, expected, sizeof(panel)))
+                fprintf(stderr, "Output redraw mismatch from %u to %u\n", before, after);
+            assert(memcmp(panel, expected, sizeof(panel)) == 0);
+        }
+    }
+    checking_ui_text = 0U;
+}
+
+static void bmp_u16(FILE *file, unsigned value)
+{ fputc(value & 255U, file); fputc((value >> 8) & 255U, file); }
+static void bmp_u32(FILE *file, uint32_t value)
+{ bmp_u16(file, value); bmp_u16(file, value >> 16); }
+static void save_preview(const char *directory, const char *name)
+{
+    char path[1024];
+    FILE *file;
+    unsigned x, y;
+    snprintf(path, sizeof(path), "%s/%s", directory, name);
+    file = fopen(path, "wb"); assert(file);
+    fputs("BM", file); bmp_u32(file, 54U + 800U * 480U * 3U);
+    bmp_u32(file, 0U); bmp_u32(file, 54U); bmp_u32(file, 40U);
+    bmp_u32(file, 800U); bmp_u32(file, 480U); bmp_u16(file, 1U); bmp_u16(file, 24U);
+    bmp_u32(file, 0U); bmp_u32(file, 800U * 480U * 3U);
+    bmp_u32(file, 2835U); bmp_u32(file, 2835U); bmp_u32(file, 0U); bmp_u32(file, 0U);
+    for(y = 480U; y > 0U; y--)
+        for(x = 0U; x < 800U; x++) {
+            uint16_t pixel = panel[(y - 1U) * 800U + x];
+            fputc((pixel & 31U) * 255U / 31U, file);
+            fputc(((pixel >> 5) & 63U) * 255U / 63U, file);
+            fputc(((pixel >> 11) & 31U) * 255U / 31U, file);
+        }
+    assert(fclose(file) == 0);
+}
+
+int main(int argc, char **argv)
 {
     test_transitions();
     test_edges_and_fallback();
@@ -472,6 +592,22 @@ int main(void)
     test_diagnostics();
     test_robot_marker_pixels();
     test_robot_telemetry_pixels();
-    puts("LCD page tests passed: menu/channel/robot transitions, Hardware Test entry while OK held, exit while BACK held, debounce, complete transfers, edges, portrait, fallback, RGB565 clipping, final marker pixels, intact outline and telemetry transitions.");
+    test_catalog_pixels(); test_output_pixels();
+    if(argc > 1) {
+        ControlLinkSnapshot snapshot = {0};
+        gui_prepare_page(); menu_group_page(0U); LCD_EndPage();
+        save_preview(argv[1], "category-home.bmp");
+        snapshot.sampled = snapshot.input_fresh = snapshot.sent = snapshot.ack_seen = 1U;
+        snapshot.sample_age_ms = snapshot.tx_age_ms = snapshot.ack_age_ms = 20U;
+        snapshot.tx_started = 128U; snapshot.tx_acked = 127U;
+        snapshot.transmitted.sequence = 128U;
+        snapshot.raw[0] = 2047U; snapshot.raw[1] = 3071U; snapshot.raw[2] = 4095U;
+        snapshot.raw[3] = 1023U; snapshot.raw[4] = 2047U; snapshot.raw[5] = 1535U;
+        snapshot.calibrated[1] = 500; snapshot.calibrated[2] = 1000;
+        snapshot.calibrated[3] = -500; snapshot.calibrated[5] = -250;
+        render_output_fresh(&snapshot);
+        save_preview(argv[1], "channel-output.bmp");
+    }
+    puts("LCD page tests passed: all category/leaf/monitor/robot transitions, bounds, incremental output pixels, diagnostics keys, framebuffer fallback and RGB565 clipping.");
     return 0;
 }

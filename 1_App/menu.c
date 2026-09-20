@@ -1,6 +1,7 @@
 #include "diagnostics.h"
 #include "bsp_fsmc_lcd.h"
 #include "menu.h"
+#include "menu_catalog.h"
 #include "control_link.h"
 #include "multi_button_user.h"
 #include "gui.h"
@@ -13,7 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MENU_ITEM_COUNT       11U
+#define MENU_ITEM_COUNT       MENU_ENTRY_COUNT
 #define MENU_EVENT_QUEUE_SIZE 8U
 #define MENU_REFRESH_TICKS    5U
 #define CLOCK_REFRESH_TICKS   20U
@@ -32,6 +33,7 @@
 typedef enum
 {
     MENU_PAGE_HOME = 0,
+    MENU_PAGE_CATEGORY,
     MENU_PAGE_SYSTEM_INFO,
     MENU_PAGE_MONITOR,
     MENU_PAGE_DIGITAL_CHANNELS,
@@ -47,17 +49,9 @@ typedef enum
 
 static const MenuPage menu_items[MENU_ITEM_COUNT] =
 {
-    MENU_PAGE_SYSTEM_INFO,
-    MENU_PAGE_MONITOR,
-    MENU_PAGE_DIGITAL_CHANNELS,
-    MENU_PAGE_IMU,
-    MENU_PAGE_GPS,
-    MENU_PAGE_NRF,
-    MENU_PAGE_FILE_BROWSER,
-    MENU_PAGE_PARAMETER_SETTINGS,
-    MENU_PAGE_DIAGNOSTICS,
-    MENU_PAGE_EEPROM,
-    MENU_PAGE_ROBOT_CONTROL
+#define MENU_TARGET(page, label, hint) MENU_PAGE_##page,
+    MENU_ENTRY_LIST(MENU_TARGET)
+#undef MENU_TARGET
 };
 
 static const uint8_t nrf_power_register[4] = {0x09U, 0x0bU, 0x0dU, 0x0fU};
@@ -76,6 +70,9 @@ static MenuKey event_queue[MENU_EVENT_QUEUE_SIZE];
 static uint8_t event_read_index;
 static uint8_t event_write_index;
 static uint8_t selected_item;
+static uint8_t selected_group;
+static uint8_t group_selection[MENU_GROUP_COUNT];
+static uint8_t monitor_output_view;
 static uint8_t refresh_tick_count;
 static uint8_t clock_refresh_tick_count;
 static uint8_t clock_refresh_due;
@@ -313,7 +310,7 @@ static void menu_handle_nrf_key(MenuKey key)
             break;
 
         case MENU_KEY_BACK:
-            current_page = MENU_PAGE_HOME;
+            current_page = MENU_PAGE_CATEGORY;
             page_dirty = 1U;
             page_changed = 1U;
             break;
@@ -893,7 +890,7 @@ static void menu_handle_param_key(MenuKey key)
             page_dirty = 1U;
             break;
         case MENU_KEY_BACK:
-            current_page = MENU_PAGE_HOME;
+            current_page = MENU_PAGE_CATEGORY;
             page_dirty = 1U;
             page_changed = 1U;
             break;
@@ -1086,7 +1083,7 @@ static void menu_browser_go_back(void)
 
     if(browser_virtual_root != 0U)
     {
-        current_page = MENU_PAGE_HOME;
+        current_page = MENU_PAGE_CATEGORY;
         page_dirty = 1U;
         page_changed = 1U;
         return;
@@ -1157,16 +1154,33 @@ static uint8_t menu_get_key(MenuKey *key)
 
 static void menu_handle_home_key(MenuKey key)
 {
+    if(key == MENU_KEY_LEFT)
+        selected_group = selected_group == 0U ? MENU_GROUP_COUNT - 1U : selected_group - 1U;
+    else if(key == MENU_KEY_RIGHT)
+        selected_group = (uint8_t)((selected_group + 1U) % MENU_GROUP_COUNT);
+    else if(key == MENU_KEY_OK) {
+        selected_item = group_selection[selected_group];
+        current_page = MENU_PAGE_CATEGORY;
+        page_changed = 1U;
+    }
+    page_dirty = 1U;
+}
+
+static void menu_handle_category_key(MenuKey key)
+{
+    uint8_t first = menu_group_first(selected_group);
+    uint8_t count = menu_group_count(selected_group);
     switch(key)
     {
         case MENU_KEY_LEFT:
-            selected_item = (selected_item == 0U) ?
-                            (MENU_ITEM_COUNT - 1U) : (selected_item - 1U);
+            selected_item = selected_item == first ? first + count - 1U : selected_item - 1U;
+            group_selection[selected_group] = selected_item;
             page_dirty = 1;
             break;
 
         case MENU_KEY_RIGHT:
-            selected_item = (uint8_t)((selected_item + 1U) % MENU_ITEM_COUNT);
+            selected_item = selected_item + 1U == first + count ? first : selected_item + 1U;
+            group_selection[selected_group] = selected_item;
             page_dirty = 1;
             break;
 
@@ -1180,7 +1194,7 @@ static void menu_handle_home_key(MenuKey key)
                 LCD_SetTextColor(BLACK);
                 /* Service screens consume raw keys; discard any pre-entry queued events. */
                 event_read_index = event_write_index;
-                current_page = MENU_PAGE_HOME;
+                current_page = MENU_PAGE_CATEGORY;
                 page_dirty = 1U;
                 page_changed = 1U;
                 return;
@@ -1202,6 +1216,9 @@ static void menu_handle_home_key(MenuKey key)
             break;
 
         case MENU_KEY_BACK:
+            current_page = MENU_PAGE_HOME;
+            page_dirty = page_changed = 1U;
+            break;
         default:
             break;
     }
@@ -1209,6 +1226,17 @@ static void menu_handle_home_key(MenuKey key)
 
 static void menu_handle_page_key(MenuKey key)
 {
+    if(current_page == MENU_PAGE_CATEGORY) {
+        menu_handle_category_key(key);
+        return;
+    }
+    if(current_page == MENU_PAGE_MONITOR && key != MENU_KEY_BACK) {
+        if(key == MENU_KEY_LEFT || key == MENU_KEY_RIGHT || key == MENU_KEY_OK) {
+            monitor_output_view = (uint8_t)!monitor_output_view;
+            page_dirty = page_changed = 1U;
+        }
+        return;
+    }
     if(current_page == MENU_PAGE_NRF)
     {
         menu_handle_nrf_key(key);
@@ -1229,10 +1257,19 @@ static void menu_handle_page_key(MenuKey key)
 
     if(key == MENU_KEY_BACK)
     {
-        current_page = MENU_PAGE_HOME;
+        current_page = MENU_PAGE_CATEGORY;
         page_dirty = 1;
         page_changed = 1;
     }
+}
+
+static void menu_draw_monitor(void)
+{
+    ControlLinkSnapshot snapshot;
+    if(monitor_output_view) {
+        control_link_get_snapshot(&snapshot);
+        channel_output_monitor_page(&snapshot);
+    } else channel_monitor_page();
 }
 
 static void menu_draw_current_page(void)
@@ -1246,6 +1283,10 @@ static void menu_draw_current_page(void)
     switch(current_page)
     {
         case MENU_PAGE_HOME:
+            menu_group_page(selected_group);
+            break;
+
+        case MENU_PAGE_CATEGORY:
             main_menu(selected_item);
             break;
 
@@ -1254,7 +1295,7 @@ static void menu_draw_current_page(void)
             break;
 
         case MENU_PAGE_MONITOR:
-            channel_monitor_page();
+            menu_draw_monitor();
             break;
 
         case MENU_PAGE_DIGITAL_CHANNELS:
@@ -1317,7 +1358,7 @@ static void menu_draw_current_page(void)
 
         default:
             current_page = MENU_PAGE_HOME;
-            main_menu(selected_item);
+            menu_group_page(selected_group);
             break;
     }
 }
@@ -1326,7 +1367,7 @@ static void menu_refresh_dynamic_page(void)
 {
     if(current_page == MENU_PAGE_MONITOR)
     {
-        channel_monitor_page();
+        menu_draw_monitor();
     }
     else if(current_page == MENU_PAGE_DIGITAL_CHANNELS)
     {
@@ -1354,6 +1395,10 @@ void menu_init(void)
     event_read_index = 0;
     event_write_index = 0;
     selected_item = 0;
+    selected_group = monitor_output_view = 0U;
+    group_selection[0] = menu_group_first(0U);
+    group_selection[1] = menu_group_first(1U);
+    group_selection[2] = menu_group_first(2U);
     refresh_tick_count = 0;
     clock_refresh_tick_count = 0U;
     clock_refresh_due = 1U;

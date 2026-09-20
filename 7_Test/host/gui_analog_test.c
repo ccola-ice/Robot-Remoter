@@ -6,6 +6,7 @@
 #include "gui.h"
 #include "gui_analog_filter.h"
 #include "gui_robot_filter.h"
+#include "control_link.h"
 
 enum { WHITE, GREY, BLACK, BLUE, BLUE2, GREEN, RED };
 enum { LCD_X_LENGTH = 800, LCD_Y_LENGTH = 480 };
@@ -14,7 +15,7 @@ static uint16_t ADC1_Value[7], ADC3_Value[3];
 static struct { uint16_t chLower[7], chMiddle[7], chUpper[7]; uint8_t chReverse[7]; int PWMadjustValue[7]; } param;
 static const char *fake_status = "DISARMED";
 static uint32_t fake_ms;
-static const char *control_link_status(void) { return fake_status; }
+const char *control_link_status(void) { return fake_status; }
 static int get_tick_count(unsigned long *count) { *count = fake_ms; return 0; }
 static char displayBuffer[100];
 static uint8_t display_flag;
@@ -24,6 +25,10 @@ static unsigned font_width = 16U, font_height = 32U;
 static uint8_t checking_robot;
 static uint16_t text_raw_x[2], text_raw_y[2];
 static uint16_t displayed_adc[10];
+static uint8_t checking_output;
+static unsigned output_texts;
+static char output_tx_state[80], output_input_state[100], output_ack_state[80];
+static char output_values[6][80];
 
 static void LCD_SetFont(void *font)
 { font_width = font == &Font8x16 ? 8U : 16U; font_height = font_width * 2U; }
@@ -47,6 +52,17 @@ static void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t width,
 }
 static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
 {
+    if(checking_output) {
+        unsigned right = x + (unsigned)strlen(text) * font_width;
+        assert(right <= LCD_X_LENGTH && y + font_height <= LCD_Y_LENGTH);
+        if(y >= 80U && y < 380U) assert(right <= (x < 468U ? 452U : 796U));
+        output_texts++;
+        if(x == 480U && y == 112U) strcpy(output_tx_state, text);
+        if(x == 480U && y == 272U) strcpy(output_ack_state, text);
+        if(x == 12U && y == 394U) strcpy(output_input_state, text);
+        if(x == 104U && y >= 112U && y <= 332U && (y - 112U) % 44U == 0U)
+            strcpy(output_values[(y - 112U) / 44U], text);
+    }
     if(checking_robot) {
         unsigned right = x + (unsigned)strlen(text) * font_width;
         assert(right <= LCD_X_LENGTH && y + font_height <= LCD_Y_LENGTH);
@@ -257,11 +273,65 @@ static void test_dot_pixel_gate(void)
     assert(blits == 2U && circles == 0U && lines == 0U && x > 134U);
 }
 
+static void test_output_monitor(void)
+{
+    ControlLinkSnapshot snapshot = {0};
+    unsigned i, before;
+    checking_robot = 0U; checking_output = 1U;
+    display_flag = 1U; fake_ms = 0U; output_texts = 0U;
+    channel_output_monitor_page(NULL);
+    assert(display_flag && output_texts == 0U);
+    channel_output_monitor_page(&snapshot);
+    assert(strstr(output_tx_state, "NOT SENT"));
+    assert(strstr(output_input_state, "NO SAMPLE"));
+    assert(strstr(output_ack_state, "NONE"));
+    snapshot.sampled = snapshot.input_fresh = snapshot.sent = snapshot.ack_seen = 1U;
+    snapshot.transmitted.armed = 1U;
+    snapshot.transmitted.sequence = UINT16_MAX;
+    snapshot.transmitted.x = -1000; snapshot.transmitted.y = 1000;
+    snapshot.transmitted.heading = -1800; snapshot.transmitted.limit = 1000U;
+    snapshot.transmitted.digital = UINT8_MAX;
+    snapshot.tx_started = snapshot.tx_acked = snapshot.tx_failed = UINT32_MAX;
+    snapshot.sample_age_ms = snapshot.tx_age_ms = snapshot.ack_age_ms = 100U;
+    for(i = 0U; i < 6U; i++) {
+        snapshot.raw[i] = 4095U;
+        snapshot.calibrated[i] = i & 1U ? -1000 : 1000;
+        param.chReverse[i] = i & 1U;
+    }
+    before = output_texts;
+    fake_ms = 99U; channel_output_monitor_page(&snapshot);
+    assert(output_texts == before); /* Bars react without defeating text cadence. */
+    fake_ms = 100U; channel_output_monitor_page(&snapshot);
+    assert(strstr(output_tx_state, "ARMED IN LAST PACKET"));
+    assert(strstr(output_input_state, "LIVE"));
+    assert(strstr(output_ack_state, "100 ms"));
+    assert(strstr(output_values[0], "+100.0%") && strstr(output_values[1], "-100.0%"));
+    assert(strstr(output_values[0], "OFF") && strstr(output_values[1], "ON"));
+    snapshot.sample_age_ms = snapshot.tx_age_ms = UINT16_MAX;
+    fake_ms = 200U; channel_output_monitor_page(&snapshot);
+    assert(strstr(output_tx_state, "STALE / LAST PACKET ONLY"));
+    assert(strstr(output_input_state, "STALE"));
+    snapshot.sample_age_ms = snapshot.tx_age_ms = 0U;
+    snapshot.input_fresh = 0U; snapshot.transmitted.armed = 0U;
+    fake_ms = 300U; channel_output_monitor_page(&snapshot);
+    assert(strstr(output_tx_state, "DISARMED / ZERO MOTION"));
+    assert(strstr(output_input_state, "STALE")); /* An old sample is not live just because age is zero. */
+    snapshot.input_fresh = 1U;
+    for(i = 0U; i < 6U; i++) { snapshot.raw[i] = 0U; snapshot.calibrated[i] = 0; }
+    display_flag = 1U; fake_ms = UINT32_MAX - 50U;
+    channel_output_monitor_page(&snapshot);
+    before = output_texts;
+    fake_ms = 48U; channel_output_monitor_page(&snapshot); assert(output_texts == before);
+    fake_ms = 49U; channel_output_monitor_page(&snapshot); assert(output_texts > before);
+    checking_output = 0U;
+}
+
 int main(void)
 {
     test_filter(); test_monitor();
     test_robot_noise_and_response(); test_robot_clock_cadence();
     test_robot_telemetry_and_bounds(); test_dot_pixel_gate();
-    puts("GUI analog tests passed: neutral noise/spikes, two-frame response, 250 ms cadence/wrap, offline/status redraw, card bounds, marker blits.");
+    test_output_monitor();
+    puts("GUI analog tests passed: neutral noise/spikes, marker response, telemetry cadence/wrap, output bounds/stale/no sample/no ACK, 100 ms text cadence/wrap.");
     return 0;
 }
