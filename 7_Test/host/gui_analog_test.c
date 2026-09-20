@@ -47,11 +47,12 @@ static void ILI9806G_DrawLine(uint16_t x, uint16_t y, uint16_t x2, uint16_t y2)
 static void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t width,
                            uint16_t height, const uint16_t *pixels)
 {
-    assert(width == 17U && height == 17U && pixels != NULL);
+    assert(pixels != NULL);
     assert(x + width <= LCD_X_LENGTH && y + height <= LCD_Y_LENGTH);
-    blits++;
+    if(width == 17U && height == 17U) blits++;
+    else assert((width == 16U || width == 32U || width == 48U) && height == 4U);
 }
-static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
+static void capture_text(uint16_t x, uint16_t y, const char *text)
 {
     if(checking_output) {
         unsigned right = x + (unsigned)strlen(text) * font_width;
@@ -101,7 +102,25 @@ static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
 }
 
 /* Runner extracts these complete functions from the production gui.c. */
+static int GetGBKCode(uint8_t *bitmap, uint16_t code)
+{ memset(bitmap, (code & 1U) ? 0x55 : 0xaa, 128U); return 0; }
+uint8_t FLASH_GetIoError(void) { return 0U; }
+static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
+{
+    assert(x + strlen(text)*font_width <= LCD_X_LENGTH);
+    assert(y + font_height <= LCD_Y_LENGTH);
+}
+#define ui_text ui_real_text
 #include "gui_theme.h"
+#undef ui_text
+static void ui_text(uint16_t x, uint16_t y, uint8_t columns,
+    const char *text, uint16_t fg, uint16_t bg, uint8_t large)
+{
+    char captured[101];
+    ui_real_text(x,y,columns,text,fg,bg,large);
+    snprintf(captured,sizeof(captured),"%-*.*s",columns,columns,text ? text : "");
+    capture_text(x,y,captured);
+}
 #include "gui_analog_functions.inc"
 
 static void test_filter(void)
@@ -293,7 +312,7 @@ static void test_output_monitor(void)
     channel_output_monitor_page(NULL);
     assert(display_flag && output_texts == 0U);
     channel_output_monitor_page(&snapshot);
-    assert(strstr(output_tx_state, "NOT SENT"));
+    assert(strstr(output_tx_state, "\311\320\316\264\267\242\313\315"));
     assert(strstr(output_input_state, "NO SAMPLE"));
     assert(strstr(output_ack_state, "NONE"));
     snapshot.sampled = snapshot.input_fresh = snapshot.sent = snapshot.ack_seen = 1U;
@@ -313,19 +332,19 @@ static void test_output_monitor(void)
     fake_ms = 99U; channel_output_monitor_page(&snapshot);
     assert(output_texts == before); /* Bars react without defeating text cadence. */
     fake_ms = 100U; channel_output_monitor_page(&snapshot);
-    assert(strstr(output_tx_state, "OUTPUT ENABLED"));
+    assert(strstr(output_tx_state, "\324\312\320\355\324\313\266\257"));
     assert(strstr(output_input_state, "LIVE"));
     assert(strstr(output_ack_state, "100 ms"));
     assert(strstr(output_values[0], "+100.0%") && strstr(output_values[1], "-100.0%"));
-    assert(strstr(output_reverse[0], "--") && strstr(output_reverse[1], "ON"));
+    assert(strstr(output_reverse[0], "--") && strstr(output_reverse[1], "\277\252\306\364"));
     snapshot.sample_age_ms = snapshot.tx_age_ms = UINT16_MAX;
     fake_ms = 200U; channel_output_monitor_page(&snapshot);
-    assert(strstr(output_tx_state, "STALE FRAME"));
+    assert(strstr(output_tx_state, "\267\242\313\315\326\241\322\321\271\375\306\332"));
     assert(strstr(output_input_state, "STALE"));
     snapshot.sample_age_ms = snapshot.tx_age_ms = 0U;
     snapshot.input_fresh = 0U; snapshot.transmitted.armed = 0U;
     fake_ms = 300U; channel_output_monitor_page(&snapshot);
-    assert(strstr(output_tx_state, "OUTPUT DISARMED"));
+    assert(strstr(output_tx_state, "\324\313\266\257\322\321\275\373\326\271"));
     assert(strstr(output_input_state, "STALE")); /* An old sample is not live just because age is zero. */
     snapshot.input_fresh = 1U;
     for(i = 0U; i < 6U; i++) { snapshot.raw[i] = 0U; snapshot.calibrated[i] = 0; }

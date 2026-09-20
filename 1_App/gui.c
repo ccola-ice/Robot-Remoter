@@ -59,6 +59,21 @@ void gui_prepare_page(void)
 }
 
 /* Restore layout boundaries when page content is drawn, including home pagination. */
+static const char *gui_control_status_text(const char *status)
+{
+    if(strcmp(status, "BOOT LOCK") == 0) return "\327\324\274\354\316\264\267\305\320\320";
+    if(strcmp(status, "RADIO OFF") == 0) return "\316\336\317\337\267\242\311\344\316\264\277\252\306\364";
+    if(strcmp(status, "INPUT STALE") == 0) return "\312\344\310\353\312\375\276\335\322\321\271\375\306\332";
+    if(strcmp(status, "LOW TX BATTERY") == 0) return "\322\243\277\330\306\367\265\347\263\330\265\347\321\271\265\315";
+    if(strcmp(status, "STOP / OPEN CONTROL PAGE") == 0) return "\267\307\277\330\326\306\322\263\303\346: \275\366\267\242\313\315\260\262\310\253\326\241";
+    if(strcmp(status, "NO RADIO ACK") == 0) return "\265\310\264\375\316\336\317\337\323\262\274\376\273\330\326\264";
+    if(strcmp(status, "ENABLED / HOLD DCH1") == 0) return "\324\313\266\257\322\321\324\312\320\355 / \260\264\327\241 DCH1";
+    if(strcmp(status, "READY / PRESS DCH1") == 0) return "\322\321\276\315\320\367 / \260\264\327\241 DCH1 \312\271\304\334";
+    if(strcmp(status, "RELEASE DCH1 / CENTER STICKS") == 0) return "\313\311\277\252 DCH1 \262\242\261\243\263\326\322\241\270\313\273\330\326\320";
+    if(strcmp(status, "DISARMED") == 0) return "\261\276\273\372\316\264\312\271\304\334\324\313\266\257";
+    return status;
+}
+
 void gui_clock_overlay(void)
 {
     RTC_TimeTypeDef rtc_time;
@@ -288,9 +303,9 @@ static void gui_monitor_tabs(uint8_t output)
 {
     ui_round_rect(536U,44U,240U,36U,10U,UI_SURFACE);
     ui_round_rect(output ? 656U : 540U,48U,116U,28U,8U,UI_ACCENT);
-    ui_text(564U,54U,8U,"RAW ADC",output ? UI_MUTED : UI_SURFACE,
+    ui_text(564U,54U,8U,"\324\255\312\274 ADC",output ? UI_MUTED : UI_SURFACE,
         output ? UI_SURFACE : UI_ACCENT,0U);
-    ui_text(684U,54U,8U,"OUTPUT",output ? UI_SURFACE : UI_MUTED,
+    ui_text(684U,54U,8U,"\320\243\327\274\312\344\263\366",output ? UI_SURFACE : UI_MUTED,
         output ? UI_ACCENT : UI_SURFACE,0U);
 }
 
@@ -342,16 +357,16 @@ void system_basic_information(void)
         zi_bytes = (uint32_t)(uintptr_t)&Image$$RW_IRAM1$$ZI$$Length;
         ram_bytes = rw_bytes + zi_bytes;
         flash_bytes = code_ro_bytes + rw_bytes;
-        ui_shell("System", "DEVICE / MEMORY / FIRMWARE", "TOOLS");
+        ui_shell("\317\265\315\263\320\305\317\242", "\311\350\261\270 / \304\332\264\346 / \271\314\274\376", "\271\244\276\337");
         ui_round_rect(24U, 104U, 752U, 88U, 14U, UI_SURFACE);
         ui_round_rect(40U, 116U, 64U, 64U, 12U, UI_TINT);
         ui_icon(48U, 124U, 48U, UI_ICON_CHIP, UI_ACCENT, UI_TINT);
         ui_text(124U, 116U, 26U, "STM32F407ZGT6", UI_INK, UI_SURFACE, 1U);
         ui_text(124U, 158U, 48U, "ARM Cortex-M4  /  168 MHz", UI_MUTED, UI_SURFACE, 0U);
-        ui_text(568U, 124U, 23U, "ROBOT REMOTE CONTROL", UI_ACCENT, UI_SURFACE, 0U);
-        ui_text(568U, 154U, 23U, "800 x 480 DISPLAY", UI_MUTED, UI_SURFACE, 0U);
-        gui_tools_capacity(24U, 204U, "FLASH / LINKED IMAGE", flash_bytes, GUI_MCU_FLASH_BYTES, UI_ACCENT);
-        gui_tools_capacity(408U, 204U, "RAM / LINKED RESERVE", ram_bytes, GUI_MCU_RAM_BYTES, UI_GREEN);
+        ui_text(568U, 124U, 23U, "\273\372\306\367\310\313\322\243\277\330\306\367", UI_ACCENT, UI_SURFACE, 0U);
+        ui_text(568U, 154U, 23U, "800 x 480 \317\324\312\276\306\301", UI_MUTED, UI_SURFACE, 0U);
+        gui_tools_capacity(24U, 204U, "Flash \271\314\274\376\325\274\323\303", flash_bytes, GUI_MCU_FLASH_BYTES, UI_ACCENT);
+        gui_tools_capacity(408U, 204U, "RAM \276\262\314\254\325\274\323\303", ram_bytes, GUI_MCU_RAM_BYTES, UI_GREEN);
         snprintf(text, sizeof(text), "CODE+RO %lu KB   RW %lu B", (unsigned long)(code_ro_bytes / 1024UL),
                  (unsigned long)rw_bytes);
         ui_text(44U, 308U, 41U, text, UI_MUTED, UI_SURFACE, 0U);
@@ -360,11 +375,11 @@ void system_basic_information(void)
                  (unsigned long)(remaining / 1024UL));
         ui_text(428U, 308U, 41U, text, UI_MUTED, UI_SURFACE, 0U);
         ui_round_rect(24U, 344U, 296U, 88U, 14U, UI_SURFACE);
-        ui_text(44U, 356U, 31U, "FIRMWARE", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(44U, 356U, 31U, "\271\314\274\376\260\346\261\276", UI_MUTED, UI_SURFACE, 0U);
         snprintf(text, sizeof(text), "%s  /  %s", FM_VERSION, FM_TIME);
         ui_text(44U, 386U, 31U, text, UI_INK, UI_SURFACE, 0U);
         ui_round_rect(336U, 344U, 440U, 88U, 14U, UI_SURFACE);
-        ui_footer("BACK return", "LINKER MEMORY FOOTPRINT");
+        ui_footer("BACK \267\265\273\330", "\261\340\322\353\304\332\264\346\325\274\323\303");
     }
     memset(boot, 0, sizeof(boot));
     if(boot_last_report) {
@@ -376,22 +391,21 @@ void system_basic_information(void)
     }
     if(first_draw || memcmp(boot, last_boot, sizeof(boot)) != 0) {
         state_color = UI_MUTED;
-        outcome_text = "BOOT CHECKS / UNAVAILABLE";
+        outcome_text = "\316\336\327\324\274\354\274\307\302\274";
         if(boot[0]) {
-            if(boot[4] == BOOT_PASSED) { outcome_text = "BOOT CHECKS / ALL PASSED"; state_color = UI_GREEN; }
-            else if(boot[4] == BOOT_FAILED) { outcome_text = "BOOT CHECKS / FAILED"; state_color = UI_RED; }
-            else if(boot[4] == BOOT_PARTIAL) { outcome_text = "BOOT CHECKS / PARTIAL"; state_color = UI_AMBER; }
-            else { outcome_text = "BOOT CHECKS / INCOMPLETE"; state_color = UI_AMBER; }
+            if(boot[4] == BOOT_PASSED) { outcome_text = "\311\317\265\347\327\324\274\354\315\250\271\375"; state_color = UI_GREEN; }
+            else if(boot[4] == BOOT_FAILED) { outcome_text = "\311\317\265\347\327\324\274\354\312\247\260\334"; state_color = UI_RED; }
+            else if(boot[4] == BOOT_PARTIAL) { outcome_text = "\327\324\274\354\262\277\267\326\315\352\263\311"; state_color = UI_AMBER; }
+            else { outcome_text = "\311\317\265\347\327\324\274\354\316\264\315\352\263\311"; state_color = UI_AMBER; }
         }
         ui_text(356U, 356U, 49U, outcome_text, state_color, UI_SURFACE, 0U);
-        if(boot[0]) snprintf(text, sizeof(text), "PASS %u   FAIL %u   NOT TESTED %u", boot[1], boot[2], boot[3]);
-        else strcpy(text, "No boot report is available");
+        if(boot[0]) snprintf(text, sizeof(text), "\315\250\271\375 %u   \312\247\260\334 %u   \316\264\262\342\312\324 %u", boot[1], boot[2], boot[3]);
+        else strcpy(text, "\311\320\316\336\277\311\323\303\265\304\311\317\265\347\327\324\274\354\274\307\302\274");
         ui_text(356U, 386U, 49U, text, UI_MUTED, UI_SURFACE, 0U);
         memcpy(last_boot, boot, sizeof(last_boot));
     }
 }
 
-/* Read-only dashboard: RF ACK is explicitly separate from robot telemetry. */
 /* Read-only dashboard: RF ACK is explicitly separate from robot telemetry. */
 static void gui_dashboard_status(uint8_t first)
 {
@@ -415,10 +429,10 @@ static void gui_dashboard_status(uint8_t first)
         ui_round_rect(24U,96U,752U,72U,12U,UI_SURFACE);
         ui_fill(260U,108U,1U,48U,UI_LINE);
         ui_fill(518U,108U,1U,48U,UI_LINE);
-        ui_text(44U,104U,22U,"TRANSMITTER BATTERY",UI_MUTED,UI_SURFACE,0U);
-        ui_text(280U,104U,25U,"RADIO / HARDWARE ACK",UI_MUTED,UI_SURFACE,0U);
-        ui_text(540U,104U,26U,"ROBOT OUTPUT",UI_MUTED,UI_SURFACE,0U);
-        ui_text(540U,126U,13U,"LOCKED",UI_MUTED,UI_SURFACE,1U);
+        ui_text(44U,104U,22U,"\322\243\277\330\306\367\265\347\263\330",UI_MUTED,UI_SURFACE,0U);
+        ui_text(280U,104U,25U,"\316\336\317\337\323\262\274\376\273\330\326\264",UI_MUTED,UI_SURFACE,0U);
+        ui_text(540U,104U,26U,"\324\313\266\257\277\330\326\306",UI_MUTED,UI_SURFACE,0U);
+        ui_text(540U,126U,13U,"\322\321\275\373\326\271",UI_MUTED,UI_SURFACE,1U);
     }
     if(first || mv != last_mv || valid != last_valid) {
         if(valid)
@@ -429,7 +443,7 @@ static void gui_dashboard_status(uint8_t first)
         last_valid = valid;
     }
     if(first || radio != last_radio) {
-        ui_text(280U,126U,13U,radio==0U ? "OFF" : radio==1U ? "WAITING" : "ACK RECEIVED",
+        ui_text(280U,126U,13U,radio==0U ? "\271\330\261\325" : radio==1U ? "\265\310\264\375\326\320" : "\322\321\312\325\265\275\273\330\326\264",
                 radio==2U ? UI_GREEN : UI_MUTED,UI_SURFACE,1U);
         last_radio = radio;
     }
@@ -437,8 +451,8 @@ static void gui_dashboard_status(uint8_t first)
 
 void menu_group_page(uint8_t selected_group)
 {
-    static const char * const titles[] = {"Control", "Settings", "Tools"};
-    static const char * const hints[] = {"Operate & monitor", "Configure your remote", "Sensors & diagnostics"};
+    static const char * const titles[] = {"\322\243\277\330", "\311\350\326\303", "\271\244\276\337"};
+    static const char * const hints[] = {"\273\372\306\367\310\313\277\330\326\306\323\353\274\340\312\323", "\322\243\277\330\306\367\262\316\312\375\305\344\326\303", "\264\253\270\320\306\367\323\353\323\262\274\376\325\357\266\317"};
     static const uint8_t icons[] = {UI_ICON_CONTROL, UI_ICON_SETTINGS, UI_ICON_TOOLS};
     static const uint16_t colors[] = {UI_ACCENT, UI_GREEN, UI_AMBER};
     static uint8_t previous = 255U;
@@ -448,25 +462,26 @@ void menu_group_page(uint8_t selected_group)
     if(selected_group >= MENU_GROUP_COUNT) selected_group = 0U;
     if(first) {
         display_flag = 0U; GTP_IRQ_Disable();
-        ui_shell("Remote dashboard", "Select an app to get started", "HOME");
-        ui_footer("LEFT / RIGHT  Choose app", "OK  Open");
+        ui_shell("\322\243\277\330\306\367\326\367\322\263", "\307\353\321\241\324\361\271\246\304\334\267\326\300\340", "\326\367\322\263");
+        ui_footer("\327\363\323\322 \321\241\324\361\267\326\300\340", "OK \275\370\310\353");
     }
     gui_dashboard_status(first);
     for(i = 0U; i < MENU_GROUP_COUNT; i++) {
         if(!first && selected_group == previous) continue;
         if(!first && i != selected_group && i != previous) continue;
         x = 24U + (uint16_t)i * 256U;
-        bg = i == selected_group ? UI_TINT : UI_SURFACE;
-        ui_round_rect(x,184U,240U,216U,16U,i == selected_group ? UI_ACCENT : UI_SURFACE);
-        ui_round_rect(x+2U,186U,236U,212U,14U,bg);
+        bg = UI_SURFACE;
+        if(first) ui_round_rect(x,184U,240U,216U,16U,bg);
+        ui_round_outline(x,184U,240U,216U,16U,2U,i == selected_group ? UI_ACCENT : UI_SURFACE);
+        if(!first) continue;
         ui_round_rect(x+76U,206U,88U,88U,20U,colors[i]);
         ui_icon(x+96U,226U,48U,icons[i],UI_SURFACE,colors[i]);
         ui_text(x + (uint16_t)((240U - strlen(titles[i])*16U)/2U),306U,
                 (uint8_t)strlen(titles[i]),titles[i],UI_INK,bg,1U);
         ui_text(x+(uint16_t)((240U-strlen(hints[i])*8U)/2U),348U,
                 (uint8_t)strlen(hints[i]),hints[i],UI_MUTED,bg,0U);
-        snprintf(count,sizeof(count),"%u functions",menu_group_count(i));
-        ui_text(x+76U,374U,11U,count,i==selected_group?UI_ACCENT:UI_MUTED,bg,0U);
+        snprintf(count,sizeof(count),"%u \317\356\271\246\304\334",menu_group_count(i));
+        ui_text(x+76U,374U,11U,count,UI_MUTED,bg,0U);
     }
     if(first || previous != selected_group) {
         for(i=0U;i<MENU_GROUP_COUNT;i++) {
@@ -483,11 +498,11 @@ void main_menu(uint8_t selected_item)
     static const char * const names[] = {MENU_ENTRY_LIST(MENU_LABEL)};
 #undef MENU_LABEL
     static const char * const subtitles[] = {
-        "Manual drive", "Inputs & output", "Switch states", "System & channels", "Radio link",
-        "Firmware & memory", "Local attitude", "Position & fix", "SD / Flash storage",
-        "Hardware checks", "Storage diagnostics"
+        "\312\326\266\257\277\330\326\306", "\312\344\310\353\323\353\267\242\313\315\312\375\276\335", "\260\264\274\374\323\353\262\246\270\313", "\317\265\315\263\323\353\315\250\265\300", "\316\336\317\337\301\264\302\267",
+        "\271\314\274\376\323\353\304\332\264\346", "\261\276\273\372\327\313\314\254", "\266\250\316\273\323\353\316\300\320\307", "SD / Flash \316\304\274\376",
+        "\323\262\274\376\274\354\262\342", "\264\346\264\242\325\357\266\317"
     };
-    static const char * const groups[] = {"Control","Settings","Tools"};
+    static const char * const groups[] = {"\322\243\277\330","\311\350\326\303","\271\244\276\337"};
     static const uint8_t icons[] = {UI_ICON_CONTROL,UI_ICON_CHANNEL,UI_ICON_SWITCH,
         UI_ICON_SETTINGS,UI_ICON_RADIO,UI_ICON_CHIP,UI_ICON_IMU,UI_ICON_GPS,
         UI_ICON_FOLDER,UI_ICON_TOOLS,UI_ICON_MEMORY};
@@ -500,33 +515,34 @@ void main_menu(uint8_t selected_item)
     first=display_flag!=0U || previous==255U || menu_entry_group(previous)!=group;
     if(first) {
         display_flag=0U; GTP_IRQ_Disable();
-        ui_shell(groups[group],"Select a function", "APPLICATIONS");
+        ui_shell(groups[group],"\307\353\321\241\324\361\271\246\304\334", "\271\246\304\334\262\313\265\245");
         ui_round_rect(24U,96U,160U,336U,12U,UI_SURFACE);
-        ui_text(40U,112U,16U,"WORKSPACE",UI_MUTED,UI_SURFACE,0U);
+        ui_text(40U,112U,16U,"\271\246\304\334\267\326\300\340",UI_MUTED,UI_SURFACE,0U);
         for(i=0U;i<MENU_GROUP_COUNT;i++) {
             bg=i==group?UI_TINT:UI_SURFACE;
             ui_round_rect(32U,144U+(uint16_t)i*56U,144U,44U,8U,bg);
             ui_text(44U,158U+(uint16_t)i*56U,15U,groups[i],i==group?UI_ACCENT:UI_MUTED,bg,0U);
         }
         ui_text(40U,360U,15U,"BACK",UI_MUTED,UI_SURFACE,0U);
-        ui_text(40U,382U,15U,"Choose group",UI_MUTED,UI_SURFACE,0U);
-        ui_footer("LEFT / RIGHT  Choose function", "OK  Open    BACK  Home");
+        ui_text(40U,382U,15U,"\267\265\273\330\267\326\300\340",UI_MUTED,UI_SURFACE,0U);
+        ui_footer("\327\363\323\322 \321\241\324\361\271\246\304\334", "OK \275\370\310\353  BACK \267\265\273\330");
     }
     for(i=0U;i<count;i++) {
         entry=start+i;
         if(!first && entry!=selected_item && entry!=previous) continue;
         x=200U+(uint16_t)(i%3U)*196U; y=96U+(uint16_t)(i/3U)*172U;
-        bg=entry==selected_item?UI_TINT:UI_SURFACE;
-        ui_round_rect(x,y,184U,160U,12U,entry==selected_item?UI_ACCENT:UI_SURFACE);
-        ui_round_rect(x+2U,y+2U,180U,156U,10U,bg);
+        bg=UI_SURFACE;
+        if(first) ui_round_rect(x,y,184U,160U,12U,bg);
+        ui_round_outline(x,y,184U,160U,12U,2U,entry==selected_item?UI_ACCENT:UI_SURFACE);
+        if(!first) continue;
         ui_round_rect(x+58U,y+14U,68U,68U,16U,UI_SURFACE);
-        ui_icon(x+68U,y+24U,48U,icons[entry],entry==selected_item?UI_ACCENT:UI_MUTED,UI_SURFACE);
+        ui_icon(x+68U,y+24U,48U,icons[entry],UI_ACCENT,UI_SURFACE);
         ui_text(x+12U,y+98U,20U,names[entry],UI_INK,bg,0U);
         ui_text(x+12U,y+124U,20U,subtitles[entry],UI_MUTED,bg,0U);
     }
     if(count<=3U && first) {
-        ui_text(216U,304U,65U,group==0U ? "Control is enabled only inside Robot Control." : "Changes stay local until you choose Save.",UI_MUTED,UI_BG,0U);
-        ui_text(216U,332U,65U,group==0U ? "Release DCH1 to stop. Return here to leave control." : "Use BACK while editing to cancel the current value.",UI_MUTED,UI_BG,0U);
+        ui_text(216U,304U,65U,group==0U ? "\275\366\324\332\273\372\306\367\310\313\277\330\326\306\322\263\324\312\320\355\312\271\304\334\324\313\266\257\241\243" : "\262\316\312\375\320\336\270\304\272\363\320\350\326\264\320\320\261\243\264\346\262\305\311\372\320\247\241\243",UI_MUTED,UI_BG,0U);
+        ui_text(216U,332U,65U,group==0U ? "\313\311\277\252 DCH1 \273\362\315\313\263\366\277\330\326\306\322\263\243\254\261\276\273\372\263\267\317\372\324\313\266\257\312\271\304\334\241\243" : "\261\340\274\255\312\261\260\264 BACK \310\241\317\373\243\254\315\313\263\366\307\260\274\354\262\351\261\243\264\346\327\264\314\254\241\243",UI_MUTED,UI_BG,0U);
     }
     snprintf(text,sizeof(text),"%u / %u",selected_item-start+1U,count);
     ui_text(720U,60U,7U,text,UI_ACCENT,UI_BG,0U);
@@ -547,8 +563,8 @@ void digital_channel_monitor_page(const uint8_t *raw_values, const uint8_t *stab
     if(first_draw) {
         display_flag = 0U;
         GTP_IRQ_Disable();
-        ui_shell("Digital inputs", "6 INPUTS / 30 ms DEBOUNCE", "CONTROL / MONITOR");
-        ui_footer("BACK return   Buttons: active low", "RAW + STABLE LEVELS");
+        ui_shell("\312\375\327\326\312\344\310\353", "6 \302\267\312\344\310\353 / 30 ms \310\245\266\266", "\322\243\277\330 / \274\340\312\323");
+        ui_footer("BACK \267\265\273\330  \260\264\274\374\265\315\265\347\306\275\323\320\320\247", "\324\255\312\274\323\353\316\310\266\250\265\347\306\275");
     }
     for(channel = 0U; channel < 6U; channel++) {
         raw = raw_values ? raw_values[channel] : 0xffU;
@@ -563,17 +579,17 @@ void digital_channel_monitor_page(const uint8_t *raw_values, const uint8_t *stab
             ui_round_rect(x, y, 240U, 152U, 14U, background);
             snprintf(text, sizeof(text), "DCH%u", channel + 1U);
             ui_text(x + 16U, y + 12U, 5U, text, UI_INK, background, 1U);
-            ui_text(x + 128U, y + 20U, 12U, channel == 0U ? "ENABLE" :
-                    is_button[channel] ? "BUTTON" : "TOGGLE", color, background, 0U);
-            snprintf(text, sizeof(text), "%s / %s", pins[channel], is_button[channel] ? "MOMENTARY" : "2 POSITION");
+            ui_text(x + 128U, y + 20U, 12U, channel == 0U ? "\324\313\266\257\312\271\304\334" :
+                    is_button[channel] ? "\260\264\274\374" : "\262\246\270\313", color, background, 0U);
+            snprintf(text, sizeof(text), "%s / %s", pins[channel], is_button[channel] ? "\327\324\270\264\316\273" : "\301\275\265\265");
             ui_text(x + 16U, y + 46U, 26U, text, UI_MUTED, background, 0U);
             if(stable > 1U) state = "--";
-            else if(is_button[channel]) state = stable == 0U ? "PRESSED" : "RELEASED";
-            else state = stable == 0U ? "POS A" : "POS B";
+            else if(is_button[channel]) state = stable == 0U ? "\322\321\260\264\317\302" : "\322\321\313\311\277\252";
+            else state = stable == 0U ? "\316\273\326\303 A" : "\316\273\326\303 B";
             ui_text(x + 16U, y + 68U, 8U, state, color, background, 2U);
         }
         if(changed || raw != last_raw[channel]) {
-            snprintf(text, sizeof(text), "RAW %c     STABLE %c", raw <= 1U ? '0' + raw : '-',
+            snprintf(text, sizeof(text), "\324\255\312\274 %c    \316\310\266\250 %c", raw <= 1U ? '0' + raw : '-',
                      stable <= 1U ? '0' + stable : '-');
             ui_text(x + 16U, y + 128U, 26U, text, UI_MUTED, background, 0U);
         }
@@ -855,7 +871,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
                       item_count != last_count || strcmp(safe_path, last_path) != 0;
     selection_changed = selected_item != last_selected;
     if(first_draw) {
-        ui_shell("Files", "SD CARD / BROWSE STORAGE", "TOOLS");
+        ui_shell("\316\304\274\376\344\257\300\300", "SD \277\250 / \316\304\274\376\344\257\300\300", "\271\244\276\337");
         ui_round_rect(16U, 96U, 768U, 40U, 10U, UI_TINT);
         gui_file_row_icon(32U, 102U, 1U, UI_ACCENT);
     }
@@ -882,7 +898,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
         LCD_SetTextColor(foreground);
         LCD_SetBackColor(background);
         ILI9806G_DispString_EN_CH(80U, y + 4U, safe_name);
-        if(entries[index].is_directory) strcpy(size_text, "FOLDER");
+        if(entries[index].is_directory) strcpy(size_text, "\316\304\274\376\274\320");
         else gui_file_size_text(entries[index].size, size_text);
         ui_text(620U, y + 12U, 16U, size_text, UI_MUTED, background, 0U);
         ui_text(756U, y + 12U, 1U, ">", foreground, background, 0U);
@@ -901,7 +917,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
     }
     if(content_changed || selection_changed) {
         snprintf(count_text, sizeof(count_text), "%u / %u FILES", item_count ? selected_item + 1U : 0U, item_count);
-        ui_footer("LEFT/RIGHT select   OK open   BACK parent/exit", count_text);
+        ui_footer("\327\363\323\322 \321\241\324\361  OK \264\362\277\252  BACK \311\317\274\266/\315\313\263\366", count_text);
     }
     memcpy(last_path, safe_path, sizeof(last_path));
     memcpy(last_status, safe_status, sizeof(last_status));
@@ -949,24 +965,24 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
                         editing != last_editing;
 
     if(first_draw) {
-        ui_shell("Parameters", "CONFIGURATION / CHANNEL SETUP", "SETTINGS");
+        ui_shell("\262\316\312\375\311\350\326\303", "\317\265\315\263 / \315\250\265\300\305\344\326\303", "\311\350\326\303");
         ui_round_rect(16U, 104U, 160U, 320U, 14U, UI_SURFACE);
         ui_round_rect(64U, 124U, 64U, 64U, 14U, UI_TINT);
         ui_icon(72U, 132U, 48U, UI_ICON_SETTINGS, UI_ACCENT, UI_TINT);
-        ui_text(32U, 196U, 16U, "PARAMETERS", UI_MUTED, UI_SURFACE, 0U);
-        ui_text(32U, 284U, 16U, "CURRENT ITEM", UI_MUTED, UI_SURFACE, 0U);
-        ui_text(32U, 360U, 16U, "Save changes via", UI_MUTED, UI_SURFACE, 0U);
-        ui_text(32U, 382U, 16U, "SAVE ALL below", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 196U, 16U, "\262\316\312\375\311\350\326\303", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 284U, 16U, "\265\261\307\260\317\356\304\277", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 360U, 16U, "\320\336\270\304\272\363\307\353\326\264\320\320", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 382U, 16U, "\301\320\261\355\304\251\316\262\265\304\261\243\264\346", UI_MUTED, UI_SURFACE, 0U);
     }
 
     if(first_draw || editing != last_editing || dirty != last_dirty) {
-        state_text = editing ? "EDITING" : dirty ? "UNSAVED" : "SAVED";
+        state_text = editing ? "\261\340\274\255\326\320" : dirty ? "\316\264\261\243\264\346" : "\322\321\261\243\264\346";
         state_color = editing || dirty ? UI_AMBER : UI_GREEN;
         ui_round_rect(32U, 224U, 128U, 40U, 9U, state_color);
         ui_text(40U, 236U, 14U, state_text, UI_SURFACE, state_color, 0U);
-        ui_footer(editing ? "LEFT/RIGHT change   OK confirm   BACK cancel" :
-                  "LEFT/RIGHT select   OK edit/run   BACK return",
-                  dirty ? "CHANGES NOT SAVED" : "PARAMETER SETTINGS");
+        ui_footer(editing ? "\327\363\323\322 \265\367\325\373  OK \310\267\310\317  BACK \310\241\317\373" :
+                  "\327\363\323\322 \321\241\324\361  OK \261\340\274\255/\326\264\320\320  BACK \267\265\273\330",
+                  dirty ? "\320\336\270\304\311\320\316\264\261\243\264\346" : "\262\316\312\375\311\350\326\303");
     }
     if(window_changed || selection_changed) {
         snprintf(text, sizeof(text), "%u/%u",
@@ -998,7 +1014,7 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
         gui_settings_scroll(first_visible, visible_count, total_items);
         if(!visible_count) {
             ui_round_rect(192U, 104U, 580U, 284U, 14U, UI_SURFACE);
-            ui_text(344U, 220U, 23U, "No parameters available", UI_MUTED, UI_SURFACE, 0U);
+            ui_text(344U, 220U, 23U, "\324\335\316\336\277\311\323\303\262\316\312\375", UI_MUTED, UI_SURFACE, 0U);
         }
     }
     if(first_draw || strcmp(status, last_status) != 0 || editing != last_editing || dirty != last_dirty) {
@@ -1023,8 +1039,8 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
 {
     static const int8_t power_dbm[4] = {-18, -12, -6, 0};
     static const char *rate_text[3] = {"250 Kbps", "1 Mbps", "2 Mbps"};
-    static const char *labels[6] = {"Wireless output", "RF channel", "Transmit power",
-                                   "Air data rate", "Apply & save", "Check module"};
+    static const char *labels[6] = {"\316\336\317\337\267\242\311\344", "\316\336\317\337\306\265\265\300", "\267\242\311\344\271\246\302\312",
+                                   "\277\325\326\320\313\331\302\312", "\323\246\323\303\262\242\261\243\264\346", "\274\354\262\342\304\243\277\351"};
     static char last_values[6][24];
     static char last_status[80];
     static uint8_t last_runtime[5], last_selected = 0xffU, last_editing = 0xffU;
@@ -1057,27 +1073,28 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
                       power_index != runtime_power_index || data_rate != runtime_data_rate);
     snprintf(status, sizeof(status), "%.79s", status_text ? status_text : "");
     memset(values, 0, sizeof(values));
-    snprintf(values[0], sizeof(values[0]), "%s", enabled ? "ON" : "OFF");
+    snprintf(values[0], sizeof(values[0]), "%s", enabled ? "\277\252\306\364" : "\271\330\261\325");
     snprintf(values[1], sizeof(values[1]), "%u / %u MHz", channel, 2400U + channel);
     snprintf(values[2], sizeof(values[2]), "%d dBm", power_dbm[power_index]);
     snprintf(values[3], sizeof(values[3]), "%s", rate_text[data_rate]);
-    snprintf(values[4], sizeof(values[4]), "%s", "RUN");
-    snprintf(values[5], sizeof(values[5]), "%s", "RUN");
+    snprintf(values[4], sizeof(values[4]), "%s", "\326\264\320\320");
+    snprintf(values[5], sizeof(values[5]), "%s", "\326\264\320\320");
 
     if(first_draw) {
-        ui_shell("Wireless", "NRF24 / OUTPUT CONFIGURATION", "SETTINGS");
+        ui_shell("NRF \316\336\317\337\311\350\326\303", "NRF24 / \316\336\317\337\267\242\311\344\305\344\326\303", "\311\350\326\303");
         ui_round_rect(16U, 104U, 160U, 320U, 14U, UI_SURFACE);
         ui_round_rect(64U, 124U, 64U, 64U, 14U, UI_TINT);
         ui_icon(72U, 132U, 48U, UI_ICON_RADIO, UI_ACCENT, UI_TINT);
-        ui_text(32U, 196U, 16U, "MODULE READBACK", UI_MUTED, UI_SURFACE, 0U);
-        ui_text(32U, 268U, 16U, "ACTUAL OUTPUT", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 196U, 16U, "\304\243\277\351\327\264\314\254\273\330\266\301", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 268U, 16U, "\265\261\307\260\311\372\320\247\311\350\326\303", UI_MUTED, UI_SURFACE, 0U);
     }
+    if(first_draw) ui_text(200U,430U,72U,"\316\336\317\337\277\252\306\364\272\363\326\334\306\332\267\242\260\374\243\273\324\313\266\257\320\350\324\332\277\330\326\306\322\263\265\245\266\300\312\271\304\334\241\243",UI_MUTED,UI_BG,0U);
     if(runtime_changed) {
         state_color = runtime_valid ? UI_GREEN : UI_RED;
         ui_round_rect(32U, 224U, 128U, 32U, 8U, state_color);
-        ui_text(40U, 232U, 14U, runtime_valid ? "MODULE OK" : "UNAVAILABLE",
+        ui_text(40U, 232U, 14U, runtime_valid ? "\304\243\277\351\325\375\263\243" : "\266\301\310\241\312\247\260\334",
                 UI_SURFACE, state_color, 0U);
-        ui_text(32U, 292U, 8U, runtime_valid ? (runtime_enabled ? "ON" : "OFF") : "--",
+        ui_text(32U, 292U, 8U, runtime_valid ? (runtime_enabled ? "\277\252\306\364" : "\271\330\261\325") : "--",
                 runtime_valid ? UI_INK : UI_MUTED, UI_SURFACE, 1U);
         snprintf(text, sizeof(text), runtime_valid ? "CH%u  %uMHz" : "CH --",
                  runtime_channel, 2400U + runtime_channel);
@@ -1096,9 +1113,9 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
     if(first_draw || selection_changed || runtime_changed ||
        memcmp(values, last_values, sizeof(values)) != 0 || strcmp(status, last_status) != 0) {
         ui_text(200U, 408U, 72U, status, UI_MUTED, UI_BG, 0U);
-        ui_footer(editing ? "LEFT/RIGHT change   OK confirm   BACK cancel" :
-                  "LEFT/RIGHT select   OK edit/run   BACK return",
-                  editing ? "EDITING" : actual_differs ? "PENDING APPLY" : "WIRELESS SETTINGS");
+        ui_footer(editing ? "\327\363\323\322 \265\367\325\373  OK/BACK \275\341\312\370\261\340\274\255" :
+                  "\327\363\323\322 \321\241\324\361  OK \261\340\274\255/\326\264\320\320  BACK \267\265\273\330",
+                  editing ? "\261\340\274\255\326\320" : actual_differs ? "\320\336\270\304\311\320\316\264\323\246\323\303" : "\316\336\317\337\311\350\326\303");
     }
     memcpy(last_values, values, sizeof(last_values));
     memcpy(last_runtime, runtime, sizeof(last_runtime));
@@ -1161,23 +1178,23 @@ void system_data_read_and_set(void)
 
     if(display_flag != 0U) {
         display_flag = 0U; GTP_IRQ_Disable(); snapshot_valid = 0U;
-        ui_shell("Satellite navigation", "LOCAL GNSS / POSITION + TIME", "TOOLS");
+        ui_shell("\316\300\320\307\266\250\316\273", "\261\276\273\372 GNSS / \266\250\316\273\323\353\312\261\274\344", "\271\244\276\337");
         ui_round_rect(24U,96U,480U,140U,12U,UI_SURFACE);
         ui_round_rect(520U,96U,256U,140U,12U,UI_SURFACE);
-        ui_text(40U,108U,36U,"POSITION / WGS84",UI_MUTED,UI_SURFACE,0U);
-        ui_text(536U,108U,28U,"FIX QUALITY",UI_MUTED,UI_SURFACE,0U);
+        ui_text(40U,108U,36U,"\276\255\316\263\266\310 / WGS84",UI_MUTED,UI_SURFACE,0U);
+        ui_text(536U,108U,28U,"\266\250\316\273\327\264\314\254",UI_MUTED,UI_SURFACE,0U);
         for(i=0U;i<3U;i++) {
             uint16_t x = 24U + 256U*i;
             ui_round_rect(x,248U,240U,96U,12U,UI_SURFACE);
             ui_round_rect(x,356U,240U,76U,12U,UI_SURFACE);
         }
-        ui_text(40U,258U,26U,"GPS / USED : IN VIEW",UI_MUTED,UI_SURFACE,0U);
-        ui_text(296U,258U,26U,"BDS / USED : IN VIEW",UI_MUTED,UI_SURFACE,0U);
-        ui_text(552U,258U,26U,"NMEA TIME / UTC+8",UI_MUTED,UI_SURFACE,0U);
-        ui_text(40U,366U,26U,"ALTITUDE / m",UI_MUTED,UI_SURFACE,0U);
-        ui_text(296U,366U,26U,"GROUND SPEED / km/h",UI_MUTED,UI_SURFACE,0U);
-        ui_text(552U,366U,26U,"TRUE COURSE / deg",UI_MUTED,UI_SURFACE,0U);
-        ui_footer("BACK  Return", "LOCAL GNSS");
+        ui_text(40U,258U,26U,"GPS / \312\271\323\303 : \277\311\274\373",UI_MUTED,UI_SURFACE,0U);
+        ui_text(296U,258U,26U,"\261\261\266\267 / \312\271\323\303 : \277\311\274\373",UI_MUTED,UI_SURFACE,0U);
+        ui_text(552U,258U,26U,"\316\300\320\307\312\261\274\344 / UTC+8",UI_MUTED,UI_SURFACE,0U);
+        ui_text(40U,366U,26U,"\272\243\260\316 / m",UI_MUTED,UI_SURFACE,0U);
+        ui_text(296U,366U,26U,"\265\330\303\346\313\331\266\310 / km/h",UI_MUTED,UI_SURFACE,0U);
+        ui_text(552U,366U,26U,"\325\346\272\275\317\362 / deg",UI_MUTED,UI_SURFACE,0U);
+        ui_footer("BACK \267\265\273\330", "\261\276\273\372 GNSS");
     }
     if(snapshot_valid && memcmp(&current,&previous,sizeof(current)) == 0) return;
     previous = current; snapshot_valid = 1U;
@@ -1188,8 +1205,8 @@ void system_data_read_and_set(void)
         current.day >= 1 && current.day <= 31 && current.hour >= 0 && current.hour <= 23 &&
         current.minute >= 0 && current.minute <= 59 && current.second >= 0 && current.second <= 60;
     color = position_valid ? UI_GREEN : UI_MUTED;
-    fix_text = !position_valid ? "NO FIX" : current.sig == 2 ? "DGNSS FIX" :
-        current.fix >= 3 ? "3D FIX" : "2D FIX";
+    fix_text = !position_valid ? "\316\264\266\250\316\273" : current.sig == 2 ? "\262\356\267\326\266\250\316\273" :
+        current.fix >= 3 ? "3D \266\250\316\273" : "2D \266\250\316\273";
     if(position_valid) {
         latitude = current.latitude < 0.0 ? -current.latitude : current.latitude;
         longitude = current.longitude < 0.0 ? -current.longitude : current.longitude;
@@ -1198,11 +1215,11 @@ void system_data_read_and_set(void)
         snprintf(text,sizeof(text),"LON  %c %10.6f",current.longitude < 0.0 ? 'W' : 'E',longitude);
         ui_text(40U,180U,28U,text,UI_INK,UI_SURFACE,1U);
     } else {
-        ui_text(40U,132U,28U,"LAT  -- NO VALID POSITION",UI_MUTED,UI_SURFACE,1U);
-        ui_text(40U,180U,28U,"LON  -- NO VALID POSITION",UI_MUTED,UI_SURFACE,1U);
+        ui_text(40U,132U,28U,"\316\263\266\310 -- \265\310\264\375\323\320\320\247\266\250\316\273",UI_MUTED,UI_SURFACE,1U);
+        ui_text(40U,180U,28U,"\276\255\266\310 -- \265\310\264\375\323\320\320\247\266\250\316\273",UI_MUTED,UI_SURFACE,1U);
     }
     ui_text(536U,132U,14U,fix_text,color,UI_SURFACE,1U);
-    ui_text(536U,178U,28U,fresh ? "NMEA DATA RECEIVED" : "WAITING FOR NMEA",UI_MUTED,UI_SURFACE,0U);
+    ui_text(536U,178U,28U,fresh ? "\322\321\312\325\265\275 NMEA \312\375\276\335" : "\265\310\264\375 NMEA \312\375\276\335",UI_MUTED,UI_SURFACE,0U);
     if(position_valid) snprintf(text,sizeof(text),"HDOP %.2f  PDOP %.2f",current.hdop,current.pdop);
     else strcpy(text,"HDOP --    PDOP --");
     ui_text(536U,204U,28U,text,UI_MUTED,UI_SURFACE,0U);
@@ -1218,10 +1235,10 @@ void system_data_read_and_set(void)
         ui_fill(x,324U,width,6U,i ? UI_GREEN : UI_ACCENT);
     }
     if(time_valid) snprintf(text,sizeof(text),"%02d:%02d:%02d",current.hour,current.minute,current.second);
-    else strcpy(text,"WAITING");
+    else strcpy(text,"\265\310\264\375\326\320");
     ui_text(552U,274U,13U,text,time_valid ? UI_INK : UI_MUTED,UI_SURFACE,1U);
     if(time_valid) snprintf(text,sizeof(text),"%04d-%02d-%02d",current.year+1900,current.month,current.day);
-    else strcpy(text,"NO VALID NMEA TIME");
+    else strcpy(text,"\324\335\316\336\323\320\320\247\316\300\320\307\312\261\274\344");
     ui_text(552U,320U,26U,text,UI_MUTED,UI_SURFACE,0U);
     for(i=0U;i<3U;i++) {
         double value = i == 0U ? current.altitude : i == 1U ? current.speed : current.course;
@@ -1237,8 +1254,8 @@ void channel_monitor_page(void)
     /* Battery and the joystick button are intentionally outside the axis table. */
     static const uint8_t order[8] = {0U,1U,2U,3U,4U,5U,7U,8U};
     static const char * const labels[8] = {
-        "A01  KNOB", "A02  LEFT Y", "A03  LEFT X", "A04  KNOB",
-        "A05  RIGHT Y", "A06  RIGHT X", "A07  AUX", "A08  AUX"
+        "A01 \320\375\305\245", "A02 \327\363\322\241\270\313 Y", "A03 \327\363\322\241\270\313 X", "A04 \320\375\305\245",
+        "A05 \323\322\322\241\270\313 Y", "A06 \323\322\322\241\270\313 X", "A07 \273\254\314\365", "A08 \270\250\326\372\312\344\310\353"
     };
     static GuiAnalogFilter filters[10];
     static uint16_t previous_value[10];
@@ -1249,21 +1266,21 @@ void channel_monitor_page(void)
     if(first) {
         display_flag = 0U;
         GTP_IRQ_Disable();
-        ui_shell("Channel monitor", "", "CONTROL / INPUTS");
+        ui_shell("\315\250\265\300\274\340\312\323", "", "\322\243\277\330 / \324\255\312\274\312\344\310\353");
         gui_monitor_tabs(0U);
         ui_round_rect(24U,104U,368U,266U,12U,UI_SURFACE);
         ui_round_rect(408U,104U,368U,266U,12U,UI_SURFACE);
-        ui_text(40U,116U,24U,"ANALOG INPUT / A01 - A04",UI_MUTED,UI_SURFACE,0U);
-        ui_text(424U,116U,24U,"ANALOG INPUT / A05 - A08",UI_MUTED,UI_SURFACE,0U);
-        ui_text(320U,116U,6U,"12 BIT",UI_MUTED,UI_SURFACE,0U);
-        ui_text(704U,116U,6U,"12 BIT",UI_MUTED,UI_SURFACE,0U);
+        ui_text(40U,116U,24U,"\304\243\304\342\312\344\310\353 / A01 - A04",UI_MUTED,UI_SURFACE,0U);
+        ui_text(424U,116U,24U,"\304\243\304\342\312\344\310\353 / A05 - A08",UI_MUTED,UI_SURFACE,0U);
+        ui_text(320U,116U,6U,"12 \316\273",UI_MUTED,UI_SURFACE,0U);
+        ui_text(704U,116U,6U,"12 \316\273",UI_MUTED,UI_SURFACE,0U);
         ui_round_rect(24U,382U,368U,50U,10U,UI_SURFACE);
         ui_round_rect(408U,382U,368U,50U,10U,UI_SURFACE);
-        ui_text(40U,390U,26U,"A09  JOYSTICK BUTTON",UI_INK,UI_SURFACE,0U);
-        ui_text(40U,410U,26U,"ADC sample / pull-up input",UI_MUTED,UI_SURFACE,0U);
-        ui_text(424U,390U,26U,"BAT  REMOTE BATTERY",UI_INK,UI_SURFACE,0U);
-        ui_text(424U,410U,26U,"ADC sample / local battery",UI_MUTED,UI_SURFACE,0U);
-        ui_footer("LEFT / RIGHT / OK: Switch view", "BACK: Control menu");
+        ui_text(40U,390U,26U,"A09 \322\241\270\313\260\264\321\271",UI_INK,UI_SURFACE,0U);
+        ui_text(40U,410U,26U,"ADC \262\311\321\371 / \311\317\300\255\312\344\310\353",UI_MUTED,UI_SURFACE,0U);
+        ui_text(424U,390U,26U,"BAT \261\276\273\372\265\347\263\330",UI_INK,UI_SURFACE,0U);
+        ui_text(424U,410U,26U,"ADC \262\311\321\371 / \261\276\273\372\265\347\263\330",UI_MUTED,UI_SURFACE,0U);
+        ui_footer("\327\363\323\322 / OK \307\320\273\273\312\323\315\274", "BACK \267\265\273\330\322\243\277\330\262\313\265\245");
     }
     /* Keep the established display-only filter and live frame cadence. */
     for(i = 0U; i < 7U; i++)
@@ -1317,25 +1334,25 @@ void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
     if(first) {
         display_flag = 0U;
         GTP_IRQ_Disable();
-        ui_shell("Channel monitor", "", "CONTROL / OUTPUT");
+        ui_shell("\315\250\265\300\274\340\312\323", "", "\322\243\277\330 / \312\265\274\312\267\242\313\315");
         gui_monitor_tabs(1U);
         ui_round_rect(24U,104U,424U,284U,12U,UI_SURFACE);
         ui_round_rect(464U,104U,312U,284U,12U,UI_SURFACE);
-        ui_text(40U,118U,8U,"INPUT",UI_MUTED,UI_SURFACE,0U);
-        ui_text(128U,118U,6U,"RAW",UI_MUTED,UI_SURFACE,0U);
-        ui_text(224U,118U,12U,"CALIBRATED",UI_MUTED,UI_SURFACE,0U);
-        ui_text(400U,118U,3U,"REV",UI_MUTED,UI_SURFACE,0U);
-        ui_text(480U,118U,35U,"LAST QUEUED FRAME / RC v1",UI_MUTED,UI_SURFACE,0U);
+        ui_text(40U,118U,8U,"\312\344\310\353",UI_MUTED,UI_SURFACE,0U);
+        ui_text(128U,118U,6U,"\324\255\312\274\326\265",UI_MUTED,UI_SURFACE,0U);
+        ui_text(224U,118U,12U,"\320\243\327\274\326\265",UI_MUTED,UI_SURFACE,0U);
+        ui_text(400U,118U,4U,"\267\264\317\362",UI_MUTED,UI_SURFACE,0U);
+        ui_text(480U,118U,35U,"\327\356\275\374\314\341\275\273\265\304\267\242\313\315\326\241 / RC v1",UI_MUTED,UI_SURFACE,0U);
         ui_fill(40U,142U,392U,1U,UI_LINE);
         ui_fill(480U,180U,280U,1U,UI_LINE);
         ui_text(480U,192U,7U,"X / Y",UI_MUTED,UI_SURFACE,0U);
-        ui_text(480U,232U,9U,"HEADING",UI_MUTED,UI_SURFACE,0U);
-        ui_text(480U,258U,9U,"LIMIT",UI_MUTED,UI_SURFACE,0U);
+        ui_text(480U,232U,9U,"\304\277\261\352\272\275\317\362",UI_MUTED,UI_SURFACE,0U);
+        ui_text(480U,258U,9U,"\313\331\266\310\311\317\317\336",UI_MUTED,UI_SURFACE,0U);
         ui_fill(480U,284U,280U,1U,UI_LINE);
-        ui_text(480U,368U,35U,"Radio ACK is not execution feedback",UI_MUTED,UI_SURFACE,0U);
-        ui_text(24U,418U,64U,"Stick mapping: X=-A03   Y=A02   Heading=-A06",UI_MUTED,UI_BG,0U);
-        ui_text(632U,418U,18U,"MONITOR ONLY",UI_MUTED,UI_BG,0U);
-        ui_footer("LEFT / RIGHT / OK: Switch view", "BACK: Control menu");
+        ui_text(480U,368U,35U,"\323\262\274\376\273\330\326\264\262\273\264\372\261\355\273\372\306\367\310\313\326\264\320\320\275\341\271\373",UI_MUTED,UI_SURFACE,0U);
+        ui_text(24U,418U,64U,"\315\250\265\300\323\263\311\344: X=-A03  Y=A02  \272\275\317\362=-A06",UI_MUTED,UI_BG,0U);
+        ui_text(632U,418U,18U,"\326\273\266\301\274\340\312\323",UI_MUTED,UI_BG,0U);
+        ui_footer("\327\363\323\322 / OK \307\320\273\273\312\323\315\274", "BACK \267\265\273\330\322\243\277\330\262\313\265\245");
     }
     for(i = 0U; i < 6U; i++) {
         y = 150U + (uint16_t)i * 38U;
@@ -1351,7 +1368,7 @@ void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
                 (unsigned)(value < 0 ? -value : value) / 10U,
                 (unsigned)(value < 0 ? -value : value) % 10U);
             ui_text(224U,y,9U,displayBuffer,UI_ACCENT,UI_SURFACE,0U);
-            ui_text(400U,y,3U,param.chReverse[i] ? "ON" : "--",
+            ui_text(400U,y,4U,param.chReverse[i] ? "\277\252\306\364" : "--",
                 param.chReverse[i] ? UI_ACCENT : UI_MUTED,UI_SURFACE,0U);
             previous.raw[i] = snapshot->raw[i];
             previous.calibrated[i] = value;
@@ -1361,8 +1378,8 @@ void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
     }
     if(update_text) {
         live = snapshot->sent && snapshot->tx_age_ms <= 100U;
-        state = !snapshot->sent ? "NOT SENT" : !live ? "STALE FRAME" :
-            snapshot->transmitted.armed ? "OUTPUT ENABLED" : "OUTPUT DISARMED";
+        state = !snapshot->sent ? "\311\320\316\264\267\242\313\315" : !live ? "\267\242\313\315\326\241\322\321\271\375\306\332" :
+            snapshot->transmitted.armed ? "\324\312\320\355\324\313\266\257" : "\324\313\266\257\322\321\275\373\326\271";
         state_color = !live ? UI_AMBER : snapshot->transmitted.armed ? UI_GREEN : UI_MUTED;
         ui_text(480U,148U,17U,state,state_color,UI_SURFACE,1U);
         if(snapshot->sent)
@@ -1394,7 +1411,7 @@ void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
             snprintf(displayBuffer,sizeof(displayBuffer),"INPUT %-5s  AGE %5u ms",live ? "LIVE" : "STALE",snapshot->sample_age_ms);
         else snprintf(displayBuffer,sizeof(displayBuffer),"INPUT NO SAMPLE");
         ui_text(24U,396U,34U,displayBuffer,live ? UI_GREEN : UI_AMBER,UI_BG,0U);
-        ui_text(328U,396U,56U,control_link_status(),UI_MUTED,UI_BG,0U);
+        ui_text(328U,396U,56U,gui_control_status_text(control_link_status()),UI_MUTED,UI_BG,0U);
         text_ms = (uint32_t)ticks;
     }
     LCD_SetFont(&Font16x32); LCD_SetBackColor(UI_BG); LCD_SetTextColor(UI_INK);
@@ -1402,7 +1419,7 @@ void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
 
 void imu6050_information(void)
 {
-    static const char *names[3] = {"PITCH", "ROLL", "YAW"};
+    static const char *names[3] = {"\270\251\321\366 PITCH", "\272\341\271\366 ROLL", "\272\275\317\362 YAW"};
     static const float limits[3] = {90.0f, 180.0f, 180.0f};
     static const uint16_t colors[3] = {UI_ACCENT, UI_GREEN, UI_AMBER};
     static int16_t old_bar[3];
@@ -1429,19 +1446,19 @@ void imu6050_information(void)
     if(first_draw) {
         display_flag = 0U;
         GTP_IRQ_Disable();
-        ui_shell("Attitude", "MPU6050 / LOCAL IMU", "TOOLS / SENSORS");
+        ui_shell("\261\276\273\372\327\313\314\254", "MPU6050 / \261\276\273\372\264\253\270\320\306\367", "\271\244\276\337 / \264\253\270\320\306\367");
         for(i = 0U; i < 3U; i++) {
             x = 24U + (uint16_t)i * 256U;
             ui_round_rect(x, 104U, 240U, 204U, 14U, UI_SURFACE);
             ui_text(x + 16U, 120U, 26U, names[i], colors[i], UI_SURFACE, 0U);
-            ui_text(x + 16U, 212U, 26U, "DEGREES", UI_MUTED, UI_SURFACE, 0U);
+            ui_text(x + 16U, 212U, 26U, "\275\307\266\310 / deg", UI_MUTED, UI_SURFACE, 0U);
             snprintf(text, sizeof(text), "-%3.0f       0       +%3.0f", limits[i], limits[i]);
             ui_text(x + 16U, 278U, 26U, text, UI_MUTED, UI_SURFACE, 0U);
         }
         ui_round_rect(24U, 320U, 752U, 112U, 14U, UI_SURFACE);
-        ui_text(40U, 332U, 14U, "SENSOR STATE", UI_MUTED, UI_SURFACE, 0U);
-        ui_text(432U, 332U, 20U, "TEMPERATURE / C", UI_MUTED, UI_SURFACE, 0U);
-        ui_footer("BACK return", "LOCAL SENSOR / 100 ms UI");
+        ui_text(40U, 332U, 14U, "\264\253\270\320\306\367\327\264\314\254", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(432U, 332U, 20U, "\316\302\266\310 / C", UI_MUTED, UI_SURFACE, 0U);
+        ui_footer("BACK \267\265\273\330", "\261\276\273\372\264\253\270\320\306\367 / 100 ms");
     }
     for(i = 0U; i < 3U; i++) {
         x = 24U + (uint16_t)i * 256U;
@@ -1458,7 +1475,7 @@ void imu6050_information(void)
         ui_bipolar_bar(x + 16U, 248U, 208U, 10U, meter, &old_bar[i], state_changed);
     }
     if(state_changed) {
-        ui_text(168U, 332U, 25U, valid ? "LIVE / DMP READY" : "WAITING FOR VALID SAMPLE",
+        ui_text(168U, 332U, 25U, valid ? "\312\375\276\335\323\320\320\247 / DMP \276\315\320\367" : "\265\310\264\375\323\320\320\247\262\311\321\371",
                 valid ? UI_GREEN : UI_AMBER, UI_SURFACE, 0U);
     }
     if(valid) snprintf(angle, sizeof(angle), "%5.1f", (float)temp / 100.0f);
@@ -1607,21 +1624,21 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
         snapshot_valid = 0U;
         old_raw_x[0] = old_raw_x[1] = old_raw_y[0] = old_raw_y[1] = 0xffffU;
         previous_status[0] = '\0';
-        ui_shell("Robot control", "LIVE STICKS / ROBOT TELEMETRY", "CONTROL / DASHBOARD");
+        ui_shell("\273\372\306\367\310\313\277\330\326\306", "\322\241\270\313\312\344\310\353 / \273\372\306\367\310\313\322\243\262\342", "\322\243\277\330 / \277\330\326\306\314\250");
         ui_round_rect(24U,96U,752U,40U,10U,UI_SURFACE);
         ui_round_rect(24U,148U,208U,200U,12U,UI_SURFACE);
         ui_round_rect(568U,148U,208U,200U,12U,UI_SURFACE);
         ui_round_rect(248U,148U,304U,110U,12U,UI_SURFACE);
         ui_round_rect(248U,270U,144U,78U,12U,UI_SURFACE);
         ui_round_rect(408U,270U,144U,78U,12U,UI_SURFACE);
-        ui_text(40U,158U,22U,"LEFT / MOTION",UI_ACCENT,UI_SURFACE,0U);
-        ui_text(584U,158U,22U,"RIGHT / HEADING",UI_GREEN,UI_SURFACE,0U);
-        ui_text(268U,160U,32U,"ROBOT SPEED",UI_MUTED,UI_SURFACE,0U);
+        ui_text(40U,158U,22U,"\327\363\322\241\270\313 / \306\275\322\306",UI_ACCENT,UI_SURFACE,0U);
+        ui_text(584U,158U,22U,"\323\322\322\241\270\313 / \272\275\317\362",UI_GREEN,UI_SURFACE,0U);
+        ui_text(268U,160U,32U,"\273\372\306\367\310\313\313\331\266\310",UI_MUTED,UI_SURFACE,0U);
         ui_text(496U,214U,4U,"m/s",UI_MUTED,UI_SURFACE,0U);
-        ui_text(264U,282U,15U,"ROBOT VOLTAGE",UI_MUTED,UI_SURFACE,0U);
-        ui_text(424U,282U,14U,"HEADING / deg",UI_MUTED,UI_SURFACE,0U);
+        ui_text(264U,282U,15U,"\273\372\306\367\310\313\265\347\321\271",UI_MUTED,UI_SURFACE,0U);
+        ui_text(424U,282U,14U,"\272\275\317\362 / deg",UI_MUTED,UI_SURFACE,0U);
         ui_round_rect(24U,360U,752U,76U,10U,UI_SURFACE);
-        ui_footer("DCH1: Hold to enable after ready", "BACK: Stop and return");
+        ui_footer("\276\315\320\367\272\363\260\264\327\241 DCH1 \312\271\304\334\324\313\266\257", "BACK \263\267\317\372\312\271\304\334\262\242\267\265\273\330");
     }
     /* Preserve the existing wall-clock gate and display-only joystick filter. */
     draw_text = first_draw || (uint32_t)(now - last_numeric_ms) >= 250U;
@@ -1632,10 +1649,10 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
         previous = *telemetry; snapshot_valid = 1U;
         if(!telemetry->link_online) {
             ui_text(280U,184U,8U,"--",UI_MUTED,UI_SURFACE,2U);
-            ui_text(268U,238U,32U,"NO ROBOT TELEMETRY",UI_AMBER,UI_SURFACE,0U);
+            ui_text(268U,238U,32U,"\311\320\316\336\273\372\306\367\310\313\322\243\262\342",UI_AMBER,UI_SURFACE,0U);
             ui_text(264U,306U,7U,"--",UI_MUTED,UI_SURFACE,1U);
             ui_text(424U,306U,7U,"--",UI_MUTED,UI_SURFACE,1U);
-            ui_text(40U,364U,90U,"ROBOT TELEMETRY / WAITING FOR RECEIVER",UI_AMBER,UI_SURFACE,0U);
+            ui_text(40U,364U,90U,"\273\372\306\367\310\313\322\243\262\342 / \265\310\264\375\275\323\312\325\266\313\273\330\264\253",UI_AMBER,UI_SURFACE,0U);
             ui_text(40U,382U,90U,"POS X --   Y --   Z --       ROLL --   PITCH --",UI_MUTED,UI_SURFACE,0U);
             ui_text(40U,400U,90U,"ACC X --   Y --   Z --       BAT --   GPS --   SAT --",UI_MUTED,UI_SURFACE,0U);
             ui_text(40U,418U,90U,"LAT --          LON --          ALT --",UI_MUTED,UI_SURFACE,0U);
@@ -1644,13 +1661,13 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
             fix_text = telemetry->gps_fix >= 3U ? "3D" : telemetry->gps_fix == 2U ? "2D" : "NO";
             gui_robot_format_value(number[0],sizeof(number[0]),8U,"%6.2f",telemetry->speed_mps);
             ui_text(280U,184U,8U,number[0],UI_ACCENT,UI_SURFACE,2U);
-            ui_text(268U,238U,32U,"ROBOT TELEMETRY / LIVE",UI_GREEN,UI_SURFACE,0U);
+            ui_text(268U,238U,32U,"\273\372\306\367\310\313\322\243\262\342 / \323\320\320\247",UI_GREEN,UI_SURFACE,0U);
             gui_robot_format_value(number[0],sizeof(number[0]),5U,"%5.2f",telemetry->voltage_v);
             snprintf(displayBuffer,sizeof(displayBuffer),"%s V",number[0]);
             ui_text(264U,306U,7U,displayBuffer,UI_INK,UI_SURFACE,1U);
             gui_robot_format_value(number[0],sizeof(number[0]),7U,"%6.1f",telemetry->yaw_deg);
             ui_text(424U,306U,7U,number[0],UI_INK,UI_SURFACE,1U);
-            snprintf(displayBuffer,sizeof(displayBuffer),"ROBOT TELEMETRY / LIVE     RX %10lu    AGE %5u ms",
+            snprintf(displayBuffer,sizeof(displayBuffer),"\273\372\306\367\310\313\322\243\262\342 / \323\320\320\247  RX %10lu  \321\323\263\331 %5u ms",
                 (unsigned long)telemetry->packet_count,telemetry->packet_age_ms);
             ui_text(40U,364U,90U,displayBuffer,UI_GREEN,UI_SURFACE,0U);
             gui_robot_format_value(number[0],sizeof(number[0]),11U,"%+7.2f",telemetry->position_x_m);
@@ -1679,14 +1696,14 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
     if(first_draw || strcmp(previous_status,status)) {
         snprintf(previous_status,sizeof(previous_status),"%s",status);
         if(strncmp(status,"ENABLED",7U) == 0) {
-            state_label = "OUTPUT ENABLED"; state_color = UI_GREEN;
+            state_label = "\324\312\320\355\324\313\266\257"; state_color = UI_GREEN;
         } else if(strncmp(status,"READY",5U) == 0) {
-            state_label = "READY TO ENABLE"; state_color = UI_ACCENT;
+            state_label = "\277\311\322\324\312\271\304\334"; state_color = UI_ACCENT;
         } else {
-            state_label = "OUTPUT INHIBITED"; state_color = UI_AMBER;
+            state_label = "\324\313\266\257\322\321\275\373\326\271"; state_color = UI_AMBER;
         }
         ui_text(40U,108U,23U,state_label,state_color,UI_SURFACE,0U);
-        ui_text(272U,108U,60U,previous_status,UI_INK,UI_SURFACE,0U);
+        ui_text(272U,108U,60U,gui_control_status_text(previous_status),UI_INK,UI_SURFACE,0U);
     }
     raw[0] = gui_robot_filter_update(&filters[0],ADC1_Value[ROBOT_LEFT_X_ADC_INDEX],first_draw);
     raw[1] = gui_robot_filter_update(&filters[1],ADC1_Value[ROBOT_LEFT_Y_ADC_INDEX],first_draw);

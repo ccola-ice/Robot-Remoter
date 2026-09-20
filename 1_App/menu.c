@@ -24,10 +24,11 @@
 #define BROWSER_VISIBLE_ROWS  6U
 #define BROWSER_PATH_LENGTH   256U
 #define PARAM_VISIBLE_ROWS    GUI_PARAM_VISIBLE_ROWS
-#define PARAM_GLOBAL_COUNT    18U
+#define PARAM_GLOBAL_COUNT    7U
+#define PARAM_CALIBRATION_CHANNELS 6U
 #define PARAM_CHANNEL_START   PARAM_GLOBAL_COUNT
 #define PARAM_CHANNEL_FIELDS  5U
-#define PARAM_ACTION_START    (PARAM_CHANNEL_START + chNum * PARAM_CHANNEL_FIELDS)
+#define PARAM_ACTION_START    (PARAM_CHANNEL_START + PARAM_CALIBRATION_CHANNELS * PARAM_CHANNEL_FIELDS)
 #define PARAM_ITEM_COUNT      (PARAM_ACTION_START + 3U)
 
 typedef enum
@@ -57,13 +58,13 @@ static const MenuPage menu_items[MENU_ITEM_COUNT] =
 static const uint8_t nrf_power_register[4] = {0x09U, 0x0bU, 0x0dU, 0x0fU};
 static const char * const nrf_status_text[] =
 {
-    "Ready",
-    "Settings saved; register readback OK",
-    "Module check passed",
-    "Module check FAILED",
-    "Settings saved; register readback FAILED",
-    "Unsaved change; run Apply & Save",
-    "SPI Flash save verification FAILED"
+    "\xd0\xde\xb8\xc4\xb5\xc4\xca\xc7\xb2\xdd\xb8\xe5\xa3\xac\xd3\xa6\xd3\xc3\xb2\xa2\xb1\xa3\xb4\xe6\xba\xf3\xc9\xfa\xd0\xa7",
+    "\xd2\xd1\xb1\xa3\xb4\xe6\xa3\xac\xce\xde\xcf\xdf\xc4\xa3\xbf\xe9\xb6\xc1\xbb\xd8\xd2\xbb\xd6\xc2",
+    "\xce\xde\xcf\xdf\xc4\xa3\xbf\xe9\xbc\xec\xb2\xe9\xcd\xa8\xb9\xfd",
+    "\xce\xde\xcf\xdf\xc4\xa3\xbf\xe9\xbc\xec\xb2\xe9\xca\xa7\xb0\xdc",
+    "\xd2\xd1\xb1\xa3\xb4\xe6\xa3\xac\xb5\xab\xc4\xa3\xbf\xe9\xb6\xc1\xbb\xd8\xb2\xbb\xd2\xbb\xd6\xc2",
+    "\xb2\xdd\xb8\xe5\xd2\xd1\xd0\xde\xb8\xc4\xa3\xac\xc7\xeb\xd1\xa1\xd4\xf1\xd3\xa6\xd3\xc3\xb2\xa2\xb1\xa3\xb4\xe6",
+    "\xb1\xa3\xb4\xe6\xd0\xa3\xd1\xe9\xca\xa7\xb0\xdc\xa3\xac\xd4\xcb\xd0\xd0\xc9\xe8\xd6\xc3\xd2\xd1\xbb\xd6\xb8\xb4"
 };
 
 static MenuKey event_queue[MENU_EVENT_QUEUE_SIZE];
@@ -342,7 +343,7 @@ static void menu_param_load(void)
     param_editing = 0U;
     param_dirty = 0U;
     param_revision++;
-    menu_param_set_status("Runtime parameters loaded");
+    menu_param_set_status("\xd2\xd1\xd4\xd8\xc8\xeb\xb5\xb1\xc7\xb0\xb2\xce\xca\xfd\xa3\xac\xbd\xf6\xcf\xd4\xca\xbe\xd2\xd1\xca\xb5\xcf\xd6\xcf\xee\xc4\xbf");
 }
 
 static void menu_param_adjust_window(void)
@@ -361,154 +362,99 @@ static void menu_param_adjust_window(void)
 
 static uint8_t menu_param_supported(uint8_t item)
 {
-    return !(item == 2U || item == 4U || item == 5U || item == 6U || item == 7U ||
-             item == 8U || item == 9U || item == 10U || item == 11U ||
-             item == 12U || item == 13U);
+    /* The menu contains only consumed fields. Historic/unused fields stay in
+     * the persistent structure for record compatibility, not in this catalog. */
+    return item < PARAM_ITEM_COUNT;
 }
 
 static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
 {
-    static const char * const on_off_text[2] = {"OFF", "ON"};
-    static const char * const model_text[3] = {"AIRPLANE", "CAR", "BOAT"};
-    static const char * const hand_text[2] = {"RIGHT", "LEFT"};
+    static const char * const on_off_text[2] = {"\xb9\xd8\xb1\xd5", "\xbf\xaa\xc6\xf4"};
     static const char * const rate_text[3] = {"250 Kbps", "1 Mbps", "2 Mbps"};
     static const int8_t power_dbm[4] = {-18, -12, -6, 0};
-    uint8_t channel;
-    uint8_t field;
-    uint8_t power_index;
+    uint8_t channel, field, power_index;
 
     row->label[0] = '\0';
     row->value[0] = '\0';
-
+    if(!menu_param_supported(item_index)) return;
     switch(item_index)
     {
         case 0U:
-            strcpy(row->label, "Firmware");
+            strcpy(row->label, "\xb9\xcc\xbc\xfe\xb0\xe6\xb1\xbe\xa3\xa8\xd6\xbb\xb6\xc1\xa3\xa9");
             snprintf(row->value, sizeof(row->value), "%s / %s", FM_VERSION, FM_TIME);
             break;
         case 1U:
-            strcpy(row->label, "TX low voltage cutoff");
+            strcpy(row->label, "\xb7\xa2\xc9\xe4\xb5\xcd\xd1\xb9\xcd\xa3\xbf\xd8");
             snprintf(row->value, sizeof(row->value), "%.1f V", param_edit.warnBatVolt);
             break;
         case 2U:
-            strcpy(row->label, "RX battery warning");
-            snprintf(row->value, sizeof(row->value), "%.1f V", param_edit.RecWarnBatVolt);
-            break;
-        case 3U:
-            strcpy(row->label, "Battery calibration");
+            strcpy(row->label, "\xb5\xe7\xb3\xd8\xb5\xe7\xd1\xb9\xd0\xa3\xd7\xbc");
             snprintf(row->value, sizeof(row->value), "%u", param_edit.batVoltAdjust);
             break;
-        case 4U:
-            strcpy(row->label, "Throttle hand");
-            strcpy(row->value, hand_text[param_edit.throttlePreference ? 1U : 0U]);
-            break;
-        case 5U:
-            strcpy(row->label, "Model type");
-            strcpy(row->value, model_text[(param_edit.modelType <= 2U) ?
-                                          param_edit.modelType : 0U]);
-            break;
-        case 6U:
-            strcpy(row->label, "Trim step");
-            snprintf(row->value, sizeof(row->value), "%u", param_edit.PWMadjustUnit);
-            break;
-        case 7U:
-            strcpy(row->label, "Key sound");
-            strcpy(row->value, on_off_text[param_edit.keySound ? 1U : 0U]);
-            break;
-        case 8U:
-            strcpy(row->label, "Boot image invert");
-            strcpy(row->value, on_off_text[param_edit.onImage ? 1U : 0U]);
-            break;
-        case 9U:
-            strcpy(row->label, "Clock alarm");
-            strcpy(row->value, on_off_text[param_edit.clockMode ? 1U : 0U]);
-            break;
-        case 10U:
-            strcpy(row->label, "Alarm time");
-            snprintf(row->value, sizeof(row->value), "%u x 5 min", param_edit.clockTime);
-            break;
-        case 11U:
-            strcpy(row->label, "Startup throttle check");
-            strcpy(row->value, on_off_text[param_edit.clockCheck ? 1U : 0U]);
-            break;
-        case 12U:
-            strcpy(row->label, "Throttle protect");
-            snprintf(row->value, sizeof(row->value), "%u %%", param_edit.throttleProtect);
-            break;
-        case 13U:
-            strcpy(row->label, "PPM output");
-            strcpy(row->value, on_off_text[param_edit.PPM_Out ? 1U : 0U]);
-            break;
-        case 14U:
-            strcpy(row->label, "NRF wireless");
+        case 3U:
+            strcpy(row->label, "\xce\xde\xcf\xdf\xca\xe4\xb3\xf6");
             strcpy(row->value, on_off_text[param_edit.NRF_Mode ? 1U : 0U]);
             break;
-        case 15U:
-            strcpy(row->label, "NRF channel");
+        case 4U:
+            strcpy(row->label, "\xce\xde\xcf\xdf\xc6\xb5\xb5\xc0");
             snprintf(row->value, sizeof(row->value), "%u / %u MHz", param_edit.NRF_Channel,
-                    (uint16_t)(2400U + param_edit.NRF_Channel));
+                     (uint16_t)(2400U + param_edit.NRF_Channel));
             break;
-        case 16U:
-            strcpy(row->label, "NRF TX power");
+        case 5U:
+            strcpy(row->label, "\xb7\xa2\xc9\xe4\xb9\xa6\xc2\xca");
             power_index = menu_nrf_power_index(param_edit.NRF_Power);
             snprintf(row->value, sizeof(row->value), "%d dBm", power_dbm[power_index]);
             break;
-        case 17U:
-            strcpy(row->label, "NRF air rate");
-            strcpy(row->value, rate_text[(param_edit.NRF_DataRate <= 2U) ?
-                                         param_edit.NRF_DataRate : 2U]);
+        case 6U:
+            strcpy(row->label, "\xce\xde\xcf\xdf\xcb\xd9\xc2\xca");
+            strcpy(row->value, rate_text[param_edit.NRF_DataRate <= 2U ? param_edit.NRF_DataRate : 2U]);
             break;
         default:
             if(item_index < PARAM_ACTION_START)
             {
-                channel = (uint8_t)((item_index - PARAM_CHANNEL_START) /
-                                    PARAM_CHANNEL_FIELDS);
-                field = (uint8_t)((item_index - PARAM_CHANNEL_START) %
-                                  PARAM_CHANNEL_FIELDS);
+                channel = (uint8_t)((item_index - PARAM_CHANNEL_START) / PARAM_CHANNEL_FIELDS);
+                field = (uint8_t)((item_index - PARAM_CHANNEL_START) % PARAM_CHANNEL_FIELDS);
                 switch(field)
                 {
                     case 0U:
-                        sprintf(row->label, "CH%u lower limit", channel + 1U);
+                        snprintf(row->label, sizeof(row->label), "CH%u " "\xd0\xa3\xd7\xbc\xcf\xc2\xcf\xde", channel + 1U);
                         snprintf(row->value, sizeof(row->value), "%u", param_edit.chLower[channel]);
                         break;
                     case 1U:
-                        sprintf(row->label, "CH%u center", channel + 1U);
+                        snprintf(row->label, sizeof(row->label), "CH%u " "\xd0\xa3\xd7\xbc\xd6\xd0\xb5\xe3", channel + 1U);
                         snprintf(row->value, sizeof(row->value), "%u", param_edit.chMiddle[channel]);
                         break;
                     case 2U:
-                        sprintf(row->label, "CH%u upper limit", channel + 1U);
+                        snprintf(row->label, sizeof(row->label), "CH%u " "\xd0\xa3\xd7\xbc\xc9\xcf\xcf\xde", channel + 1U);
                         snprintf(row->value, sizeof(row->value), "%u", param_edit.chUpper[channel]);
                         break;
                     case 3U:
-                        sprintf(row->label, "CH%u trim", channel + 1U);
+                        snprintf(row->label, sizeof(row->label), "CH%u " "\xcd\xa8\xb5\xc0\xce\xa2\xb5\xf7", channel + 1U);
                         snprintf(row->value, sizeof(row->value), "%d", param_edit.PWMadjustValue[channel]);
                         break;
                     default:
-                        sprintf(row->label, "CH%u reverse", channel + 1U);
-                        strcpy(row->value,
-                               on_off_text[param_edit.chReverse[channel] ? 1U : 0U]);
+                        snprintf(row->label, sizeof(row->label), "CH%u " "\xcd\xa8\xb5\xc0\xb7\xbd\xcf\xf2", channel + 1U);
+                        strcpy(row->value, param_edit.chReverse[channel] ? "\xb7\xb4\xcf\xf2" : "\xd5\xfd\xcf\xf2");
                         break;
                 }
             }
             else if(item_index == PARAM_ACTION_START)
             {
-                strcpy(row->label, "SAVE ALL PARAMETERS");
-                strcpy(row->value, "Press OK");
+                strcpy(row->label, "\xb1\xa3\xb4\xe6\xc8\xab\xb2\xbf\xb2\xce\xca\xfd");
+                strcpy(row->value, "\xb0\xb4\xc8\xb7\xb6\xa8\xd6\xb4\xd0\xd0");
             }
-            else if(item_index == (PARAM_ACTION_START + 1U))
+            else if(item_index == PARAM_ACTION_START + 1U)
             {
-                strcpy(row->label, "RELOAD CURRENT VALUES");
-                strcpy(row->value, "Press OK");
+                strcpy(row->label, "\xd6\xd8\xd0\xc2\xd4\xd8\xc8\xeb\xb2\xce\xca\xfd");
+                strcpy(row->value, "\xb0\xb4\xc8\xb7\xb6\xa8\xd6\xb4\xd0\xd0");
             }
             else
             {
-                strcpy(row->label, "RESTORE DEFAULTS");
-                strcpy(row->value, "Not saved yet");
+                strcpy(row->label, "\xbb\xd6\xb8\xb4\xc4\xac\xc8\xcf\xb2\xce\xca\xfd");
+                strcpy(row->value, "\xc8\xd4\xd0\xe8\xb1\xa3\xb4\xe6");
             }
             break;
     }
-    if(!menu_param_supported(item_index))
-        strcpy(row->value, "UNAVAILABLE");
 }
 
 static void menu_param_adjust_float(void *packed_field, int8_t direction,
@@ -551,231 +497,89 @@ static void menu_param_adjust_float(void *packed_field, int8_t direction,
 
 static void menu_param_adjust(int8_t direction)
 {
-    uint8_t channel;
-    uint8_t field;
-    uint8_t power_index;
-    uint16_t value;
+    param_Config before;
+    uint8_t channel, field, power_index;
+    uint16_t value, minimum, maximum;
     int trim;
-
+    if(direction == 0 || param_selected_item == 0U || param_selected_item >= PARAM_ACTION_START) return;
+    memcpy(&before, &param_edit, sizeof(before));
     switch(param_selected_item)
     {
         case 1U:
             menu_param_adjust_float(&param_edit.warnBatVolt, direction, 25, 50);
             break;
         case 2U:
-            menu_param_adjust_float(&param_edit.RecWarnBatVolt, direction, 30, 300);
-            break;
-        case 3U:
             value = param_edit.batVoltAdjust;
-            if(direction < 0)
-            {
-                value = (value <= 500U) ? 500U :
-                        (uint16_t)((value < 510U) ? 500U : value - 10U);
-            }
-            else
-            {
-                value = (value >= 1500U) ? 1500U :
-                        (uint16_t)((value > 1490U) ? 1500U : value + 10U);
-            }
+            if(direction < 0) value = value <= 510U ? 500U : (uint16_t)(value - 10U);
+            else value = value >= 1490U ? 1500U : (uint16_t)(value + 10U);
             param_edit.batVoltAdjust = value;
             break;
-        case 4U:
-            param_edit.throttlePreference =
-                (uint8_t)!param_edit.throttlePreference;
-            break;
-        case 5U:
-            if(direction < 0)
-            {
-                param_edit.modelType = (param_edit.modelType == 0U) ?
-                                       2U : (param_edit.modelType - 1U);
-            }
-            else
-            {
-                param_edit.modelType = (uint8_t)((param_edit.modelType + 1U) % 3U);
-            }
-            break;
-        case 6U:
-            if(direction < 0)
-            {
-                if(param_edit.PWMadjustUnit > 1U)
-                {
-                    param_edit.PWMadjustUnit--;
-                }
-            }
-            else if(param_edit.PWMadjustUnit < 100U)
-            {
-                param_edit.PWMadjustUnit++;
-            }
-            break;
-        case 7U:
-            param_edit.keySound = (uint8_t)!param_edit.keySound;
-            break;
-        case 8U:
-            param_edit.onImage = (uint8_t)!param_edit.onImage;
-            break;
-        case 9U:
-            param_edit.clockMode = (uint8_t)!param_edit.clockMode;
-            break;
-        case 10U:
-            if(direction < 0)
-            {
-                if(param_edit.clockTime > 1U)
-                {
-                    param_edit.clockTime--;
-                }
-            }
-            else if(param_edit.clockTime < 255U)
-            {
-                param_edit.clockTime++;
-            }
-            break;
-        case 11U:
-            param_edit.clockCheck = (uint8_t)!param_edit.clockCheck;
-            break;
-        case 12U:
-            if(direction < 0)
-            {
-                if(param_edit.throttleProtect > 0U)
-                {
-                    param_edit.throttleProtect--;
-                }
-            }
-            else if(param_edit.throttleProtect < 100U)
-            {
-                param_edit.throttleProtect++;
-            }
-            break;
-        case 13U:
-            param_edit.PPM_Out = (uint8_t)!param_edit.PPM_Out;
-            break;
-        case 14U:
+        case 3U:
             param_edit.NRF_Mode = (uint8_t)!param_edit.NRF_Mode;
             break;
-        case 15U:
-            if(direction < 0)
-            {
-                if(param_edit.NRF_Channel > 0U)
-                {
-                    param_edit.NRF_Channel--;
-                }
-            }
-            else if(param_edit.NRF_Channel < 125U)
-            {
-                param_edit.NRF_Channel++;
-            }
+        case 4U:
+            if(direction < 0) { if(param_edit.NRF_Channel > 0U) param_edit.NRF_Channel--; }
+            else if(param_edit.NRF_Channel < 125U) param_edit.NRF_Channel++;
             break;
-        case 16U:
+        case 5U:
             power_index = menu_nrf_power_index(param_edit.NRF_Power);
-            if(direction < 0)
-            {
-                power_index = (power_index == 0U) ? 3U : (power_index - 1U);
-            }
-            else
-            {
-                power_index = (uint8_t)((power_index + 1U) % 4U);
-            }
+            if(direction < 0) power_index = power_index == 0U ? 3U : power_index - 1U;
+            else power_index = (uint8_t)((power_index + 1U) % 4U);
             param_edit.NRF_Power = nrf_power_register[power_index];
             break;
-        case 17U:
-            if(direction < 0)
-            {
-                param_edit.NRF_DataRate = (param_edit.NRF_DataRate == 0U) ?
-                                          2U : (param_edit.NRF_DataRate - 1U);
-            }
-            else
-            {
-                param_edit.NRF_DataRate =
-                    (uint8_t)((param_edit.NRF_DataRate + 1U) % 3U);
-            }
+        case 6U:
+            if(direction < 0) param_edit.NRF_DataRate = param_edit.NRF_DataRate == 0U ? 2U : param_edit.NRF_DataRate - 1U;
+            else param_edit.NRF_DataRate = (uint8_t)((param_edit.NRF_DataRate + 1U) % 3U);
             break;
         default:
-            if((param_selected_item >= PARAM_CHANNEL_START) &&
-               (param_selected_item < PARAM_ACTION_START))
+            channel = (uint8_t)((param_selected_item - PARAM_CHANNEL_START) / PARAM_CHANNEL_FIELDS);
+            field = (uint8_t)((param_selected_item - PARAM_CHANNEL_START) % PARAM_CHANNEL_FIELDS);
+            if(field < 3U)
             {
-                channel = (uint8_t)((param_selected_item - PARAM_CHANNEL_START) /
-                                    PARAM_CHANNEL_FIELDS);
-                field = (uint8_t)((param_selected_item - PARAM_CHANNEL_START) %
-                                  PARAM_CHANNEL_FIELDS);
-                if(field == 0U)
-                {
-                    value = param_edit.chLower[channel];
-                    if(direction < 0)
-                    {
-                        value = (value < 10U) ? 0U : (uint16_t)(value - 10U);
-                    }
-                    else
-                    {
-                        value = (uint16_t)(value + 10U);
-                        if(value > param_edit.chMiddle[channel])
-                        {
-                            value = param_edit.chMiddle[channel];
-                        }
-                    }
-                    param_edit.chLower[channel] = value;
+                /* Preserve the same strict ordering required by param_sanitize.
+                 * Reaching an endpoint must not reset a calibration on Save. */
+                if(param_edit.chLower[channel] >= param_edit.chMiddle[channel] ||
+                   param_edit.chMiddle[channel] >= param_edit.chUpper[channel] ||
+                   param_edit.chUpper[channel] > 4095U) {
+                    menu_param_set_status("\xd0\xa3\xd7\xbc\xb7\xb6\xce\xa7\xce\xde\xd0\xa7\xa3\xac\xc7\xeb\xcf\xc8\xbb\xd6\xb8\xb4\xc4\xac\xc8\xcf\xb2\xce\xca\xfd");
+                    param_revision++;
+                    return;
                 }
-                else if(field == 1U)
-                {
-                    value = param_edit.chMiddle[channel];
-                    if(direction < 0)
-                    {
-                        value = (value < 10U) ? 0U : (uint16_t)(value - 10U);
-                        if(value < param_edit.chLower[channel])
-                        {
-                            value = param_edit.chLower[channel];
-                        }
-                    }
-                    else
-                    {
-                        value = (value > 4085U) ? 4095U : (uint16_t)(value + 10U);
-                        if(value > param_edit.chUpper[channel])
-                        {
-                            value = param_edit.chUpper[channel];
-                        }
-                    }
-                    param_edit.chMiddle[channel] = value;
+                if(field == 0U) {
+                    value = param_edit.chLower[channel]; minimum = 0U;
+                    maximum = param_edit.chMiddle[channel] - 1U;
+                } else if(field == 1U) {
+                    value = param_edit.chMiddle[channel]; minimum = param_edit.chLower[channel] + 1U;
+                    maximum = param_edit.chUpper[channel] - 1U;
+                } else {
+                    value = param_edit.chUpper[channel]; minimum = param_edit.chMiddle[channel] + 1U;
+                    maximum = 4095U;
                 }
-                else if(field == 2U)
-                {
-                    value = param_edit.chUpper[channel];
-                    if(direction < 0)
-                    {
-                        value = (value < 10U) ? 0U : (uint16_t)(value - 10U);
-                        if(value < param_edit.chMiddle[channel])
-                        {
-                            value = param_edit.chMiddle[channel];
-                        }
-                    }
-                    else
-                    {
-                        value = (value > 4085U) ? 4095U : (uint16_t)(value + 10U);
-                    }
-                    param_edit.chUpper[channel] = value;
-                }
-                else if(field == 3U)
-                {
-                    trim = param_edit.PWMadjustValue[channel] + direction;
-                    if(trim < -1000)
-                    {
-                        trim = -1000;
-                    }
-                    else if(trim > 1000)
-                    {
-                        trim = 1000;
-                    }
-                    param_edit.PWMadjustValue[channel] = trim;
-                }
-                else
-                {
-                    param_edit.chReverse[channel] =
-                        (uint8_t)!param_edit.chReverse[channel];
-                }
+                if(direction < 0) value = value < 10U ? 0U : (uint16_t)(value - 10U);
+                else value = (uint16_t)(value + 10U);
+                if(value < minimum) value = minimum;
+                if(value > maximum) value = maximum;
+                if(field == 0U) param_edit.chLower[channel] = value;
+                else if(field == 1U) param_edit.chMiddle[channel] = value;
+                else param_edit.chUpper[channel] = value;
             }
+            else if(field == 3U)
+            {
+                trim = param_edit.PWMadjustValue[channel] + direction;
+                if(trim < -1000) trim = -1000;
+                if(trim > 1000) trim = 1000;
+                param_edit.PWMadjustValue[channel] = trim;
+            }
+            else param_edit.chReverse[channel] = (uint8_t)!param_edit.chReverse[channel];
             break;
     }
-
-    param_dirty = 1U;
     param_revision++;
-    menu_param_set_status("Unsaved change; select SAVE when finished");
+    if(memcmp(&before, &param_edit, sizeof(before)) == 0) {
+        menu_param_set_status("\xd2\xd1\xb4\xef\xb5\xbd\xd4\xca\xd0\xed\xb7\xb6\xce\xa7\xa3\xac\xca\xfd\xd6\xb5\xce\xb4\xb8\xc4\xb1\xe4");
+        return;
+    }
+    param_dirty = 1U;
+    menu_param_set_status("\xb2\xce\xca\xfd\xd2\xd1\xd0\xde\xb8\xc4\xa3\xac\xcd\xea\xb3\xc9\xba\xf3\xc7\xeb\xd1\xa1\xd4\xf1\xb1\xa3\xb4\xe6\xc8\xab\xb2\xbf\xb2\xce\xca\xfd");
 }
 
 static void menu_handle_param_key(MenuKey key)
@@ -795,8 +599,12 @@ static void menu_handle_param_key(MenuKey key)
         else if(key == MENU_KEY_OK)
         {
             param_editing = 0U;
+            if(memcmp(&param_edit, &param_edit_backup, sizeof(param_edit)) == 0)
+                param_dirty = param_dirty_before_edit;
             param_revision++;
-            menu_param_set_status("Edit confirmed; select SAVE to store it");
+            menu_param_set_status(param_dirty ?
+                "\xd0\xde\xb8\xc4\xd2\xd1\xc8\xb7\xc8\xcf\xa3\xac\xd1\xa1\xd4\xf1\xb1\xa3\xb4\xe6\xc8\xab\xb2\xbf\xb2\xce\xca\xfd\xba\xf3\xc9\xfa\xd0\xa7" :
+                "\xb1\xe0\xbc\xad\xd2\xd1\xbd\xe1\xca\xf8\xa3\xac\xc3\xbb\xd3\xd0\xce\xb4\xb1\xa3\xb4\xe6\xd0\xde\xb8\xc4");
         }
         else if(key == MENU_KEY_BACK)
         {
@@ -804,7 +612,7 @@ static void menu_handle_param_key(MenuKey key)
             param_dirty = param_dirty_before_edit;
             param_editing = 0U;
             param_revision++;
-            menu_param_set_status("Edit cancelled");
+            menu_param_set_status("\xd2\xd1\xc8\xa1\xcf\xfb\xb1\xbe\xcf\xee\xd0\xde\xb8\xc4");
         }
         page_dirty = 1U;
         return;
@@ -828,12 +636,12 @@ static void menu_handle_param_key(MenuKey key)
         case MENU_KEY_OK:
             if(param_selected_item == 0U)
             {
-                menu_param_set_status("Firmware information is read-only");
+                menu_param_set_status("\xb9\xcc\xbc\xfe\xb0\xe6\xb1\xbe\xce\xaa\xd6\xbb\xb6\xc1\xd0\xc5\xcf\xa2");
                 param_revision++;
             }
             else if(!menu_param_supported(param_selected_item))
             {
-                menu_param_set_status("Unavailable; control safety is always enabled");
+                menu_param_set_status("\xb8\xc3\xb2\xce\xca\xfd\xb2\xbb\xbf\xc9\xb1\xe0\xbc\xad\xa3\xac\xb0\xb2\xc8\xab\xb1\xa3\xbb\xa4\xca\xbc\xd6\xd5\xc6\xf4\xd3\xc3");
                 param_revision++;
             }
             else if(param_selected_item < PARAM_ACTION_START)
@@ -842,12 +650,12 @@ static void menu_handle_param_key(MenuKey key)
                 param_dirty_before_edit = param_dirty;
                 param_editing = 1U;
                 param_revision++;
-                menu_param_set_status("Editing: LEFT/RIGHT change, OK confirm");
+                menu_param_set_status("\xd7\xf3\xd3\xd2\xbc\xfc\xd0\xde\xb8\xc4\xa3\xac\xc8\xb7\xb6\xa8\xbc\xfc\xc8\xb7\xc8\xcf\xa3\xac\xb7\xb5\xbb\xd8\xbc\xfc\xc8\xa1\xcf\xfb");
             }
             else if(param_selected_item == PARAM_ACTION_START)
             {
                 if(param_sanitize(&param_edit)) {
-                    menu_param_set_status("Invalid values repaired; review before saving");
+                    menu_param_set_status("\xd2\xd1\xd0\xde\xb8\xb4\xce\xde\xd0\xa7\xca\xfd\xd6\xb5\xa3\xac\xc7\xeb\xbc\xec\xb2\xe9\xba\xf3\xd4\xd9\xb4\xce\xb1\xa3\xb4\xe6");
                     param_revision++;
                     break;
                 }
@@ -862,14 +670,14 @@ static void menu_handle_param_key(MenuKey key)
                     nrf24l01_apply_settings(param.NRF_Mode, param.NRF_Channel,
                                             param.NRF_Power, param.NRF_DataRate);
                     param_dirty = 0U;
-                    menu_param_set_status("Saved and verified in SPI Flash");
+                    menu_param_set_status("\xb2\xce\xca\xfd\xd2\xd1\xb1\xa3\xb4\xe6\xb2\xa2\xd0\xa3\xd1\xe9\xa3\xac\xd4\xcb\xd0\xd0\xd6\xb5\xd2\xd1\xb8\xfc\xd0\xc2");
                 }
                 else
                 {
                     memcpy((void *)&param, &runtime_backup,
                            sizeof(runtime_backup));
                     param_dirty = 1U;
-                    menu_param_set_status("SAVE FAILED: SPI Flash verify error");
+                    menu_param_set_status("\xb1\xa3\xb4\xe6\xca\xa7\xb0\xdc\xa3\xac\xd4\xcb\xd0\xd0\xb2\xce\xca\xfd\xd2\xd1\xbb\xd6\xb8\xb4\xa3\xac\xc7\xeb\xd6\xd8\xca\xd4");
                 }
                 param_revision++;
             }
@@ -878,14 +686,14 @@ static void menu_handle_param_key(MenuKey key)
                 menu_param_copy_from_runtime();
                 param_dirty = 0U;
                 param_revision++;
-                menu_param_set_status("Current runtime values reloaded");
+                menu_param_set_status("\xd2\xd1\xd6\xd8\xd0\xc2\xd4\xd8\xc8\xeb\xd4\xcb\xd0\xd0\xb2\xce\xca\xfd\xa3\xac\xce\xb4\xb1\xa3\xb4\xe6\xd0\xde\xb8\xc4\xd2\xd1\xb3\xb7\xcf\xfa");
             }
             else
             {
                 param_load_defaults(&param_edit);
                 param_dirty = 1U;
                 param_revision++;
-                menu_param_set_status("Defaults loaded; select SAVE to store them");
+                menu_param_set_status("\xd2\xd1\xd4\xd8\xc8\xeb\xc4\xac\xc8\xcf\xb2\xce\xca\xfd\xa3\xac\xd1\xa1\xd4\xf1\xb1\xa3\xb4\xe6\xba\xf3\xc9\xfa\xd0\xa7");
             }
             page_dirty = 1U;
             break;
@@ -1465,6 +1273,7 @@ void menu_process(void)
     {
         page_dirty = 0;
         refresh_due = 0;
+        if(!page_changed) LCD_BeginUpdate();
         menu_draw_current_page();
         gui_clock_overlay();
         LCD_EndPage();
@@ -1473,13 +1282,18 @@ void menu_process(void)
     else if(refresh_due)
     {
         refresh_due = 0;
+        LCD_BeginUpdate();
         menu_refresh_dynamic_page();
+        if(clock_refresh_due) { clock_refresh_due = 0U; gui_clock_overlay(); }
+        LCD_EndPage();
     }
 
     if(clock_refresh_due != 0U)
     {
         clock_refresh_due = 0U;
+        LCD_BeginUpdate();
         gui_clock_overlay();
+        LCD_EndPage();
     }
 }
 

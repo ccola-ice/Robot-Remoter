@@ -5,11 +5,11 @@ $testDir = Join-Path ([IO.Path]::GetTempPath()) ('remoter-gui-' + [guid]::NewGui
 [IO.Directory]::CreateDirectory($testDir) | Out-Null
 try {
     $source = [IO.File]::ReadAllText((Join-Path $repoRoot '1_App/gui.c'), [Text.Encoding]::GetEncoding(28591))
-    $functions = @('gui_monitor_tabs', 'channel_monitor_page', 'channel_output_monitor_page',
+    $functions = @('gui_control_status_text', 'gui_monitor_tabs', 'channel_monitor_page', 'channel_output_monitor_page',
         'gui_robot_stick_value', 'gui_robot_dot_patch', 'gui_robot_draw_stick', 'gui_robot_format_value', 'robot_control_page')
     $parts = @([regex]::Matches($source, '(?m)^#define ROBOT_\w+[^\r\n]*') | ForEach-Object { $_.Value })
     foreach ($name in $functions) {
-        $pattern = '(?ms)^(?:static )?(?:void|int16_t) ' + $name + '\(.*?^\}'
+        $pattern = '(?ms)^(?:static )?(?:void\s+|int16_t\s+|const char\s*\*\s*)' + $name + '\(.*?^\}'
         $matches = [regex]::Matches($source, $pattern)
         if ($matches.Count -ne 1) { throw "Expected one production function: $name" }
         $parts += $matches[0].Value

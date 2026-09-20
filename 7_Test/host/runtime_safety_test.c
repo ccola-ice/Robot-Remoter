@@ -98,7 +98,7 @@ static void GTP_IRQ_Disable(void) {}
 #define gui_robot_draw_stick ignore_draw
 static int16_t gui_robot_stick_value(uint16_t raw, uint8_t channel)
 { (void)channel; return (int16_t)(raw / 4U) - 500; }
-static void ILI9806G_DispString_EN(unsigned x, unsigned y, const char *text)
+static void capture_text(unsigned x, unsigned y, const char *text)
 {
     (void)x; (void)y;
     assert(text_guard.before == 0x12345678UL && text_guard.after == 0x87654321UL);
@@ -108,7 +108,24 @@ static void ILI9806G_DispString_EN(unsigned x, unsigned y, const char *text)
     if(x == 552U && y == 274U) snprintf(gps_time_text, sizeof(gps_time_text), "%s", text);
     rendered_strings++;
 }
+static void ILI9806G_DispString_EN(unsigned x, unsigned y, const char *text)
+{ (void)x; (void)y; assert(strlen(text) < sizeof(displayBuffer)); }
+static int GetGBKCode(uint8_t *bitmap, uint16_t code)
+{ (void)code; memset(bitmap,0x55,128U); return 0; }
+uint8_t FLASH_GetIoError(void) { return 0U; }
+static void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels)
+{ assert(pixels && x+w<=800U && y+h<=480U); }
+#define ui_text ui_real_text
 #include "gui_theme.h"
+#undef ui_text
+static void ui_text(uint16_t x, uint16_t y, uint8_t columns,
+    const char *text, uint16_t fg, uint16_t bg, uint8_t large)
+{
+    char captured[101];
+    ui_real_text(x,y,columns,text,fg,bg,large);
+    snprintf(captured,sizeof(captured),"%-*.*s",columns,columns,text ? text : "");
+    capture_text(x,y,captured);
+}
 #include "runtime_safety_impl.inc"
 
 static void test_ticks_and_atomic_flags(void)
@@ -212,12 +229,12 @@ static void test_bounded_formatting(void)
     extreme.battery_percent = extreme.satellites = extreme.gps_fix = 255U;
     display_flag = 1U;
     robot_control_page(&extreme);
-    assert(strstr(last_link, "WAITING FOR RECEIVER") != 0);
+    assert(strstr(last_link, "\265\310\264\375\275\323\312\325\266\313\273\330\264\253") != 0);
     offline_strings = rendered_strings;
     memcpy(&extreme.speed_mps, &nan_bits, sizeof(nan_bits));
     extreme.link_online = 1U;
     robot_control_page(&extreme);
-    assert(strstr(last_link, "TELEMETRY / LIVE") != 0 && rendered_strings > offline_strings);
+    assert(strstr(last_link, "\273\372\306\367\310\313\322\243\262\342 / \323\320\320\247") != 0 && rendered_strings > offline_strings);
     memset(&param_edit, 0xff, sizeof(param_edit));
     param_edit.warnBatVolt = FLT_MAX;
     param_edit.RecWarnBatVolt = -FLT_MAX;
@@ -228,8 +245,10 @@ static void test_bounded_formatting(void)
         assert(memchr(row_guard.row.label, 0, sizeof(row_guard.row.label)) != 0);
         assert(memchr(row_guard.row.value, 0, sizeof(row_guard.row.value)) != 0);
     }
+    assert(PARAM_ITEM_COUNT == 40U && PARAM_CALIBRATION_CHANNELS == 6U);
+    param_edit.batVoltAdjust = 1000U;
     menu_param_format_item(2U, &row_guard.row);
-    assert(strcmp(row_guard.row.value, "UNAVAILABLE") == 0);
+    assert(strcmp(row_guard.row.value, "1000") == 0);
 }
 
 static void test_gps_page_freshness(void)
@@ -245,11 +264,11 @@ static void test_gps_page_freshness(void)
     assert(strncmp(gps_time_text, "16:30:20", 8U) == 0);
     gps_position_fresh = 0U;
     system_data_read_and_set();
-    assert(strstr(gps_position_text, "NO VALID POSITION") != 0);
+    assert(strstr(gps_position_text, "\265\310\264\375\323\320\320\247\266\250\316\273") != 0);
     assert(strncmp(gps_time_text, "16:30:20", 8U) == 0);
     gps_clock_fresh = 0U;
     system_data_read_and_set();
-    assert(strncmp(gps_time_text, "WAITING", 7U) == 0);
+    assert(strncmp(gps_time_text, "\265\310\264\375\326\320", 6U) == 0);
 }
 
 int main(void)

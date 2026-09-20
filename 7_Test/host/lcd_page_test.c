@@ -13,6 +13,18 @@
 #include "menu_catalog.h"
 #include "control_link.h"
 
+static FILE *preview_font_file;
+void FLASH_SPI_Init(void) {}
+uint8_t FLASH_GetIoError(void) { return 0U; }
+void FLASH_Read_Data(uint8_t *buffer, unsigned address, unsigned size)
+{
+    memset(buffer,0,size);
+    if(preview_font_file && address >= GBKCODE_START_ADDRESS) {
+        assert(fseek(preview_font_file,(long)(address-GBKCODE_START_ADDRESS),SEEK_SET) == 0);
+        assert(fread(buffer,1U,size,preview_font_file) == size);
+    }
+}
+
 #define WHITE 0xffffU
 #define GREY 0xf7deU
 #define BLACK 0U
@@ -26,6 +38,9 @@
 #define CMD_SetPixel 0x2cU
 #define ILI9806G_DispWindow_X_Star 0U
 #define ILI9806G_DispWindow_Y_Star 0U
+#define ILI9806G_MORE_PIXEL 800U
+#define ILI9806G_LESS_PIXEL 480U
+static uint8_t LCD_SCAN_MODE = 5U;
 
 static uint16_t sram[800U * 480U + 16U];
 #define SRAM_BASE_ADDR ((uintptr_t)sram)
@@ -74,6 +89,7 @@ static void ILI9806G_Write_Data(uint16_t data)
         pixel_writes++;
         if(++cursor_x > x1) { cursor_x = x0; if(++cursor_y > y1) cursor_y = y0; }
     }
+    else if(command == 0x36U) { assert(data < 256U); }
     else
     {
         assert(command == CMD_SetCoordinateX || command == CMD_SetCoordinateY);
@@ -98,9 +114,6 @@ static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
             fprintf(stderr, "Text outside display: %u,%u: %s\n", x, y, text);
         assert(right <= LCD_X_LENGTH && y + LCD_Currentfonts->Height <= LCD_Y_LENGTH);
     }
-    if(x == 44U && y == 126U) snprintf(dashboard_battery_text, sizeof(dashboard_battery_text), "%s", text);
-    if(x == 280U && y == 126U) snprintf(dashboard_radio_text, sizeof(dashboard_radio_text), "%s", text);
-    if(x == 576U && y == 184U) snprintf(output_xy_text, sizeof(output_xy_text), "%s", text);
     lcd_real_DispString_EN(x, y, text);
 }
 
@@ -122,19 +135,32 @@ static void RTC_GetTime(unsigned format, RTC_TimeTypeDef *time)
 { (void)format; time->RTC_Hours = 12U; time->RTC_Minutes = 34U; time->RTC_Seconds = fake_rtc_seconds; rtc_time_reads++; }
 static void RTC_GetDate(unsigned format, RTC_DateTypeDef *date)
 { (void)format; date->RTC_Date = 21U; rtc_date_reads++; }
-/* External Chinese glyph storage is absent on the host; all preview names are ASCII. */
+/* Filename conversion stays ASCII in this fixture; menu Chinese uses the optional font file. */
 typedef uint16_t WCHAR;
 static WCHAR ff_convert(WCHAR code, unsigned direction) { (void)direction; return code < 128U ? code : 0U; }
 static void ILI9806G_DispString_EN_CH(uint16_t x, uint16_t y, char *text)
 { ILI9806G_DispString_EN(x, y, text); }
 
+#define ui_text ui_render_text
 #include "gui_theme.h"
+#undef ui_text
+static void ui_text(uint16_t x,uint16_t y,uint8_t columns,const char *text,
+                    uint16_t fg,uint16_t bg,uint8_t large)
+{
+    if(x == 44U && y == 126U) snprintf(dashboard_battery_text,sizeof(dashboard_battery_text),"%.*s",columns,text);
+    if(x == 280U && y == 126U) snprintf(dashboard_radio_text,sizeof(dashboard_radio_text),"%.*s",columns,text);
+    if(x == 576U && y == 184U) snprintf(output_xy_text,sizeof(output_xy_text),"%.*s",columns,text);
+    ui_render_text(x,y,columns,text,fg,bg,large);
+}
 #include "lcd_page_gui.inc"
 
 static const GuiParamRow preview_rows[6] = {
-    {"Firmware version", "1.0"}, {"Battery warning", "3.50 V"},
-    {"Control safety", "ALWAYS ON"}, {"CH1 lower", "0"},
-    {"CH1 center", "2047"}, {"CH1 upper", "4095"}
+    {"\xb9\xcc\xbc\xfe\xb0\xe6\xb1\xbe\xa3\xa8\xd6\xbb\xb6\xc1\xa3\xa9", "V1.0.0 / 2024.07.10"},
+    {"\xb7\xa2\xc9\xe4\xb5\xcd\xd1\xb9\xcd\xa3\xbf\xd8", "3.5 V"},
+    {"\xb5\xe7\xb3\xd8\xb5\xe7\xd1\xb9\xd0\xa3\xd7\xbc", "1000"},
+    {"\xce\xde\xcf\xdf\xca\xe4\xb3\xf6", "\xbf\xaa\xc6\xf4"},
+    {"\xce\xde\xcf\xdf\xc6\xb5\xb5\xc0", "40 / 2440 MHz"},
+    {"\xb7\xa2\xc9\xe4\xb9\xa6\xc2\xca", "0 dBm"}
 };
 static const GuiFileEntry preview_files[7] = {
     {"Models", 0U, 0U, 0U, 1U}, {"Logs", 0U, 0U, 0U, 1U},
@@ -245,7 +271,7 @@ static void draw_page(unsigned page)
     else if(page < 5U) menu_group_page((uint8_t)(page - 2U));
     else if(page < 16U) main_menu((uint8_t)(page - 5U));
     else if(page == 16U) channel_output_monitor_page(&snapshot);
-    else if(page == 17U) parameter_settings_page(preview_rows, 6U, 2U, 0U, 61U, 0U, 0U, 1U, "Runtime parameters loaded");
+    else if(page == 17U) parameter_settings_page(preview_rows, 6U, 2U, 0U, 40U, 0U, 0U, 1U, "Runtime parameters loaded");
     else if(page == 18U) nrf_settings_page(1U, 0U, 1U, 40U, 3U, 2U, "Settings loaded", 1U, 1U, 40U, 3U, 2U);
     else file_browser_page("0:/", preview_files, 7U, 2U, 0U, 1U, "Select a folder to open");
     /* The production late overlay must be included in the presented image. */
@@ -613,7 +639,7 @@ static void render_settings_case(unsigned page, unsigned state, uint8_t fresh)
         unsigned count = state == 0U ? 0U : state == 2U ? 2U : 6U;
         if(state == 3U) strcpy(rows[2].value, "4294967295 / 65535");
         parameter_settings_page(rows, (uint8_t)count, state == 3U ? 2U : 0U,
-            state == 2U ? 59U : 0U, state == 0U ? 0U : 61U,
+            state == 2U ? 38U : 0U, state == 0U ? 0U : 40U,
             state == 3U, state >= 2U, (uint16_t)(state + 1U), statuses[state]);
     } else if(page == 1U) {
         nrf_settings_page((uint8_t)state, state == 3U, state != 0U,
@@ -654,16 +680,16 @@ static void test_dashboard_truth(void)
     memset(&dashboard_snapshot, 0, sizeof(dashboard_snapshot));
     param.NRF_Mode = 0U; param.batVoltAdjust = 1000.0f; ADC1_Value[6] = 2385U;
     fake_ms = 0U; gui_prepare_page(); menu_group_page(0U); LCD_EndPage();
-    assert(strstr(dashboard_battery_text, "--.-- V") && strstr(dashboard_radio_text, "OFF"));
+    assert(strstr(dashboard_battery_text, "--.-- V") && strstr(dashboard_radio_text, "\271\330\261\325"));
     param.NRF_Mode = 1U;
     dashboard_snapshot.sampled = dashboard_snapshot.input_fresh = dashboard_snapshot.ack_seen = 1U;
     fake_ms = 249U; menu_group_page(0U);
     assert(strstr(dashboard_battery_text, "--.-- V"));
     fake_ms = 250U; menu_group_page(0U);
-    assert(strstr(dashboard_battery_text, "3.84 V") && strstr(dashboard_radio_text, "ACK RECEIVED"));
+    assert(strstr(dashboard_battery_text, "3.84 V") && strstr(dashboard_radio_text, "\322\321\312\325\265\275\273\330\326\264"));
     dashboard_snapshot.sample_age_ms = 101U; dashboard_snapshot.ack_age_ms = 150U;
     fake_ms = 500U; menu_group_page(0U);
-    assert(strstr(dashboard_battery_text, "--.-- V") && strstr(dashboard_radio_text, "WAITING"));
+    assert(strstr(dashboard_battery_text, "--.-- V") && strstr(dashboard_radio_text, "\265\310\264\375\326\320"));
     memset(&dashboard_snapshot, 0, sizeof(dashboard_snapshot));
     param.NRF_Mode = 0U;
 }
@@ -723,12 +749,23 @@ static void save_preview(const char *directory, const char *name)
     assert(fclose(file) == 0);
 }
 
+#include "lcd_transaction_test.inc"
+
 int main(int argc, char **argv)
 {
+    if(argc > 2) {
+        uint8_t glyph[128]; unsigned i, ink = 0U;
+        preview_font_file = fopen(argv[2],"rb"); assert(preview_font_file);
+        assert(GetGBKCode(glyph,0xd2a3U) == 0); /* Preview font must contain the word Remote. */
+        for(i=0U;i<sizeof(glyph);i++) ink += glyph[i];
+        assert(ink != 0U && ink != sizeof(glyph)*255U);
+    }
     test_transitions();
     test_edges_and_fallback();
     test_rgb565_blit();
     test_ascii_fast_path();
+    test_partial_transactions();
+    test_focus_transactions();
     test_diagnostics();
     test_diagnostics();
     test_robot_marker_pixels();
@@ -760,13 +797,14 @@ int main(int argc, char **argv)
         save_preview(argv[1], "channel-output.bmp");
         gui_prepare_page(); robot_control_page(&telemetry); LCD_EndPage();
         save_preview(argv[1], "robot-control.bmp");
-        gui_prepare_page(); parameter_settings_page(preview_rows, 6U, 4U, 0U, 61U, 0U, 0U, 1U, "Runtime parameters loaded"); LCD_EndPage();
+        gui_prepare_page(); parameter_settings_page(preview_rows, 6U, 4U, 0U, 40U, 0U, 0U, 1U, "\xd2\xd1\xd4\xd8\xc8\xeb\xb5\xb1\xc7\xb0\xb2\xce\xca\xfd\xa3\xac\xbd\xf6\xcf\xd4\xca\xbe\xd2\xd1\xca\xb5\xcf\xd6\xcf\xee\xc4\xbf"); LCD_EndPage();
         save_preview(argv[1], "parameter-settings.bmp");
-        gui_prepare_page(); nrf_settings_page(1U, 0U, 1U, 40U, 3U, 2U, "Settings loaded", 1U, 1U, 40U, 3U, 2U); LCD_EndPage();
+        gui_prepare_page(); nrf_settings_page(1U, 0U, 1U, 40U, 3U, 2U, "\xd0\xde\xb8\xc4\xb5\xc4\xca\xc7\xb2\xdd\xb8\xe5\xa3\xac\xd3\xa6\xd3\xc3\xb2\xa2\xb1\xa3\xb4\xe6\xba\xf3\xc9\xfa\xd0\xa7", 1U, 1U, 40U, 3U, 2U); LCD_EndPage();
         save_preview(argv[1], "wireless-settings.bmp");
         gui_prepare_page(); file_browser_page("0:/", preview_files, 7U, 2U, 0U, 1U, "Select a folder to open"); LCD_EndPage();
         save_preview(argv[1], "file-browser.bmp");
     }
     puts("LCD page tests passed: 80 page transitions, 16 output and 48 settings state transitions, bounds, marker trails, stable settings, diagnostics keys, framebuffer fallback and RGB565 clipping.");
+    if(preview_font_file) fclose(preview_font_file);
     return 0;
 }

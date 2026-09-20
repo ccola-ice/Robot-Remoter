@@ -30,25 +30,145 @@ static __inline void ui_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uin
     ILI9806G_Fill(x, y, x + w, y + h, color);
 }
 
+/* The existing GB2312 32x32 font lives in SPI Flash. Keep the UI independent
+ * of its GPIO headers; the driver owns this error latch. */
+uint8_t FLASH_GetIoError(void);
+
+static __inline uint8_t ui_gb2312_pair(uint8_t first, uint8_t second)
+{
+    return first >= 0xa1U && first <= 0xf7U && second >= 0xa1U && second <= 0xfeU;
+}
+
+/* GUI-thread-only FIFO cache: 8192 bitmap bytes plus 128 bytes of keys.
+ * Failed/erased reads never become valid entries or reuse old glyph pixels. */
+static const uint8_t *ui_chinese_bitmap(uint16_t code)
+{
+    static uint8_t bitmaps[64][128];
+    static uint16_t codes[64];
+    static uint8_t next;
+    uint8_t i, any_ink = 0U, any_clear = 0U;
+    uint8_t *bitmap;
+    int result;
+    if(!ui_gb2312_pair((uint8_t)(code >> 8),(uint8_t)code)) return 0;
+    for(i = 0U; i < 64U; i++) if(codes[i] == code) return bitmaps[i];
+    if(FLASH_GetIoError() != 0U) return 0;
+    bitmap = bitmaps[next];
+    codes[next] = 0U;
+    memset(bitmap,0,128U);
+    result = GetGBKCode(bitmap,code);
+    if(result != 0 || FLASH_GetIoError() != 0U) return 0;
+    for(i = 0U; i < 128U; i++) {
+        if(bitmap[i] != 0U) any_ink = 1U;
+        if(bitmap[i] != 0xffU) any_clear = 1U;
+    }
+    /* A1A1 is the intentional full-width space. Blank/erased other glyphs
+     * produce a visible replacement instead of silently hiding a label. */
+    if(!any_clear || (!any_ink && code != 0xa1a1U)) return 0;
+    codes[next] = code;
+    next = (uint8_t)((next + 1U) % 64U);
+    return bitmap;
+}
+
+static __inline uint8_t ui_chinese_bit(const uint8_t *bitmap, uint16_t x, uint16_t y)
+{
+    return (bitmap[y * 4U + x / 8U] & (uint8_t)(0x80U >> (x & 7U))) != 0U;
+}
+
+static void ui_chinese_glyph(uint16_t x, uint16_t y, uint16_t size,
+    uint16_t code, uint16_t fg, uint16_t bg)
+{
+    /* Four opaque rows at a time keep scratch RAM at 384 B, off the stack. */
+    static uint16_t pixels[48U * 4U];
+    const uint8_t *bitmap = ui_chinese_bitmap(code);
+    uint16_t row, band, column, source_x, source_y, low = size / 8U;
+    uint16_t high = size - low - 1U;
+    uint8_t ink;
+    for(band = 0U; band < size; band += 4U) {
+        for(row = 0U; row < 4U; row++) {
+            source_y = (uint16_t)((band + row) * 32U / size);
+            for(column = 0U; column < size; column++) {
+                if(bitmap) {
+                    source_x = (uint16_t)(column * 32U / size);
+                    ink = ui_chinese_bit(bitmap,source_x,source_y);
+                    if(size == 16U) {
+                        /* OR all 2x2 source pixels: thin strokes survive. */
+                        ink |= ui_chinese_bit(bitmap,source_x + 1U,source_y);
+                        ink |= ui_chinese_bit(bitmap,source_x,source_y + 1U);
+                        ink |= ui_chinese_bit(bitmap,source_x + 1U,source_y + 1U);
+                    }
+                } else {
+                    /* An outlined crossed box is a font-independent missing glyph. */
+                    ink = column >= low && column <= high && band + row >= low && band + row <= high &&
+                        (column == low || column == high || band + row == low || band + row == high ||
+                         column == band + row);
+                }
+                pixels[row * size + column] = ink ? fg : bg;
+            }
+        }
+        LCD_BlitRGB565(x,y + band,size,4U,pixels);
+    }
+}
+
 static __inline void ui_text(uint16_t x, uint16_t y, uint8_t columns,
     const char *text, uint16_t fg, uint16_t bg, uint8_t large)
 {
     char field[101];
+    const uint8_t *source = (const uint8_t *)text;
     uint16_t width = large == 2U ? 24U : large == 1U ? 16U : 8U;
     uint16_t height = width * 2U;
-    uint8_t count, i;
+    uint16_t code;
+    uint8_t count, i = 0U, start, has_chinese = 0U, first, second;
+    char saved;
     if(x >= 800U || y + height > 480U) return;
     count = (uint8_t)((800U - x) / width);
     if(columns > count) columns = count;
     if(columns > 100U) columns = 100U;
     if(!columns) return;
     memset(field, ' ', columns);
-    if(text) for(i = 0U; i < columns && text[i]; i++)
-        field[i] = (text[i] >= 32 && text[i] <= 126) ? text[i] : ' ';
+    /* The project strings use GB2312/CP936 bytes, not UTF-8. One ASCII cell
+     * is half a Chinese glyph. Never retain half a double-byte character. */
+    while(source && *source && i < columns) {
+        first = *source;
+        if(first < 0x80U) {
+            field[i++] = first >= 32U && first <= 126U ? (char)first : ' ';
+            source++;
+        } else {
+            second = source[1];
+            if(first >= 0x81U && first <= 0xfeU && second >= 0x40U && second <= 0xfeU && second != 0x7fU) {
+                if(i + 2U > columns) break;
+                if(ui_gb2312_pair(first,second)) {
+                    field[i] = (char)first; field[i + 1U] = (char)second;
+                    has_chinese = 1U;
+                } else field[i] = '?';
+                i += 2U; source += 2;
+            } else {
+                field[i++] = '?';
+                source++;
+            }
+        }
+    }
     field[columns] = '\0';
     LCD_SetFont(large == 2U ? &Font24x48 : large == 1U ? &Font16x32 : &Font8x16);
     LCD_SetBackColor(bg); LCD_SetTextColor(fg);
-    ILI9806G_DispString_EN(x, y, field);
+    if(!has_chinese) {
+        /* Preserve the established ASCII fast path and semantic test hook. */
+        ILI9806G_DispString_EN(x, y, field);
+        return;
+    }
+    i = 0U;
+    while(i < columns) {
+        if((uint8_t)field[i] >= 0x80U) {
+            code = (uint16_t)(((uint16_t)(uint8_t)field[i] << 8) | (uint8_t)field[i + 1U]);
+            ui_chinese_glyph(x + (uint16_t)i * width,y,height,code,fg,bg);
+            i += 2U;
+        } else {
+            start = i;
+            while(i < columns && (uint8_t)field[i] < 0x80U) i++;
+            saved = field[i]; field[i] = '\0';
+            ILI9806G_DispString_EN(x + (uint16_t)start * width,y,&field[start]);
+            field[i] = saved;
+        }
+    }
 }
 
 static __inline void ui_round_rect(uint16_t x, uint16_t y, uint16_t w,
@@ -75,11 +195,54 @@ static __inline void ui_round_rect(uint16_t x, uint16_t y, uint16_t w,
     }
 }
 
+static __inline uint16_t ui_round_inset(uint16_t row, uint16_t h, uint16_t radius)
+{
+    uint16_t edge_row = row < h - row - 1U ? row : h - row - 1U;
+    uint16_t inset = 0U;
+    int32_t dy, dx;
+    if(edge_row >= radius) return 0U;
+    dy = (int32_t)radius - edge_row - 1L;
+    do {
+        dx = (int32_t)radius - inset - 1L;
+        if(dx*dx + dy*dy <= (int32_t)radius*radius) break;
+        inset++;
+    } while(inset < radius);
+    return inset;
+}
+
+/* Focus changes touch the frame only; the already composed icon/text stays. */
+static __inline void ui_round_outline(uint16_t x, uint16_t y, uint16_t w,
+    uint16_t h, uint16_t radius, uint16_t thickness, uint16_t color)
+{
+    uint16_t row, outer, inner, inner_radius;
+    if(!w || !h || !thickness) return;
+    if(radius > w/2U) radius = w/2U;
+    if(radius > h/2U) radius = h/2U;
+    if(thickness >= w/2U || thickness >= h/2U) {
+        ui_round_rect(x,y,w,h,radius,color);
+        return;
+    }
+    inner_radius = 0U;
+    if(radius > thickness) inner_radius = (uint16_t)(radius-thickness);
+    for(row=0U;row<h;row++) {
+        outer = ui_round_inset(row,h,radius);
+        if(row < thickness || row >= h-thickness) {
+            ui_fill(x+outer,y+row,w-2U*outer,1U,color);
+        } else {
+            inner = thickness + ui_round_inset(row-thickness,h-2U*thickness,inner_radius);
+            if(inner > outer) {
+                ui_fill(x+outer,y+row,inner-outer,1U,color);
+                ui_fill(x+w-inner,y+row,inner-outer,1U,color);
+            }
+        }
+    }
+}
+
 static __inline void ui_shell(const char *title, const char *subtitle, const char *section)
 {
     ui_fill(0U,0U,800U,480U,UI_BG);
     ui_fill(0U,0U,800U,32U,UI_INK);
-    ui_text(20U,8U,20U,"ROBOT REMOTE",UI_SURFACE,UI_INK,0U);
+    ui_text(20U,8U,20U,"\xBB\xFA\xC6\xF7\xC8\xCB\xD2\xA3\xBF\xD8\xC6\xF7",UI_SURFACE,UI_INK,0U);
     ui_text(208U,8U,32U,section,UI_SURFACE,UI_INK,0U);
     ui_text(24U,48U,27U,title,UI_INK,UI_BG,1U);
     ui_text(464U,60U,39U,subtitle,UI_MUTED,UI_BG,0U);

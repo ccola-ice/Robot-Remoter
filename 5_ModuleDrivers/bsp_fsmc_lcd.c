@@ -34,25 +34,52 @@ static void                	ILI9806G_SetCursor           ( uint16_t usX, uint16_
 static __inline void       	ILI9806G_FillColor           ( uint32_t ulAmout_Point, uint16_t usColor );
 static uint16_t            	ILI9806G_Read_PixelData      ( void );
 
-/* Page transitions reserve the first 750 KiB of external SRAM (RGB565).
- * The panel keeps displaying its old GRAM while the next page is composed.
+/* Page transitions reserve the first 750 KiB of external SRAM; widget updates
+ * reuse the retained image. The panel keeps its old GRAM until composition is complete. A 16 px
+ * tile bitmap describes partial updates; no second framebuffer is allocated.
  * Enable only after the external SRAM boot test has passed. */
 #define LCD_PAGE_PIXEL_CAPACITY (800UL * 480UL)
+#define LCD_DIRTY_TILE_SIZE 16U
+#define LCD_DIRTY_TILE_CAPACITY (50U * 30U)
+#define LCD_DIRTY_WORDS ((LCD_DIRTY_TILE_CAPACITY + 31U) / 32U)
+#ifndef LCD_PAGE_TIMING_LOG
+#define LCD_PAGE_TIMING_LOG 0
+#endif
 static volatile uint16_t * const lcd_page_pixels =
     (volatile uint16_t *)SRAM_BASE_ADDR;
+/* active: 0 direct, 1 full page, 2 retained-image partial transaction. */
 static uint8_t lcd_page_enabled, lcd_page_active, lcd_page_window_valid;
-static uint16_t lcd_page_width, lcd_page_height;
+static uint8_t lcd_page_committed;
+static uint16_t lcd_page_width, lcd_page_height, lcd_dirty_columns, lcd_dirty_rows;
 static uint32_t lcd_page_x0, lcd_page_y0, lcd_page_x1, lcd_page_y1;
-static uint32_t lcd_page_x, lcd_page_y;
+static uint32_t lcd_page_x, lcd_page_y, lcd_page_started_cycles;
+static uint32_t lcd_dirty[LCD_DIRTY_WORDS];
 
-static uint32_t lcd_page_started_cycles;
+static void lcd_page_mark_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+    uint32_t right, bottom, row, column, bit;
+    if(lcd_page_active != 2U || !width || !height ||
+       x >= lcd_page_width || y >= lcd_page_height) return;
+    right = x + width;
+    bottom = y + height;
+    if(right > lcd_page_width) right = lcd_page_width;
+    if(bottom > lcd_page_height) bottom = lcd_page_height;
+    for(row = y / LCD_DIRTY_TILE_SIZE; row <= (bottom - 1U) / LCD_DIRTY_TILE_SIZE; row++)
+        for(column = x / LCD_DIRTY_TILE_SIZE; column <= (right - 1U) / LCD_DIRTY_TILE_SIZE; column++) {
+            bit = row * lcd_dirty_columns + column;
+            lcd_dirty[bit / 32U] |= 1UL << (bit % 32U);
+        }
+}
 
-/* Rectangles dominate menu composition. Check their bounds once per row,
- * then write spans without per-pixel window decoding or address multiplication. */
+static uint8_t lcd_page_tile_dirty(uint16_t column, uint16_t row)
+{
+    uint32_t bit = (uint32_t)row * lcd_dirty_columns + column;
+    return (lcd_dirty[bit / 32U] & (1UL << (bit % 32U))) != 0U;
+}
+
 static void lcd_page_fill_span(volatile uint16_t *dest, uint32_t count, uint16_t color)
 {
-    while(count >= 8U)
-    {
+    while(count >= 8U) {
         dest[0] = color; dest[1] = color; dest[2] = color; dest[3] = color;
         dest[4] = color; dest[5] = color; dest[6] = color; dest[7] = color;
         dest += 8U;
@@ -65,19 +92,17 @@ static uint8_t lcd_page_fill_window(uint32_t count, uint16_t color)
 {
     uint32_t x_end, y_end, y;
     if(lcd_page_window_valid == 0U) return 1U;
-    if(count != (lcd_page_x1 - lcd_page_x0) * (lcd_page_y1 - lcd_page_y0))
-        return 0U;
+    if(count != (lcd_page_x1 - lcd_page_x0) * (lcd_page_y1 - lcd_page_y0)) return 0U;
     x_end = lcd_page_x1 < lcd_page_width ? lcd_page_x1 : lcd_page_width;
     y_end = lcd_page_y1 < lcd_page_height ? lcd_page_y1 : lcd_page_height;
     if(lcd_page_x0 >= x_end || lcd_page_y0 >= y_end) return 1U;
+    lcd_page_mark_rect(lcd_page_x0,lcd_page_y0,x_end-lcd_page_x0,y_end-lcd_page_y0);
     for(y = lcd_page_y0; y < y_end; y++)
         lcd_page_fill_span(lcd_page_pixels + y * lcd_page_width + lcd_page_x0,
                            x_end - lcd_page_x0, color);
     return 1U;
 }
 
-/* All built-in ASCII fonts have byte-aligned rows. Keep their common,
- * fully-visible path separate from the clipped pixel-stream fallback. */
 static uint8_t lcd_page_draw_ascii(uint16_t x, uint16_t y, const uint8_t *bitmap)
 {
     uint16_t width = LCD_Currentfonts->Width, height = LCD_Currentfonts->Height;
@@ -86,11 +111,10 @@ static uint8_t lcd_page_draw_ascii(uint16_t x, uint16_t y, const uint8_t *bitmap
     uint8_t bits;
     if((width & 7U) != 0U || (uint32_t)x + width > lcd_page_width ||
        (uint32_t)y + height > lcd_page_height) return 0U;
-    for(row = 0U; row < height; row++)
-    {
+    lcd_page_mark_rect(x,y,width,height);
+    for(row = 0U; row < height; row++) {
         dest = lcd_page_pixels + ((uint32_t)y + row) * lcd_page_width + x;
-        for(column = 0U; column < width; column += 8U)
-        {
+        for(column = 0U; column < width; column += 8U) {
             bits = *bitmap++;
             dest[0] = (bits & 0x80U) ? foreground : background;
             dest[1] = (bits & 0x40U) ? foreground : background;
@@ -106,28 +130,30 @@ static uint8_t lcd_page_draw_ascii(uint16_t x, uint16_t y, const uint8_t *bitmap
     return 1U;
 }
 
+/* Call before legacy direct GRAM writers or display orientation changes. */
+void LCD_InvalidatePage(void)
+{
+    lcd_page_active = lcd_page_committed = lcd_page_window_valid = 0U;
+}
+
 void LCD_PageBuffer_Enable(uint8_t enabled)
 {
     lcd_page_enabled = enabled;
-    lcd_page_active = 0U;
+    LCD_InvalidatePage();
 }
 
 void LCD_BeginPage(uint16_t background)
 {
     uint32_t count = (uint32_t)LCD_X_LENGTH * LCD_Y_LENGTH;
-    if(count == 0U)
-    {
-        lcd_page_active = 0U;
-        lcd_page_window_valid = 0U;
+    lcd_page_committed = 0U;
+    if(count == 0U) {
+        lcd_page_active = lcd_page_window_valid = 0U;
         return;
     }
-    if(lcd_page_enabled == 0U || count > LCD_PAGE_PIXEL_CAPACITY)
-    {
-        /* A failed/disabled SRAM buffer must not leave the old page behind. */
-        lcd_page_active = 0U;
-        lcd_page_window_valid = 0U;
-        ILI9806G_OpenWindow(0U, 0U, LCD_X_LENGTH, LCD_Y_LENGTH);
-        ILI9806G_FillColor(count, background);
+    if(lcd_page_enabled == 0U || count > LCD_PAGE_PIXEL_CAPACITY) {
+        lcd_page_active = lcd_page_window_valid = 0U;
+        ILI9806G_OpenWindow(0U,0U,LCD_X_LENGTH,LCD_Y_LENGTH);
+        ILI9806G_FillColor(count,background);
         return;
     }
     lcd_page_started_cycles = DWT->CYCCNT;
@@ -135,7 +161,25 @@ void LCD_BeginPage(uint16_t background)
     lcd_page_height = LCD_Y_LENGTH;
     lcd_page_window_valid = 0U;
     lcd_page_active = 1U;
-    lcd_page_fill_span(lcd_page_pixels, count, background);
+    lcd_page_fill_span(lcd_page_pixels,count,background);
+}
+
+/* Retain the last presented pixels and defer all widget drawing. If a legacy
+ * direct draw invalidated the image, never replay stale SRAM over the panel:
+ * use direct rendering until the next complete page rebuild. */
+void LCD_BeginUpdate(void)
+{
+    uint16_t i;
+    if(lcd_page_active != 0U) return;
+    if(!lcd_page_enabled || !lcd_page_committed ||
+       lcd_page_width != LCD_X_LENGTH || lcd_page_height != LCD_Y_LENGTH) return;
+    lcd_dirty_columns = (lcd_page_width + LCD_DIRTY_TILE_SIZE - 1U) / LCD_DIRTY_TILE_SIZE;
+    lcd_dirty_rows = (lcd_page_height + LCD_DIRTY_TILE_SIZE - 1U) / LCD_DIRTY_TILE_SIZE;
+    if((uint32_t)lcd_dirty_columns * lcd_dirty_rows > LCD_DIRTY_TILE_CAPACITY) return;
+    for(i = 0U; i < LCD_DIRTY_WORDS; i++) lcd_dirty[i] = 0U;
+    lcd_page_window_valid = 0U;
+    lcd_page_started_cycles = DWT->CYCCNT;
+    lcd_page_active = 2U;
 }
 
 static void lcd_page_set_window(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
@@ -149,10 +193,10 @@ static void lcd_page_set_window(uint16_t x, uint16_t y, uint16_t width, uint16_t
 
 static __inline void lcd_begin_pixels(void)
 {
-    if(lcd_page_active == 0U)
+    if(lcd_page_active == 0U) {
+        lcd_page_committed = 0U;
         ILI9806G_Write_Cmd(CMD_SetPixel);
-    else
-    {
+    } else {
         lcd_page_x = lcd_page_x0;
         lcd_page_y = lcd_page_y0;
     }
@@ -160,23 +204,21 @@ static __inline void lcd_begin_pixels(void)
 
 static __inline void lcd_write_pixel(uint16_t color)
 {
-    if(lcd_page_active == 0U)
-    {
+    if(lcd_page_active == 0U) {
         ILI9806G_Write_Data(color);
         return;
     }
     if(lcd_page_window_valid == 0U) return;
-    /* Preserve the original window stride even when it crosses an edge. */
-    if(lcd_page_x < lcd_page_width && lcd_page_y < lcd_page_height)
+    if(lcd_page_x < lcd_page_width && lcd_page_y < lcd_page_height) {
         lcd_page_pixels[lcd_page_y * lcd_page_width + lcd_page_x] = color;
-    if(++lcd_page_x >= lcd_page_x1)
-    {
+        lcd_page_mark_rect(lcd_page_x,lcd_page_y,1U,1U);
+    }
+    if(++lcd_page_x >= lcd_page_x1) {
         lcd_page_x = lcd_page_x0;
         if(++lcd_page_y >= lcd_page_y1) lcd_page_y = lcd_page_y0;
     }
 }
 
-/* Write final widget pixels as one rectangle; clipped rows keep source stride. */
 void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
                     const uint16_t *pixels)
 {
@@ -186,68 +228,99 @@ void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
     uint32_t row, column;
     const uint16_t *source;
     volatile uint16_t *dest;
-    if(pixels == 0 || width == 0U || height == 0U ||
-       x >= target_width || y >= target_height) return;
+    if(pixels == 0 || width == 0U || height == 0U || x >= target_width || y >= target_height) return;
     visible_width = width;
     visible_height = height;
-    if(visible_width > target_width - x) visible_width = target_width - x;
-    if(visible_height > target_height - y) visible_height = target_height - y;
-    if(lcd_page_active != 0U)
-    {
-        for(row = 0U; row < visible_height; row++)
-        {
+    if(visible_width > target_width-x) visible_width = target_width-x;
+    if(visible_height > target_height-y) visible_height = target_height-y;
+    if(lcd_page_active != 0U) {
+        lcd_page_mark_rect(x,y,visible_width,visible_height);
+        for(row = 0U; row < visible_height; row++) {
             source = pixels + row * width;
             dest = lcd_page_pixels + ((uint32_t)y + row) * target_width + x;
-            for(column = 0U; column < visible_width; column++)
-                dest[column] = source[column];
+            for(column = 0U; column < visible_width; column++) dest[column] = source[column];
         }
         return;
     }
-    ILI9806G_OpenWindow(x, y, visible_width, visible_height);
+    lcd_page_committed = 0U;
+    ILI9806G_OpenWindow(x,y,visible_width,visible_height);
     ILI9806G_Write_Cmd(CMD_SetPixel);
-    for(row = 0U; row < visible_height; row++)
-    {
+    for(row = 0U; row < visible_height; row++) {
         source = pixels + row * width;
-        for(column = 0U; column < visible_width; column++)
-            ILI9806G_Write_Data(source[column]);
+        for(column = 0U; column < visible_width; column++) ILI9806G_Write_Data(source[column]);
+    }
+}
+
+static void lcd_page_present_rect(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
+{
+    uint16_t row;
+    uint32_t remaining;
+    volatile uint16_t *pixel;
+    ILI9806G_OpenWindow(x,y,width,height);
+    ILI9806G_Write_Cmd(CMD_SetPixel);
+    for(row = 0U; row < height; row++) {
+        pixel = lcd_page_pixels + ((uint32_t)y + row) * lcd_page_width + x;
+        remaining = width;
+        while(remaining >= 8U) {
+            ILI9806G_Write_Data(*pixel++); ILI9806G_Write_Data(*pixel++);
+            ILI9806G_Write_Data(*pixel++); ILI9806G_Write_Data(*pixel++);
+            ILI9806G_Write_Data(*pixel++); ILI9806G_Write_Data(*pixel++);
+            ILI9806G_Write_Data(*pixel++); ILI9806G_Write_Data(*pixel++);
+            remaining -= 8U;
+        }
+        while(remaining-- != 0U) ILI9806G_Write_Data(*pixel++);
     }
 }
 
 void LCD_EndPage(void)
 {
-    uint32_t remaining, present_started, present_finished, cycles_per_us;
-    volatile uint16_t *pixel;
+    uint32_t present_started, present_finished, cycles_per_us, bit;
+    uint16_t row, column, end_column, end_row, test_row, test_column;
+    uint16_t x, y, right, bottom;
+    uint8_t full, complete;
     if(lcd_page_active == 0U) return;
     present_started = DWT->CYCCNT;
+    full = lcd_page_active == 1U;
     lcd_page_active = 0U;
-    pixel = lcd_page_pixels;
-    remaining = (uint32_t)lcd_page_width * lcd_page_height;
-    ILI9806G_OpenWindow(0U, 0U, lcd_page_width, lcd_page_height);
-    ILI9806G_Write_Cmd(CMD_SetPixel);
-    /* One uninterrupted pixel stream, without clearing the visible GRAM,
-     * rendering glyphs, or changing the backlight during the transfer.
-     * This is a software back buffer, not a hardware/TE-synchronized swap. */
-    while(remaining >= 8U)
-    {
-        ILI9806G_Write_Data(*pixel++);
-        ILI9806G_Write_Data(*pixel++);
-        ILI9806G_Write_Data(*pixel++);
-        ILI9806G_Write_Data(*pixel++);
-        ILI9806G_Write_Data(*pixel++);
-        ILI9806G_Write_Data(*pixel++);
-        ILI9806G_Write_Data(*pixel++);
-        ILI9806G_Write_Data(*pixel++);
-        remaining -= 8U;
+    if(full) lcd_page_present_rect(0U,0U,lcd_page_width,lcd_page_height);
+    else for(row = 0U; row < lcd_dirty_rows; row++) {
+        for(column = 0U; column < lcd_dirty_columns; column++) {
+            if(!lcd_page_tile_dirty(column,row)) continue;
+            end_column = column + 1U;
+            while(end_column < lcd_dirty_columns && lcd_page_tile_dirty(end_column,row)) end_column++;
+            end_row = row + 1U;
+            while(end_row < lcd_dirty_rows) {
+                complete = 1U;
+                for(test_column = column; test_column < end_column; test_column++)
+                    if(!lcd_page_tile_dirty(test_column,end_row)) { complete = 0U; break; }
+                if(!complete) break;
+                end_row++;
+            }
+            for(test_row = row; test_row < end_row; test_row++)
+                for(test_column = column; test_column < end_column; test_column++) {
+                    bit = (uint32_t)test_row * lcd_dirty_columns + test_column;
+                    lcd_dirty[bit/32U] &= ~(1UL << (bit%32U));
+                }
+            x = column * LCD_DIRTY_TILE_SIZE;
+            y = row * LCD_DIRTY_TILE_SIZE;
+            right = end_column * LCD_DIRTY_TILE_SIZE;
+            bottom = end_row * LCD_DIRTY_TILE_SIZE;
+            if(right > lcd_page_width) right = lcd_page_width;
+            if(bottom > lcd_page_height) bottom = lcd_page_height;
+            lcd_page_present_rect(x,y,right-x,bottom-y);
+            column = end_column-1U;
+        }
     }
-    while(remaining-- != 0U) ILI9806G_Write_Data(*pixel++);
+    lcd_page_committed = 1U;
     present_finished = DWT->CYCCNT;
     cycles_per_us = SystemCoreClock / 1000000UL;
-    if(cycles_per_us != 0U)
-        printf("[LCD] page compose=%lu us, transfer=%lu us\r\n",
-               (unsigned long)((present_started - lcd_page_started_cycles) / cycles_per_us),
-               (unsigned long)((present_finished - present_started) / cycles_per_us));
+    /* No serial traffic on the normal input/render path. Enable explicitly
+     * for hardware measurements. This is not a TE-synchronized GRAM swap. */
+    if(LCD_PAGE_TIMING_LOG && cycles_per_us != 0U)
+        printf("[LCD] compose=%lu us, transfer=%lu us\r\n",
+            (unsigned long)((present_started-lcd_page_started_cycles)/cycles_per_us),
+            (unsigned long)((present_finished-present_started)/cycles_per_us));
 }
-
 ///**
 //  * @brief  向ILI9806G写入命令
 //  * @param  usCmd :要写入的命令（表寄存器地址）
@@ -1081,6 +1154,9 @@ void ILI9806G_GramScan ( uint8_t ucOption )
 	//参数检查，只可输入0-7
 	if(ucOption >7 )
 		return;
+
+    /* Same-sized rotations also change the physical GRAM mapping. */
+    LCD_InvalidatePage();
 	
 	//根据模式更新LCD_SCAN_MODE的值，主要用于触摸屏选择计算参数
 	LCD_SCAN_MODE = ucOption;

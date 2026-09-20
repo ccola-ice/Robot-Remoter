@@ -189,6 +189,10 @@ extern uint8_t LCD_SCAN_MODE;
 /* Call Enable only after the SRAM boot test. Pair Begin/End around page draws. */
 void LCD_PageBuffer_Enable(uint8_t enabled);
 void LCD_BeginPage(uint16_t background);
+/* Retained-image widget transaction; LCD_EndPage commits only dirty tiles. */
+void LCD_BeginUpdate(void);
+/* Cancel pending composition before bypassing drawing APIs or changing scan. */
+void LCD_InvalidatePage(void);
 void LCD_EndPage(void);
 /* RGB565 pixels are row-major with source stride == width; clips to the LCD. */
 void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t width, uint16_t height,

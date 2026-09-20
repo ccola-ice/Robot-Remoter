@@ -12,6 +12,8 @@
 #include "menu_state.inc"
 
 static unsigned draws, inhibits, resumes, diagnostics, eeproms;
+static unsigned partial_updates, full_updates, commits;
+static uint8_t transaction;
 static unsigned nrf_loads, browser_loads, param_loads, raw_draws, output_draws, snapshots;
 static void menu_nrf_load_settings(void) { nrf_loads++; }
 static void menu_browser_load_drives(void) { browser_loads++; }
@@ -25,12 +27,18 @@ static void eeprom_menu(void) { eeproms++; menu_post_key(MENU_KEY_RIGHT); }
 static void user_BUTTON_resume(void) { resumes++; }
 static void LCD_SetBackColor(unsigned color) { (void)color; }
 static void LCD_SetTextColor(unsigned color) { (void)color; }
-static void menu_draw_current_page(void) { draws++; page_changed = 0U; }
-static void menu_refresh_dynamic_page(void) {}
+static void menu_draw_current_page(void)
+{
+    if(page_changed) { full_updates++; transaction = 1U; }
+    else assert(transaction == 2U);
+    draws++; page_changed = 0U;
+}
+static void menu_refresh_dynamic_page(void) { assert(transaction == 2U); }
 static void menu_robot_telemetry_reset(void) {}
 static void menu_robot_telemetry_service(void) {}
-void gui_clock_overlay(void) {}
-static void LCD_EndPage(void) {}
+void gui_clock_overlay(void) { assert(transaction != 0U); }
+static void LCD_BeginUpdate(void) { partial_updates++; transaction = 2U; }
+static void LCD_EndPage(void) { assert(transaction != 0U); transaction = 0U; commits++; }
 void control_link_inhibit(void) { inhibits++; }
 void control_link_get_snapshot(ControlLinkSnapshot *snapshot)
 { memset(snapshot, 0, sizeof(*snapshot)); snapshots++; }
@@ -122,9 +130,31 @@ static void test_monitor_is_observer(void)
     press(MENU_KEY_BACK); assert(!menu_control_active() && inhibits == original_inhibits + 1U);
 }
 
+static void test_render_transactions(void)
+{
+    unsigned partial_before, full_before, commits_before, i;
+    menu_init(); menu_process();
+    full_before = full_updates; partial_before = partial_updates;
+    press(MENU_KEY_RIGHT);
+    assert(partial_updates == partial_before + 1U && full_updates == full_before);
+    press(MENU_KEY_OK);
+    assert(full_updates == full_before + 1U);
+    partial_before = partial_updates; commits_before = commits;
+    for(i = 0U; i < 6U; i++) menu_post_key(i & 1U ? MENU_KEY_LEFT : MENU_KEY_RIGHT);
+    menu_process();
+    assert(partial_updates == partial_before + 1U && commits == commits_before + 1U);
+    partial_before = partial_updates;
+    refresh_due = clock_refresh_due = 1U;
+    menu_process();
+    assert(partial_updates == partial_before + 1U && transaction == 0U);
+    partial_before = partial_updates;
+    clock_refresh_due = 1U; menu_process();
+    assert(partial_updates == partial_before + 1U && transaction == 0U);
+}
+
 int main(void)
 {
-    test_all_routes(); test_wrap_and_memory(); test_monitor_is_observer();
+    test_all_routes(); test_wrap_and_memory(); test_monitor_is_observer(); test_render_transactions();
     assert(draws > 0U);
     puts("Menu navigation: all 11 routes, category wrap/selection memory, service event discard, monitor isolation and robot exit: PASS");
     return 0;

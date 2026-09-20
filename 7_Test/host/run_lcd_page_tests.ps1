@@ -1,4 +1,4 @@
-param([string]$Compiler = 'gcc', [string]$PreviewDirectory = '')
+param([string]$Compiler = 'gcc', [string]$PreviewDirectory = '', [string]$PreviewFont = '')
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('remoter-lcd-page-' + [guid]::NewGuid().ToString('N'))
@@ -7,7 +7,7 @@ function Get-Functions([string]$source, [string[]]$names) {
     $bodies = @()
     $prototypes = @()
     foreach($name in $names) {
-        $pattern = '(?ms)^(?:static )?(?:__inline )?(?:void|uint8_t|uint16_t|int16_t|sFONT\s*\*)\s+' + $name + '\s*\([^;]*?\)\s*\{.*?^\}'
+        $pattern = '(?ms)^(?:static )?(?:__inline )?(?:void\s+|uint8_t\s+|uint16_t\s+|int16_t\s+|sFONT\s*\*\s*|const char\s*\*\s*)' + $name + '\s*\([^;]*?\)\s*\{.*?^\}'
         $matches = [regex]::Matches($source, $pattern)
         if($matches.Count -ne 1) { throw "Expected one function: $name" }
         $body = $matches[0].Value
@@ -22,7 +22,7 @@ try {
     $start = $driver.IndexOf('/* Page transitions reserve')
     $end = $driver.IndexOf('///**', $start)
     $block = $driver.Substring($start, $end - $start)
-    $drawFunctions = Get-Functions $driver @('LCD_Draw_Rect', 'ILI9806G_OpenWindow', 'ILI9806G_SetCursor',
+    $drawFunctions = Get-Functions $driver @('LCD_Draw_Rect', 'ILI9806G_GramScan', 'ILI9806G_OpenWindow', 'ILI9806G_SetCursor',
         'ILI9806G_FillColor', 'ILI9806G_Clear', 'ILI9806G_SetPointPixel', 'ILI9806G_DrawPoint',
         'ILI9806G_GetPointPixel', 'ILI9806G_DrawLine', 'ILI9806G_DrawRectangle', 'ILI9806G_Fill',
         'ILI9806G_DrawCircle', 'ILI9806G_DispChar_EN', 'ILI9806G_DispString_EN',
@@ -33,7 +33,7 @@ try {
     $gui = [IO.File]::ReadAllText((Join-Path $repo '1_App/gui.c'), $enc)
     $mapping = ([regex]::Matches($gui, '(?m)^#define ROBOT_\w+[^\r\n]*') | ForEach-Object { $_.Value }) -join [Environment]::NewLine
     $guiFunctions = Get-Functions $gui @('gui_prepare_page', 'gui_clock_overlay',
-        'gui_dashboard_status', 'menu_group_page', 'main_menu', 'gui_monitor_tabs',
+        'gui_control_status_text', 'gui_dashboard_status', 'menu_group_page', 'main_menu', 'gui_monitor_tabs',
         'channel_monitor_page', 'channel_output_monitor_page',
         'gui_robot_stick_value', 'gui_robot_dot_patch', 'gui_robot_draw_stick', 'gui_robot_format_value', 'robot_control_page',
         'gui_file_decode_utf8', 'gui_file_source_is_utf8', 'gui_file_display_text', 'gui_file_size_text',
@@ -53,16 +53,16 @@ try {
     [IO.File]::WriteAllText((Join-Path $temp 'stm32f4xx.h'), '#include <stdint.h>')
     [IO.File]::WriteAllText((Join-Path $temp 'bsp_usart_debug.h'), '')
     [IO.File]::WriteAllText((Join-Path $temp 'bsp_spi_flash.h'), @'
-static void FLASH_SPI_Init(void) {}
-static void FLASH_Read_Data(uint8_t *buffer, unsigned address, unsigned size)
-{ (void)address; while(size--) *buffer++ = 0U; }
+void FLASH_SPI_Init(void);
+void FLASH_Read_Data(uint8_t *buffer, unsigned address, unsigned size);
 '@)
     $exe = Join-Path $temp 'lcd-page-test.exe'
     & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-finput-charset=GBK' '-fexec-charset=GBK' '-I' $temp '-I' (Join-Path $repo '1_App') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') '-o' $exe
     if($LASTEXITCODE -ne 0) { throw 'LCD page test compilation failed.' }
     if ($PreviewDirectory) {
         [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($PreviewDirectory)) | Out-Null
-        & $exe ([IO.Path]::GetFullPath($PreviewDirectory))
+        if($PreviewFont) { & $exe ([IO.Path]::GetFullPath($PreviewDirectory)) ([IO.Path]::GetFullPath($PreviewFont)) }
+        else { & $exe ([IO.Path]::GetFullPath($PreviewDirectory)) }
     } else { & $exe }
     if($LASTEXITCODE -ne 0) { throw 'LCD page tests failed.' }
     if ($PreviewDirectory) {

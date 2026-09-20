@@ -113,6 +113,7 @@ void LCD_Show_BMP ( uint16_t x, uint16_t y, char * pic_name )
 	
 	
 	/* 开一个图片大小的窗口*/
+    LCD_InvalidatePage(); /* This legacy loader writes GRAM directly. */
 	ILI9806G_OpenWindow(x, y, width, height);
 	ILI9806G_Write_Cmd (CMD_SetPixel ); 
 
