@@ -1365,7 +1365,11 @@ static void menu_draw_current_page(void)
 
 static void menu_refresh_dynamic_page(void)
 {
-    if(current_page == MENU_PAGE_MONITOR)
+    if(current_page == MENU_PAGE_HOME)
+    {
+        menu_group_page(selected_group);
+    }
+    else if(current_page == MENU_PAGE_MONITOR)
     {
         menu_draw_monitor();
     }

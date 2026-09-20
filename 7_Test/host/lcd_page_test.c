@@ -41,6 +41,7 @@ static uint16_t command, x0, x1, y0, y1, cursor_x, cursor_y, coord;
 static unsigned parameter;
 static uint8_t watch_overlap;
 static uint16_t watch_old_x, watch_old_y, watch_new_x, watch_new_y;
+static uint16_t watch_color;
 static unsigned overlap_writes;
 static uint32_t fake_ms;
 static int get_tick_count(unsigned long *count) { *count = fake_ms; return 0; }
@@ -64,7 +65,7 @@ static void ILI9806G_Write_Data(uint16_t data)
             int32_t new_dy = (int32_t)cursor_y - watch_new_y;
             if(old_dx * old_dx + old_dy * old_dy <= 64L &&
                new_dx * new_dx + new_dy * new_dy <= 64L) {
-                assert(data == BLUE2); /* No transient clearing of shared dot pixels. */
+                assert(data == watch_color); /* No transient clearing of shared dot pixels. */
                 overlap_writes++;
             }
         }
@@ -87,6 +88,8 @@ static uint16_t ILI9806G_Read_PixelData(void) { return 0U; }
 #include "lcd_page_driver.inc"
 
 static uint8_t checking_ui_text;
+static char dashboard_battery_text[32], dashboard_radio_text[32];
+static char output_xy_text[32];
 static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
 {
     if(checking_ui_text) {
@@ -95,19 +98,52 @@ static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
             fprintf(stderr, "Text outside display: %u,%u: %s\n", x, y, text);
         assert(right <= LCD_X_LENGTH && y + LCD_Currentfonts->Height <= LCD_Y_LENGTH);
     }
+    if(x == 44U && y == 126U) snprintf(dashboard_battery_text, sizeof(dashboard_battery_text), "%s", text);
+    if(x == 280U && y == 126U) snprintf(dashboard_radio_text, sizeof(dashboard_radio_text), "%s", text);
+    if(x == 576U && y == 184U) snprintf(output_xy_text, sizeof(output_xy_text), "%s", text);
     lcd_real_DispString_EN(x, y, text);
 }
 
-static uint8_t display_flag, clock_force_redraw;
+static uint8_t display_flag, clock_force_redraw, clock_last_seconds = 0xffU;
 static uint16_t ADC1_Value[7] = {2047, 2047, 2047, 2047, 2047, 2047, 2047};
 static uint16_t ADC3_Value[3] = {1024, 2048, 3072};
-static struct { uint16_t chLower[7], chMiddle[7], chUpper[7]; uint8_t chReverse[7]; int PWMadjustValue[7]; } param;
+static struct { uint16_t chLower[7], chMiddle[7], chUpper[7]; uint8_t chReverse[7]; int PWMadjustValue[7]; float batVoltAdjust; uint8_t NRF_Mode; } param;
+static ControlLinkSnapshot dashboard_snapshot;
 const char *control_link_status(void) { return "DISARMED"; }
+void control_link_get_snapshot(ControlLinkSnapshot *snapshot) { *snapshot = dashboard_snapshot; }
 static char displayBuffer[100];
 static void GTP_IRQ_Disable(void) {}
-static void gui_boot_menu_badge(void) {}
+typedef struct { uint8_t RTC_Hours, RTC_Minutes, RTC_Seconds; } RTC_TimeTypeDef;
+typedef struct { uint8_t RTC_Date; } RTC_DateTypeDef;
+#define RTC_Format_BIN 0U
+static uint8_t fake_rtc_seconds = 56U;
+static unsigned rtc_time_reads, rtc_date_reads;
+static void RTC_GetTime(unsigned format, RTC_TimeTypeDef *time)
+{ (void)format; time->RTC_Hours = 12U; time->RTC_Minutes = 34U; time->RTC_Seconds = fake_rtc_seconds; rtc_time_reads++; }
+static void RTC_GetDate(unsigned format, RTC_DateTypeDef *date)
+{ (void)format; date->RTC_Date = 21U; rtc_date_reads++; }
+/* External Chinese glyph storage is absent on the host; all preview names are ASCII. */
+typedef uint16_t WCHAR;
+static WCHAR ff_convert(WCHAR code, unsigned direction) { (void)direction; return code < 128U ? code : 0U; }
+static void ILI9806G_DispString_EN_CH(uint16_t x, uint16_t y, char *text)
+{ ILI9806G_DispString_EN(x, y, text); }
 
+#include "gui_theme.h"
 #include "lcd_page_gui.inc"
+
+static const GuiParamRow preview_rows[6] = {
+    {"Firmware version", "1.0"}, {"Battery warning", "3.50 V"},
+    {"Control safety", "ALWAYS ON"}, {"CH1 lower", "0"},
+    {"CH1 center", "2047"}, {"CH1 upper", "4095"}
+};
+static const GuiFileEntry preview_files[7] = {
+    {"Models", 0U, 0U, 0U, 1U}, {"Logs", 0U, 0U, 0U, 1U},
+    {"robot-profile.txt", 2048U, 0U, 0U, 0U},
+    {"session-001.csv", 125952U, 0U, 0U, 0U},
+    {"readme.txt", 1536U, 0U, 0U, 0U},
+    {"config-backup.bin", 512U, 0U, 0U, 0U},
+    {"test-result.txt", 768U, 0U, 0U, 0U}
+};
 
 static uint8_t key_levels[4];
 static unsigned delay_calls, replay_entry;
@@ -203,18 +239,17 @@ static void draw_page(unsigned page)
     GuiRobotTelemetry telemetry = {0};
     ControlLinkSnapshot snapshot = {0};
     checking_ui_text = 1U;
+    if(display_flag) clock_force_redraw = 1U;
     if(page == 0U) channel_monitor_page();
     else if(page == 1U) robot_control_page(&telemetry);
     else if(page < 5U) menu_group_page((uint8_t)(page - 2U));
     else if(page < 16U) main_menu((uint8_t)(page - 5U));
-    else channel_output_monitor_page(&snapshot);
-    /* A late overlay must be included in the presented image as well. */
-    LCD_SetTextColor(BLACK);
-    ILI9806G_DrawRectangle(700U, 4U, 92U, 24U, 1U);
-    LCD_SetFont(&Font8x16);
-    LCD_SetTextColor(WHITE);
-    LCD_SetBackColor(BLACK);
-    ILI9806G_DispString_EN(714U, 8U, "12:34:56");
+    else if(page == 16U) channel_output_monitor_page(&snapshot);
+    else if(page == 17U) parameter_settings_page(preview_rows, 6U, 2U, 0U, 61U, 0U, 0U, 1U, "Runtime parameters loaded");
+    else if(page == 18U) nrf_settings_page(1U, 0U, 1U, 40U, 3U, 2U, "Settings loaded", 1U, 1U, 40U, 3U, 2U);
+    else file_browser_page("0:/", preview_files, 7U, 2U, 0U, 1U, "Select a folder to open");
+    /* The production late overlay must be included in the presented image. */
+    gui_clock_overlay();
     checking_ui_text = 0U;
 }
 
@@ -223,7 +258,7 @@ static void test_transitions(void)
     unsigned page, repeat, i;
     for(i = 800U * 480U; i < sizeof(sram) / sizeof(sram[0]); i++) sram[i] = 0x1234U;
     for(repeat = 0U; repeat < 4U; repeat++)
-        for(page = 0U; page < 17U; page++)
+        for(page = 0U; page < 20U; page++)
         {
             /* Independent reference: existing direct rendering onto a clean panel. */
             LCD_PageBuffer_Enable(0U);
@@ -389,10 +424,10 @@ static void test_ascii_fast_path(void)
 static void check_stick_pixels(uint16_t dot_x, uint16_t dot_y)
 {
     uint16_t x, y, wanted;
-    for(y = 300U; y <= 412U; y++)
-        for(x = 78U; x <= 190U; x++) {
+    for(y = 182U; y <= 294U; y++)
+        for(x = 72U; x <= 184U; x++) {
             int32_t dx = (int32_t)x - dot_x, dy = (int32_t)y - dot_y;
-            wanted = dx * dx + dy * dy <= 64L ? BLUE2 : expected[y * 800U + x];
+            wanted = dx * dx + dy * dy <= 64L ? UI_ACCENT : expected[y * 800U + x];
             if(panel[y * 800U + x] != wanted)
                 fprintf(stderr, "Marker trail/outline mismatch at %u,%u (dot %u,%u): %04x != %04x\n",
                         x,y,dot_x,dot_y,panel[y * 800U + x],wanted);
@@ -406,35 +441,35 @@ static void test_robot_marker_pixels(void)
     int control_x, control_y;
     unsigned i;
     LCD_PageBuffer_Enable(0U);
-    for(i = 0U; i < 800U * 480U; i++) panel[i] = GREY;
-    gui_robot_draw_stick(134U,356U,2047U,2047U,0,0,BLUE2,
+    for(i = 0U; i < 800U * 480U; i++) panel[i] = UI_SURFACE;
+    gui_robot_draw_stick(128U,238U,2047U,2047U,0,0,UI_ACCENT,
                          &dot_x,&dot_y,&raw_x,&raw_y,1U,1U);
     memcpy(expected,panel,sizeof(panel));
     /* Independent reference keeps the actual static outline and axes only. */
-    for(y = 348U; y <= 364U; y++)
-        for(x = 126U; x <= 142U; x++)
-            expected[y * 800U + x] = (x == 134U || y == 356U) ? WHITE : GREY;
+    for(y = 230U; y <= 246U; y++)
+        for(x = 120U; x <= 136U; x++)
+            expected[y * 800U + x] = (x == 128U || y == 238U) ? UI_LINE : UI_SURFACE;
     watch_old_x = dot_x; watch_old_y = dot_y;
-    watch_new_x = 145U; watch_new_y = 356U;
+    watch_new_x = 139U; watch_new_y = 238U; watch_color = UI_ACCENT;
     watch_overlap = 1U; overlap_writes = 0U;
     memory_commands = pixel_writes = 0U;
-    gui_robot_draw_stick(134U,356U,2500U,2047U,250,0,BLUE2,
+    gui_robot_draw_stick(128U,238U,2500U,2047U,250,0,UI_ACCENT,
                          &dot_x,&dot_y,&raw_x,&raw_y,0U,0U);
     watch_overlap = 0U;
-    assert(dot_x == 145U && dot_y == 356U && overlap_writes > 0U);
+    assert(dot_x == 139U && dot_y == 238U && overlap_writes > 0U);
     assert(memory_commands == 2U && pixel_writes == 2U * 17U * 17U);
     check_stick_pixels(dot_x,dot_y);
     /* Repeated diagonal/full travel must preserve every static outline pixel. */
     for(control_x = -1000; control_x <= 1000; control_x += 250)
         for(control_y = -1000; control_y <= 1000; control_y += 250) {
-            gui_robot_draw_stick(134U,356U,2500U,2500U,
-                (int16_t)control_x,(int16_t)control_y,BLUE2,
+            gui_robot_draw_stick(128U,238U,2500U,2500U,
+                (int16_t)control_x,(int16_t)control_y,UI_ACCENT,
                 &dot_x,&dot_y,&raw_x,&raw_y,0U,0U);
             check_stick_pixels(dot_x,dot_y);
         }
-    gui_robot_draw_stick(134U,356U,2047U,2047U,0,0,BLUE2,
+    gui_robot_draw_stick(128U,238U,2047U,2047U,0,0,UI_ACCENT,
                          &dot_x,&dot_y,&raw_x,&raw_y,0U,0U);
-    assert(dot_x == 134U && dot_y == 356U);
+    assert(dot_x == 128U && dot_y == 238U);
     check_stick_pixels(dot_x,dot_y);
 }
 
@@ -492,9 +527,9 @@ static void test_catalog_pixels(void)
         gui_prepare_page(); main_menu((uint8_t)((entry + MENU_ENTRY_COUNT - 1U) % MENU_ENTRY_COUNT));
         main_menu((uint8_t)entry);
         assert(memcmp(panel, expected, sizeof(panel)) == 0);
-        /* The card's selection rail is visible and every unused row stays clear. */
-        assert(panel[(84U + ((entry - menu_group_first(menu_entry_group(entry))) / 2U) * 104U) * 800U +
-                     (8U + ((entry - menu_group_first(menu_entry_group(entry))) & 1U) * 400U)] == BLUE);
+        /* The selected app's left outline is blue in the new 3-column grid. */
+        assert(panel[(176U + ((entry - menu_group_first(menu_entry_group(entry))) / 3U) * 172U) * 800U +
+                     (200U + ((entry - menu_group_first(menu_entry_group(entry))) % 3U) * 196U)] == UI_ACCENT);
     }
     for(entry = 0U; entry < MENU_GROUP_COUNT; entry++) {
         gui_prepare_page(); menu_group_page((uint8_t)entry);
@@ -516,6 +551,7 @@ static void test_output_pixels(void)
 {
     ControlLinkSnapshot states[4];
     unsigned i, before, after;
+    int rendered_x, rendered_y;
     memset(states, 0, sizeof(states));
     states[1].sampled = states[1].input_fresh = states[1].sent = states[1].ack_seen = 1U;
     states[1].transmitted.armed = 1U;
@@ -545,6 +581,10 @@ static void test_output_pixels(void)
     checking_ui_text = 1U;
     for(after = 0U; after < 4U; after++) {
         render_output_fresh(&states[after]); memcpy(expected, panel, sizeof(panel));
+        if(states[after].sent) {
+            assert(sscanf(output_xy_text, "%d%d", &rendered_x, &rendered_y) == 2);
+            assert(rendered_x == states[after].transmitted.x && rendered_y == states[after].transmitted.y);
+        }
         for(before = 0U; before < 4U; before++) {
             render_output_fresh(&states[before]);
             fake_ms += 100U; channel_output_monitor_page(&states[after]);
@@ -553,7 +593,106 @@ static void test_output_pixels(void)
             assert(memcmp(panel, expected, sizeof(panel)) == 0);
         }
     }
+    states[1].transmitted.x = 1000; states[1].transmitted.y = -1000;
+    render_output_fresh(&states[1]);
+    assert(sscanf(output_xy_text, "%d%d", &rendered_x, &rendered_y) == 2);
+    assert(rendered_x == 1000 && rendered_y == -1000); /* Both signs and final digits survive. */
     checking_ui_text = 0U;
+}
+
+static void render_settings_case(unsigned page, unsigned state, uint8_t fresh)
+{
+    static const char * const statuses[] = {
+        "", "Runtime parameters loaded", "SAVE FAILED: SPI Flash verify error",
+        "Editing: LEFT/RIGHT changes the value, OK confirms; this deliberately long status must fit the page without wrapping"
+    };
+    GuiParamRow rows[6];
+    memcpy(rows, preview_rows, sizeof(rows));
+    if(fresh) { LCD_PageBuffer_Enable(0U); gui_prepare_page(); }
+    if(page == 0U) {
+        unsigned count = state == 0U ? 0U : state == 2U ? 2U : 6U;
+        if(state == 3U) strcpy(rows[2].value, "4294967295 / 65535");
+        parameter_settings_page(rows, (uint8_t)count, state == 3U ? 2U : 0U,
+            state == 2U ? 59U : 0U, state == 0U ? 0U : 61U,
+            state == 3U, state >= 2U, (uint16_t)(state + 1U), statuses[state]);
+    } else if(page == 1U) {
+        nrf_settings_page((uint8_t)state, state == 3U, state != 0U,
+            state == 3U ? 125U : 40U, (uint8_t)state, (uint8_t)(state % 3U),
+            statuses[state], state != 0U, state != 0U, 40U, 3U, 2U);
+    } else {
+        file_browser_page(state == 3U ? "0:/models/robot-with-a-long-directory-name/" : "0:/",
+            state == 0U ? NULL : preview_files, state == 0U ? 0U : state == 3U ? 2U : 7U,
+            state == 2U ? 6U : state == 0U ? 0U : 1U, state == 2U ? 1U : 0U,
+            (uint16_t)(state + 1U), statuses[state]);
+    }
+}
+
+static void test_settings_pixels(void)
+{
+    unsigned page, before, after;
+    checking_ui_text = 1U;
+    for(page = 0U; page < 3U; page++)
+        for(after = 0U; after < 4U; after++) {
+            render_settings_case(page, after, 1U);
+            memcpy(expected, panel, sizeof(panel));
+            for(before = 0U; before < 4U; before++) {
+                render_settings_case(page, before, 1U);
+                render_settings_case(page, after, 0U);
+                if(memcmp(panel, expected, sizeof(panel)))
+                    fprintf(stderr, "Settings page %u incremental mismatch: %u -> %u\n", page, before, after);
+                assert(memcmp(panel, expected, sizeof(panel)) == 0);
+                bus_writes = 0U;
+                render_settings_case(page, after, 0U);
+                assert(bus_writes == 0U); /* Stable settings must not redraw. */
+            }
+        }
+    checking_ui_text = 0U;
+}
+
+static void test_dashboard_truth(void)
+{
+    memset(&dashboard_snapshot, 0, sizeof(dashboard_snapshot));
+    param.NRF_Mode = 0U; param.batVoltAdjust = 1000.0f; ADC1_Value[6] = 2385U;
+    fake_ms = 0U; gui_prepare_page(); menu_group_page(0U); LCD_EndPage();
+    assert(strstr(dashboard_battery_text, "--.-- V") && strstr(dashboard_radio_text, "OFF"));
+    param.NRF_Mode = 1U;
+    dashboard_snapshot.sampled = dashboard_snapshot.input_fresh = dashboard_snapshot.ack_seen = 1U;
+    fake_ms = 249U; menu_group_page(0U);
+    assert(strstr(dashboard_battery_text, "--.-- V"));
+    fake_ms = 250U; menu_group_page(0U);
+    assert(strstr(dashboard_battery_text, "3.84 V") && strstr(dashboard_radio_text, "ACK RECEIVED"));
+    dashboard_snapshot.sample_age_ms = 101U; dashboard_snapshot.ack_age_ms = 150U;
+    fake_ms = 500U; menu_group_page(0U);
+    assert(strstr(dashboard_battery_text, "--.-- V") && strstr(dashboard_radio_text, "WAITING"));
+    memset(&dashboard_snapshot, 0, sizeof(dashboard_snapshot));
+    param.NRF_Mode = 0U;
+}
+
+static void test_clock_overlay(void)
+{
+    unsigned i;
+    LCD_PageBuffer_Enable(0U);
+    fake_rtc_seconds = 56U;
+    gui_prepare_page(); menu_group_page(0U); gui_clock_overlay(); LCD_EndPage();
+    assert(clock_force_redraw == 0U);
+    memcpy(expected, panel, sizeof(panel));
+    bus_writes = 0U;
+    gui_clock_overlay();
+    assert(bus_writes == 0U && memcmp(expected, panel, sizeof(panel)) == 0);
+    fake_rtc_seconds = 57U;
+    gui_clock_overlay();
+    assert(bus_writes > 0U && memcmp(expected, panel, 800U * 32U * sizeof(panel[0])) != 0);
+    for(i = 800U * 32U; i < 800U * 480U; i++) assert(panel[i] == expected[i]);
+    assert(rtc_time_reads == rtc_date_reads); /* Every time read unlocks RTC shadow registers. */
+    LCD_PageBuffer_Enable(1U);
+    gui_prepare_page(); main_menu(0U);
+    assert(clock_force_redraw == 1U);
+    bus_writes = 0U;
+    gui_clock_overlay();
+    assert(clock_force_redraw == 0U && bus_writes == 0U);
+    LCD_EndPage();
+    assert(bus_writes > 0U);
+    fake_rtc_seconds = 56U;
 }
 
 static void bmp_u16(FILE *file, unsigned value)
@@ -565,6 +704,8 @@ static void save_preview(const char *directory, const char *name)
     char path[1024];
     FILE *file;
     unsigned x, y;
+    clock_force_redraw = 1U;
+    gui_clock_overlay();
     snprintf(path, sizeof(path), "%s/%s", directory, name);
     file = fopen(path, "wb"); assert(file);
     fputs("BM", file); bmp_u32(file, 54U + 800U * 480U * 3U);
@@ -592,11 +733,21 @@ int main(int argc, char **argv)
     test_diagnostics();
     test_robot_marker_pixels();
     test_robot_telemetry_pixels();
-    test_catalog_pixels(); test_output_pixels();
+    test_catalog_pixels(); test_output_pixels(); test_settings_pixels(); test_dashboard_truth(); test_clock_overlay();
     if(argc > 1) {
         ControlLinkSnapshot snapshot = {0};
+        GuiRobotTelemetry telemetry = {0};
+        param.NRF_Mode = 1U; param.batVoltAdjust = 1000.0f;
+        dashboard_snapshot.sampled = dashboard_snapshot.input_fresh = dashboard_snapshot.ack_seen = 1U;
+        ADC1_Value[6] = 2385U;
         gui_prepare_page(); menu_group_page(0U); LCD_EndPage();
         save_preview(argv[1], "category-home.bmp");
+        gui_prepare_page(); main_menu(5U); LCD_EndPage();
+        save_preview(argv[1], "function-icons.bmp");
+        ADC1_Value[0] = 2047U; ADC1_Value[1] = 3071U; ADC1_Value[2] = 4095U;
+        ADC1_Value[3] = 1023U; ADC1_Value[4] = 2047U; ADC1_Value[5] = 1535U;
+        gui_prepare_page(); channel_monitor_page(); LCD_EndPage();
+        save_preview(argv[1], "channel-raw.bmp");
         snapshot.sampled = snapshot.input_fresh = snapshot.sent = snapshot.ack_seen = 1U;
         snapshot.sample_age_ms = snapshot.tx_age_ms = snapshot.ack_age_ms = 20U;
         snapshot.tx_started = 128U; snapshot.tx_acked = 127U;
@@ -607,7 +758,15 @@ int main(int argc, char **argv)
         snapshot.calibrated[3] = -500; snapshot.calibrated[5] = -250;
         render_output_fresh(&snapshot);
         save_preview(argv[1], "channel-output.bmp");
+        gui_prepare_page(); robot_control_page(&telemetry); LCD_EndPage();
+        save_preview(argv[1], "robot-control.bmp");
+        gui_prepare_page(); parameter_settings_page(preview_rows, 6U, 4U, 0U, 61U, 0U, 0U, 1U, "Runtime parameters loaded"); LCD_EndPage();
+        save_preview(argv[1], "parameter-settings.bmp");
+        gui_prepare_page(); nrf_settings_page(1U, 0U, 1U, 40U, 3U, 2U, "Settings loaded", 1U, 1U, 40U, 3U, 2U); LCD_EndPage();
+        save_preview(argv[1], "wireless-settings.bmp");
+        gui_prepare_page(); file_browser_page("0:/", preview_files, 7U, 2U, 0U, 1U, "Select a folder to open"); LCD_EndPage();
+        save_preview(argv[1], "file-browser.bmp");
     }
-    puts("LCD page tests passed: all category/leaf/monitor/robot transitions, bounds, incremental output pixels, diagnostics keys, framebuffer fallback and RGB565 clipping.");
+    puts("LCD page tests passed: 80 page transitions, 16 output and 48 settings state transitions, bounds, marker trails, stable settings, diagnostics keys, framebuffer fallback and RGB565 clipping.");
     return 0;
 }

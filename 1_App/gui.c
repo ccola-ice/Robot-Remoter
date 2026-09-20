@@ -18,6 +18,8 @@
 #include "ff.h"
 #include "param.h"
 #include <string.h>
+#include <float.h>
+#include "gui_theme.h"
 
 extern volatile uint16_t ADC1_Value[NUM_OF_ADC1CHANNEL];
 extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
@@ -56,54 +58,37 @@ void gui_prepare_page(void)
 	clock_force_redraw = 1U;
 }
 
-static void gui_clear_page_band(uint16_t y, uint16_t height)
-{
-	ILI9806G_Fill(0U, y, LCD_X_LENGTH, y + height, WHITE);
-}
-
 /* Restore layout boundaries when page content is drawn, including home pagination. */
-static void gui_clear_page_content(void)
-{
-	ILI9806G_Fill(0U, 64U, LCD_X_LENGTH, 72U, WHITE);
-	ILI9806G_Fill(0U, 72U, 4U, LCD_Y_LENGTH, WHITE);
-	ILI9806G_Fill(796U, 72U, LCD_X_LENGTH, LCD_Y_LENGTH, WHITE);
-}
-
 void gui_clock_overlay(void)
 {
-	RTC_TimeTypeDef rtc_time;
-	RTC_DateTypeDef rtc_date;
-	char clock_text[9];
-
-	RTC_GetTime(RTC_Format_BIN, &rtc_time);
-	/* Reading the date unlocks the STM32 RTC shadow registers. */
-	RTC_GetDate(RTC_Format_BIN, &rtc_date);
-	(void)rtc_date;
-
-	if((clock_force_redraw == 0U) &&
-	   (clock_last_seconds == rtc_time.RTC_Seconds))
-	{
-		return;
-	}
-
-	clock_force_redraw = 0U;
-	clock_last_seconds = rtc_time.RTC_Seconds;
-	sprintf(clock_text, "%02u:%02u:%02u", rtc_time.RTC_Hours,
-			rtc_time.RTC_Minutes, rtc_time.RTC_Seconds);
-
-	/* A self-contained badge works on both blue and white page headers. */
-	LCD_SetTextColor(BLACK);
-	ILI9806G_DrawRectangle(700U, 4U, 92U, 24U, 1U);
-	LCD_SetTextColor(BLUE2);
-	ILI9806G_DrawRectangle(700U, 4U, 92U, 24U, 0U);
-	LCD_SetFont(&Font8x16);
-	LCD_SetBackColor(BLACK);
-	LCD_SetTextColor(WHITE);
-	ILI9806G_DispString_EN(714U, 8U, clock_text);
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(BLACK);
+    RTC_TimeTypeDef rtc_time;
+    RTC_DateTypeDef rtc_date;
+    ControlLinkSnapshot link;
+    uint32_t mv;
+    char text[24];
+    RTC_GetTime(RTC_Format_BIN, &rtc_time);
+    /* Reading the date unlocks the STM32 RTC shadow registers. */
+    RTC_GetDate(RTC_Format_BIN, &rtc_date);
+    (void)rtc_date;
+    if(!clock_force_redraw && clock_last_seconds == rtc_time.RTC_Seconds) return;
+    clock_force_redraw = 0U;
+    clock_last_seconds = rtc_time.RTC_Seconds;
+    memset(&link,0,sizeof(link));
+    control_link_get_snapshot(&link);
+    if(link.sampled && link.input_fresh && link.sample_age_ms <= 100UL && ADC1_Value[6] <= 4095U) {
+        mv = (uint32_t)ADC1_Value[6] * 66UL * param.batVoltAdjust / 40950UL;
+        snprintf(text,sizeof(text),"TX %lu.%02luV",(unsigned long)(mv/1000UL),
+            (unsigned long)((mv%1000UL)/10UL));
+    } else strcpy(text,"TX --.--V");
+    ui_fill(500U,0U,300U,32U,UI_INK);
+    ui_text(508U,8U,12U,text,WHITE,UI_INK,0U);
+    ui_text(612U,8U,12U,!param.NRF_Mode ? "RF OFF" :
+        link.ack_seen && link.ack_age_ms < 150UL ? "RF ACK" : "RF WAIT",WHITE,UI_INK,0U);
+    snprintf(text,sizeof(text),"%02u:%02u:%02u",rtc_time.RTC_Hours,rtc_time.RTC_Minutes,rtc_time.RTC_Seconds);
+    ui_text(716U,8U,8U,text,WHITE,UI_INK,0U);
+    LCD_SetFont(&Font16x32);
+    LCD_SetBackColor(WHITE);
+    LCD_SetTextColor(BLACK);
 }
 
 static const BootReport *boot_last_report;
@@ -245,513 +230,356 @@ void gui_boot_finish(const BootReport *report)
     ILI9806G_DispString_EN(20U, 446U, (char *)summary);
 }
 
-static void gui_boot_menu_badge(void)
+static void gui_settings_row(uint8_t row, uint16_t number,
+                             const char *label, const char *value,
+                             uint8_t selected, uint8_t editing)
 {
-    char text[96];
-    if(boot_last_report == 0) return;
-    LCD_SetFont(&Font8x16);
-    LCD_SetBackColor(WHITE);
-    LCD_SetTextColor(boot_last_report->failed ? RED : BLUE);
-    sprintf(text, "Boot: PASS %u / FAIL %u / NOT TESTED %u - details in startup serial log",
-            boot_last_report->passed, boot_last_report->failed,
-            boot_last_report->not_tested);
-    ILI9806G_DispString_EN(8U, 456U, text);
+    uint16_t y = 104U + (uint16_t)row * 48U;
+    uint16_t background = selected ? (editing ? UI_AMBER : UI_TINT) : UI_SURFACE;
+    uint16_t foreground = selected ? (editing ? UI_SURFACE : UI_ACCENT) : UI_INK;
+    uint8_t value_large = strlen(value) <= 17U ? 1U : 0U;
+    char index_text[5];
+
+    ui_round_rect(192U, y, 580U, 44U, 10U, background);
+    snprintf(index_text, sizeof(index_text), "%02u", number);
+    ui_text(204U, y + 14U, 3U, index_text,
+            selected ? foreground : UI_MUTED, background, 0U);
+    ui_text(240U, y + 14U, 24U, label, foreground, background, 0U);
+    ui_text(464U, y + (value_large ? 6U : 14U),
+            value_large ? 17U : 34U, value, foreground, background, value_large);
+    ui_text(748U, y + 14U, 1U, selected && editing ? "*" : ">",
+            selected ? foreground : UI_MUTED, background, 0U);
 }
 
-static void gui_draw_progress_bar(uint16_t x, uint16_t y, uint16_t width,
-							  uint16_t height, uint32_t percent_x10,
-							  uint16_t fill_color)
+static void gui_settings_scroll(uint8_t first_visible, uint8_t visible_count,
+                                uint8_t total_items)
 {
-	uint16_t inner_width;
-	uint16_t filled_width;
-
-	if(percent_x10 > 1000UL)
-	{
-		percent_x10 = 1000UL;
-	}
-
-	inner_width = (width > 4U) ? (width - 4U) : 0U;
-	filled_width = (uint16_t)((inner_width * percent_x10 + 500UL) / 1000UL);
-
-	LCD_SetTextColor(WHITE);
-	ILI9806G_DrawRectangle(x, y, width, height, 1U);
-	if(filled_width > 0U)
-	{
-		LCD_SetTextColor(fill_color);
-		ILI9806G_DrawRectangle(x + 2U, y + 2U, filled_width, height - 4U, 1U);
-	}
-	LCD_SetTextColor(BLACK);
-	ILI9806G_DrawRectangle(x, y, width, height, 0U);
+    uint16_t height, offset;
+    ui_round_rect(782U, 108U, 4U, 276U, 2U, UI_TRACK);
+    if(!total_items || !visible_count) return;
+    height = (uint16_t)(276UL * visible_count / total_items);
+    if(height < 24U) height = 24U;
+    if(height > 276U) height = 276U;
+    offset = total_items > visible_count ?
+        (uint16_t)((276UL - height) * first_visible / (total_items - visible_count)) : 0U;
+    if(offset > 276U - height) offset = 276U - height;
+    ui_round_rect(782U, 108U + offset, 4U, height, 2U, UI_ACCENT);
 }
 
-static void gui_update_progress_bar(uint16_t x, uint16_t y, uint16_t width,
-								uint16_t height, uint32_t percent_x10,
-								uint16_t fill_color, uint16_t *previous_width,
-								uint8_t draw_frame)
+static void gui_file_row_icon(uint16_t x, uint16_t y, uint8_t directory, uint16_t color)
 {
-	uint16_t inner_width;
-	uint16_t filled_width;
-	uint16_t old_width;
-	uint16_t changed_width;
-
-	if(percent_x10 > 1000UL)
-	{
-		percent_x10 = 1000UL;
-	}
-
-	inner_width = (width > 4U) ? (width - 4U) : 0U;
-	filled_width = (uint16_t)((inner_width * percent_x10 + 500UL) / 1000UL);
-	old_width = (*previous_width <= inner_width) ? *previous_width : 0U;
-
-	if(draw_frame != 0U)
-	{
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DrawRectangle(x, y, width, height, 1U);
-		LCD_SetTextColor(BLACK);
-		ILI9806G_DrawRectangle(x, y, width, height, 0U);
-		old_width = 0U;
-	}
-	else
-	{
-		changed_width = (filled_width > old_width) ?
-						(filled_width - old_width) : (old_width - filled_width);
-		/* Ignore one-pixel ADC/float jitter to avoid continuous LCD writes. */
-		if(changed_width < 2U)
-		{
-			return;
-		}
-	}
-
-	if(filled_width > old_width)
-	{
-		LCD_SetTextColor(fill_color);
-		ILI9806G_DrawRectangle(x + 2U + old_width, y + 2U,
-							  filled_width - old_width, height - 4U, 1U);
-	}
-	else if(old_width > filled_width)
-	{
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DrawRectangle(x + 2U + filled_width, y + 2U,
-							  old_width - filled_width, height - 4U, 1U);
-	}
-
-	*previous_width = filled_width;
+    LCD_SetTextColor(color);
+    if(directory) {
+        ILI9806G_DrawLine(x, y + 4U, x + 10U, y + 4U);
+        ILI9806G_DrawLine(x + 10U, y + 4U, x + 14U, y + 8U);
+        ILI9806G_DrawLine(x + 14U, y + 8U, x + 26U, y + 8U);
+        ILI9806G_DrawLine(x + 26U, y + 8U, x + 26U, y + 24U);
+        ILI9806G_DrawLine(x + 26U, y + 24U, x, y + 24U);
+        ILI9806G_DrawLine(x, y + 24U, x, y + 4U);
+        ILI9806G_DrawLine(x, y + 12U, x + 26U, y + 12U);
+    } else {
+        ILI9806G_DrawRectangle(x + 4U, y + 2U, 18U, 24U, 0U);
+        ILI9806G_DrawLine(x + 8U, y + 10U, x + 18U, y + 10U);
+        ILI9806G_DrawLine(x + 8U, y + 16U, x + 18U, y + 16U);
+    }
 }
 
-static void gui_draw_channel_card(uint16_t x, uint16_t y, uint8_t channel,
-							  uint16_t value, uint16_t bar_color,
-							  uint16_t *previous_width, uint16_t *previous_value,
-							  uint8_t draw_text, uint8_t draw_frame)
+static void gui_monitor_tabs(uint8_t output)
 {
-	uint16_t shown_value = (value > 4095U) ? 4095U : value;
-	uint16_t bar_x = x + 170U;
-	uint16_t bar_width = 206U;
-
-	if(draw_frame != 0U)
-	{
-		LCD_SetTextColor(GREY);
-		ILI9806G_DrawRectangle(x, y, 392U, 46U, 1U);
-		LCD_SetBackColor(GREY);
-		LCD_SetTextColor(BLACK);
-		if(channel == 6U) strcpy(displayBuffer, "BAT");
-        else snprintf(displayBuffer, sizeof(displayBuffer), "A%02u",
-                      (unsigned)(channel < 6U ? channel + 1U : channel));
-		ILI9806G_DispString_EN(x + 8U, y + 7U, displayBuffer);
-	}
-
-	if(draw_frame != 0U || (draw_text != 0U && value != *previous_value))
-	{
-		LCD_SetBackColor(GREY);
-		LCD_SetTextColor(BLACK);
-		snprintf(displayBuffer, sizeof(displayBuffer), "%4u", value);
-		ILI9806G_DispString_EN(x + 88U, y + 7U, displayBuffer);
-		*previous_value = value;
-	}
-
-	gui_update_progress_bar(bar_x, y + 13U, bar_width, 20U,
-							((uint32_t)shown_value * 1000UL) / 4095UL,
-							bar_color, previous_width, draw_frame);
-	LCD_SetTextColor(RED);
-	ILI9806G_DrawLine(bar_x + bar_width / 2U, y + 11U,
-					  bar_x + bar_width / 2U, y + 35U);
+    ui_round_rect(536U,44U,240U,36U,10U,UI_SURFACE);
+    ui_round_rect(output ? 656U : 540U,48U,116U,28U,8U,UI_ACCENT);
+    ui_text(564U,54U,8U,"RAW ADC",output ? UI_MUTED : UI_SURFACE,
+        output ? UI_SURFACE : UI_ACCENT,0U);
+    ui_text(684U,54U,8U,"OUTPUT",output ? UI_SURFACE : UI_MUTED,
+        output ? UI_ACCENT : UI_SURFACE,0U);
 }
 
-static uint32_t gui_imu_axis_percent(float value, float limit)
+static void gui_tools_capacity(uint16_t x, uint16_t y, const char *label,
+                               uint32_t used, uint32_t capacity, uint16_t color)
 {
-	if(value < -limit)
-	{
-		value = -limit;
-	}
-	else if(value > limit)
-	{
-		value = limit;
-	}
-
-	return (uint32_t)(((value + limit) * 1000.0f) / (2.0f * limit) + 0.5f);
+    uint32_t percent = (used * 1000UL + capacity / 2UL) / capacity;
+    uint16_t width = (uint16_t)(328UL * (used > capacity ? capacity : used) / capacity);
+    char text[48];
+    ui_round_rect(x, y, 368U, 128U, 14U, UI_SURFACE);
+    ui_text(x + 20U, y + 12U, 26U, label, UI_MUTED, UI_SURFACE, 0U);
+    snprintf(text, sizeof(text), "%lu.%01lu / %lu KB", (unsigned long)(used / 1024UL),
+             (unsigned long)((used % 1024UL) * 10UL / 1024UL), (unsigned long)(capacity / 1024UL));
+    ui_text(x + 20U, y + 36U, 20U, text, UI_INK, UI_SURFACE, 1U);
+    ui_round_rect(x + 20U, y + 80U, 328U, 8U, 4U, UI_TRACK);
+    if(width) ui_round_rect(x + 20U, y + 80U, width, 8U, 4U, color);
+    snprintf(text, sizeof(text), "%lu.%01lu%%", (unsigned long)(percent / 10UL),
+             (unsigned long)(percent % 10UL));
+    ui_text(x + 280U, y + 12U, 9U, text, color, UI_SURFACE, 0U);
 }
 
-static void gui_draw_imu_axis(uint16_t y, const char *name, float value,
-						  float limit, uint16_t color,
-						  uint16_t *previous_width, uint8_t draw_frame)
+static void gui_robot_format_value(char *field, size_t size, uint8_t columns,
+    const char *format, double value)
 {
-	if(draw_frame != 0U)
-	{
-		LCD_SetTextColor(GREY);
-		ILI9806G_DrawRectangle(4U, y, 792U, 80U, 1U);
-		LCD_SetBackColor(GREY);
-		LCD_SetTextColor(BLACK);
-		ILI9806G_DispString_EN(20U, y + 8U, (char *)name);
-		snprintf(displayBuffer, sizeof(displayBuffer), "Range: +/-%3.0f deg", limit);
-		ILI9806G_DispString_EN(476U, y + 8U, displayBuffer);
-	}
-
-	LCD_SetBackColor(GREY);
-	LCD_SetTextColor(color);
-	snprintf(displayBuffer, sizeof(displayBuffer), "%+7.1f deg", value);
-	ILI9806G_DispString_EN(156U, y + 8U, displayBuffer);
-	gui_update_progress_bar(20U, y + 48U, 760U, 22U,
-							gui_imu_axis_percent(value, limit), color,
-							previous_width, draw_frame);
-	LCD_SetTextColor(RED);
-	ILI9806G_DrawLine(400U, y + 45U, 400U, y + 73U);
+    int length;
+    if(!(value >= -DBL_MAX && value <= DBL_MAX)) {
+        snprintf(field,size,"--");
+        return;
+    }
+    length = snprintf(field,size,format,value);
+    if(length < 0 || (unsigned)length > columns || (size_t)length >= size)
+        snprintf(field,size,"OVR");
 }
 
 void system_basic_information(void)
 {
-	uint32_t code_ro_bytes;
-	uint32_t flash_bytes;
-	uint32_t ram_bytes;
-	uint32_t zi_bytes;
-	uint32_t rw_bytes;
-	uint32_t flash_percent_x10;
-	uint32_t ram_percent_x10;
-	uint8_t first_draw = 0U;
+    static uint8_t last_boot[5];
+    uint8_t boot[5], first_draw = display_flag != 0U;
+    uint32_t code_ro_bytes, rw_bytes, zi_bytes, ram_bytes, flash_bytes, remaining;
+    uint16_t state_color;
+    const char *outcome_text;
+    char text[80];
 
-	if(display_flag == 1)
-	{
-		display_flag = 0;
-		GTP_IRQ_Disable();
-		first_draw = 1U;
-	}
-	
-	code_ro_bytes = (uint32_t)(uintptr_t)&Image$$ER_IROM1$$Length;
-	rw_bytes = (uint32_t)(uintptr_t)&Image$$RW_IRAM1$$Length;
-	zi_bytes = (uint32_t)(uintptr_t)&Image$$RW_IRAM1$$ZI$$Length;
-	ram_bytes = rw_bytes + zi_bytes;
-	flash_bytes = code_ro_bytes + rw_bytes;
-	flash_percent_x10 = (flash_bytes * 1000UL + GUI_MCU_FLASH_BYTES / 2UL) /
-						GUI_MCU_FLASH_BYTES;
-	ram_percent_x10 = (ram_bytes * 1000UL + GUI_MCU_RAM_BYTES / 2UL) /
-					GUI_MCU_RAM_BYTES;
+    if(first_draw) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        code_ro_bytes = (uint32_t)(uintptr_t)&Image$$ER_IROM1$$Length;
+        rw_bytes = (uint32_t)(uintptr_t)&Image$$RW_IRAM1$$Length;
+        zi_bytes = (uint32_t)(uintptr_t)&Image$$RW_IRAM1$$ZI$$Length;
+        ram_bytes = rw_bytes + zi_bytes;
+        flash_bytes = code_ro_bytes + rw_bytes;
+        ui_shell("System", "DEVICE / MEMORY / FIRMWARE", "TOOLS");
+        ui_round_rect(24U, 104U, 752U, 88U, 14U, UI_SURFACE);
+        ui_round_rect(40U, 116U, 64U, 64U, 12U, UI_TINT);
+        ui_icon(48U, 124U, 48U, UI_ICON_CHIP, UI_ACCENT, UI_TINT);
+        ui_text(124U, 116U, 26U, "STM32F407ZGT6", UI_INK, UI_SURFACE, 1U);
+        ui_text(124U, 158U, 48U, "ARM Cortex-M4  /  168 MHz", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(568U, 124U, 23U, "ROBOT REMOTE CONTROL", UI_ACCENT, UI_SURFACE, 0U);
+        ui_text(568U, 154U, 23U, "800 x 480 DISPLAY", UI_MUTED, UI_SURFACE, 0U);
+        gui_tools_capacity(24U, 204U, "FLASH / LINKED IMAGE", flash_bytes, GUI_MCU_FLASH_BYTES, UI_ACCENT);
+        gui_tools_capacity(408U, 204U, "RAM / LINKED RESERVE", ram_bytes, GUI_MCU_RAM_BYTES, UI_GREEN);
+        snprintf(text, sizeof(text), "CODE+RO %lu KB   RW %lu B", (unsigned long)(code_ro_bytes / 1024UL),
+                 (unsigned long)rw_bytes);
+        ui_text(44U, 308U, 41U, text, UI_MUTED, UI_SURFACE, 0U);
+        remaining = ram_bytes < GUI_MCU_RAM_BYTES ? GUI_MCU_RAM_BYTES - ram_bytes : 0UL;
+        snprintf(text, sizeof(text), "ZI/BSS %lu KB  AVAILABLE %lu KB", (unsigned long)(zi_bytes / 1024UL),
+                 (unsigned long)(remaining / 1024UL));
+        ui_text(428U, 308U, 41U, text, UI_MUTED, UI_SURFACE, 0U);
+        ui_round_rect(24U, 344U, 296U, 88U, 14U, UI_SURFACE);
+        ui_text(44U, 356U, 31U, "FIRMWARE", UI_MUTED, UI_SURFACE, 0U);
+        snprintf(text, sizeof(text), "%s  /  %s", FM_VERSION, FM_TIME);
+        ui_text(44U, 386U, 31U, text, UI_INK, UI_SURFACE, 0U);
+        ui_round_rect(336U, 344U, 440U, 88U, 14U, UI_SURFACE);
+        ui_footer("BACK return", "LINKER MEMORY FOOTPRINT");
+    }
+    memset(boot, 0, sizeof(boot));
+    if(boot_last_report) {
+        boot[0] = 1U;
+        boot[1] = boot_last_report->passed;
+        boot[2] = boot_last_report->failed;
+        boot[3] = boot_last_report->not_tested;
+        boot[4] = (uint8_t)boot_report_outcome(boot_last_report);
+    }
+    if(first_draw || memcmp(boot, last_boot, sizeof(boot)) != 0) {
+        state_color = UI_MUTED;
+        outcome_text = "BOOT CHECKS / UNAVAILABLE";
+        if(boot[0]) {
+            if(boot[4] == BOOT_PASSED) { outcome_text = "BOOT CHECKS / ALL PASSED"; state_color = UI_GREEN; }
+            else if(boot[4] == BOOT_FAILED) { outcome_text = "BOOT CHECKS / FAILED"; state_color = UI_RED; }
+            else if(boot[4] == BOOT_PARTIAL) { outcome_text = "BOOT CHECKS / PARTIAL"; state_color = UI_AMBER; }
+            else { outcome_text = "BOOT CHECKS / INCOMPLETE"; state_color = UI_AMBER; }
+        }
+        ui_text(356U, 356U, 49U, outcome_text, state_color, UI_SURFACE, 0U);
+        if(boot[0]) snprintf(text, sizeof(text), "PASS %u   FAIL %u   NOT TESTED %u", boot[1], boot[2], boot[3]);
+        else strcpy(text, "No boot report is available");
+        ui_text(356U, 386U, 49U, text, UI_MUTED, UI_SURFACE, 0U);
+        memcpy(last_boot, boot, sizeof(last_boot));
+    }
+}
 
-	LCD_SetFont(&Font16x32);
-	LCD_SetBackColor(WHITE);
-	if(first_draw != 0U) gui_clear_page_band(LINE(0), 32U);
-	LCD_SetTextColor(BLUE);
-	ILI9806G_DispString_EN(4U, LINE(0), "System / Memory Information");
-	if(first_draw != 0U) gui_clear_page_band(LINE(1), 32U);
-	LCD_SetTextColor(BLACK);
-	ILI9806G_DispString_EN(4U, LINE(1), "MCU: STM32F407ZGT6 @ 168 MHz");
-	if(first_draw != 0U)
-	{
-		LCD_SetBackColor(WHITE);
-		LCD_SetTextColor(BLACK);
-	}
-
-	if(first_draw != 0U) gui_clear_page_band(LINE(2), 32U);
-	snprintf(displayBuffer, sizeof(displayBuffer), "Flash linked: %lu.%01lu / 1024.0 KB   %lu.%01lu%% ",
-			flash_bytes / 1024UL, ((flash_bytes % 1024UL) * 10UL) / 1024UL,
-			flash_percent_x10 / 10UL, flash_percent_x10 % 10UL);
-	ILI9806G_DispString_EN(4U, LINE(2), displayBuffer);
-	if(first_draw != 0U) gui_clear_page_band(LINE(3), 32U);
-	gui_draw_progress_bar(20U, LINE(3) + 5U, 760U, 22U, flash_percent_x10, BLUE);
-
-	if(first_draw != 0U) gui_clear_page_band(LINE(4), 32U);
-	snprintf(displayBuffer, sizeof(displayBuffer), "RAM linked: %lu.%01lu / 128.0 KB      %lu.%01lu%% ",
-			ram_bytes / 1024UL, ((ram_bytes % 1024UL) * 10UL) / 1024UL,
-		ram_percent_x10 / 10UL, ram_percent_x10 % 10UL);
-	ILI9806G_DispString_EN(4U, LINE(4), displayBuffer);
-	if(first_draw != 0U) gui_clear_page_band(LINE(5), 32U);
-	gui_draw_progress_bar(20U, LINE(5) + 5U, 760U, 22U, ram_percent_x10, GREEN);
-
-	if(first_draw != 0U)
-	{
-		gui_clear_page_band(LINE(6), 32U);
-		gui_clear_page_band(LINE(7), 32U);
-	}
-	snprintf(displayBuffer, sizeof(displayBuffer), "ROM Code + RO: %lu.%01lu KB                  ",
-			code_ro_bytes / 1024UL, ((code_ro_bytes % 1024UL) * 10UL) / 1024UL);
-	ILI9806G_DispString_EN(4U, LINE(7), displayBuffer);
-	if(first_draw != 0U) gui_clear_page_band(LINE(8), 32U);
-	snprintf(displayBuffer, sizeof(displayBuffer), "RW initialized: %lu bytes                    ", rw_bytes);
-	ILI9806G_DispString_EN(4U, LINE(8), displayBuffer);
-	if(first_draw != 0U) gui_clear_page_band(LINE(9), 32U);
-	snprintf(displayBuffer, sizeof(displayBuffer), "ZI/BSS + Heap/Stack: %lu.%01lu KB            ",
-			zi_bytes / 1024UL, ((zi_bytes % 1024UL) * 10UL) / 1024UL);
-	ILI9806G_DispString_EN(4U, LINE(9), displayBuffer);
-
-	if(first_draw != 0U) gui_clear_page_band(LINE(10), 32U);
-	snprintf(displayBuffer, sizeof(displayBuffer), "RAM remaining: %lu.%01lu KB                  ",
-			(GUI_MCU_RAM_BYTES - ram_bytes) / 1024UL,
-			(((GUI_MCU_RAM_BYTES - ram_bytes) % 1024UL) * 10UL) / 1024UL);
-	ILI9806G_DispString_EN(4U, LINE(10), displayBuffer);
-	if(first_draw != 0U) gui_clear_page_band(LINE(11), 32U);
-	snprintf(displayBuffer, sizeof(displayBuffer), "Flash remaining: %lu.%01lu KB                ",
-			(GUI_MCU_FLASH_BYTES - flash_bytes) / 1024UL,
-			(((GUI_MCU_FLASH_BYTES - flash_bytes) % 1024UL) * 10UL) / 1024UL);
-	ILI9806G_DispString_EN(4U, LINE(11), displayBuffer);
-
-	if(first_draw != 0U)
-	{
-		gui_clear_page_band(LINE(12), 64U);
-		gui_clear_page_band(LINE(14), 32U);
-	}
-	LCD_SetTextColor(BLUE);
-	ILI9806G_DispString_EN(4U, LINE(14), "Live values from current linker image");
+/* Read-only dashboard: RF ACK is explicitly separate from robot telemetry. */
+/* Read-only dashboard: RF ACK is explicitly separate from robot telemetry. */
+static void gui_dashboard_status(uint8_t first)
+{
+    static uint32_t last_ms;
+    static uint16_t last_mv;
+    static uint8_t last_radio = 255U;
+    static uint8_t last_valid = 255U;
+    ControlLinkSnapshot snapshot;
+    unsigned long now;
+    uint32_t mv;
+    uint8_t radio, valid;
+    char text[40];
+    get_tick_count(&now);
+    if(!first && (uint32_t)(now - last_ms) < 250U) return;
+    last_ms = (uint32_t)now;
+    control_link_get_snapshot(&snapshot);
+    mv = ADC1_Value[6] <= 4095U ? (uint32_t)ADC1_Value[6] * 66UL * param.batVoltAdjust / 40950UL : 0UL;
+    radio = !param.NRF_Mode ? 0U : snapshot.ack_seen && snapshot.ack_age_ms < 150U ? 2U : 1U;
+    valid = snapshot.sampled && snapshot.input_fresh && snapshot.sample_age_ms <= 100U && ADC1_Value[6] <= 4095U;
+    if(first) {
+        ui_round_rect(24U,96U,752U,72U,12U,UI_SURFACE);
+        ui_fill(260U,108U,1U,48U,UI_LINE);
+        ui_fill(518U,108U,1U,48U,UI_LINE);
+        ui_text(44U,104U,22U,"TRANSMITTER BATTERY",UI_MUTED,UI_SURFACE,0U);
+        ui_text(280U,104U,25U,"RADIO / HARDWARE ACK",UI_MUTED,UI_SURFACE,0U);
+        ui_text(540U,104U,26U,"ROBOT OUTPUT",UI_MUTED,UI_SURFACE,0U);
+        ui_text(540U,126U,13U,"LOCKED",UI_MUTED,UI_SURFACE,1U);
+    }
+    if(first || mv != last_mv || valid != last_valid) {
+        if(valid)
+            snprintf(text,sizeof(text),"%lu.%02lu V",(unsigned long)(mv/1000U),(unsigned long)((mv%1000U)/10U));
+        else strcpy(text,"--.-- V");
+        ui_text(44U,126U,12U,text,UI_INK,UI_SURFACE,1U);
+        last_mv = (uint16_t)mv;
+        last_valid = valid;
+    }
+    if(first || radio != last_radio) {
+        ui_text(280U,126U,13U,radio==0U ? "OFF" : radio==1U ? "WAITING" : "ACK RECEIVED",
+                radio==2U ? UI_GREEN : UI_MUTED,UI_SURFACE,1U);
+        last_radio = radio;
+    }
 }
 
 void menu_group_page(uint8_t selected_group)
 {
-    static const char * const titles[3] = {"CONTROL", "SETUP", "TOOLS"};
-    static const char * const hints[3] = {
-        "Robot control / channel monitor / digital inputs",
-        "Parameters / calibration values / wireless settings",
-        "System / IMU / GPS / files / hardware tests / EEPROM"
-    };
-    static uint8_t previous = 0xffU;
-    uint8_t i, first = display_flag != 0U;
-    uint16_t y;
+    static const char * const titles[] = {"Control", "Settings", "Tools"};
+    static const char * const hints[] = {"Operate & monitor", "Configure your remote", "Sensors & diagnostics"};
+    static const uint8_t icons[] = {UI_ICON_CONTROL, UI_ICON_SETTINGS, UI_ICON_TOOLS};
+    static const uint16_t colors[] = {UI_ACCENT, UI_GREEN, UI_AMBER};
+    static uint8_t previous = 255U;
+    uint8_t first = display_flag != 0U, i;
+    uint16_t x, bg;
+    char count[24];
     if(selected_group >= MENU_GROUP_COUNT) selected_group = 0U;
     if(first) {
-        display_flag = 0U;
-        GTP_IRQ_Disable();
-        LCD_SetTextColor(BLUE);
-        ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-        LCD_SetFont(&Font16x32);
-        LCD_SetBackColor(BLUE);
-        LCD_SetTextColor(WHITE);
-        ILI9806G_DispString_EN(20U, 0U, "ROBOT REMOTE");
-        LCD_SetFont(&Font8x16);
-        ILI9806G_DispString_EN(20U, 40U, "Select a category to open its functions");
-        gui_clear_page_content();
+        display_flag = 0U; GTP_IRQ_Disable();
+        ui_shell("Remote dashboard", "Select an app to get started", "HOME");
+        ui_footer("LEFT / RIGHT  Choose app", "OK  Open");
     }
+    gui_dashboard_status(first);
     for(i = 0U; i < MENU_GROUP_COUNT; i++) {
-        y = 80U + (uint16_t)i * 104U;
-        if(first) {
-            LCD_SetTextColor(GREY);
-            ILI9806G_DrawRectangle(4U, y, 792U, 92U, 1U);
-            LCD_SetFont(&Font16x32);
-            LCD_SetBackColor(GREY);
-            LCD_SetTextColor(BLACK);
-            snprintf(displayBuffer, sizeof(displayBuffer), "%02u  %s", i + 1U, titles[i]);
-            ILI9806G_DispString_EN(28U, y + 8U, displayBuffer);
-            LCD_SetFont(&Font8x16);
-            ILI9806G_DispString_EN(92U, y + 54U, (char *)hints[i]);
-            snprintf(displayBuffer, sizeof(displayBuffer), "%u functions", menu_group_count(i));
-            ILI9806G_DispString_EN(676U, y + 14U, displayBuffer);
-        }
-        if(first || i == selected_group || i == previous) {
-            LCD_SetTextColor(i == selected_group ? BLUE : GREY);
-            ILI9806G_DrawRectangle(8U, y + 4U, 8U, 84U, 1U);
-            LCD_SetTextColor(i == selected_group ? BLUE : BLACK);
-            ILI9806G_DrawRectangle(4U, y, 792U, 92U, 0U);
+        if(!first && selected_group == previous) continue;
+        if(!first && i != selected_group && i != previous) continue;
+        x = 24U + (uint16_t)i * 256U;
+        bg = i == selected_group ? UI_TINT : UI_SURFACE;
+        ui_round_rect(x,184U,240U,216U,16U,i == selected_group ? UI_ACCENT : UI_SURFACE);
+        ui_round_rect(x+2U,186U,236U,212U,14U,bg);
+        ui_round_rect(x+76U,206U,88U,88U,20U,colors[i]);
+        ui_icon(x+96U,226U,48U,icons[i],UI_SURFACE,colors[i]);
+        ui_text(x + (uint16_t)((240U - strlen(titles[i])*16U)/2U),306U,
+                (uint8_t)strlen(titles[i]),titles[i],UI_INK,bg,1U);
+        ui_text(x+(uint16_t)((240U-strlen(hints[i])*8U)/2U),348U,
+                (uint8_t)strlen(hints[i]),hints[i],UI_MUTED,bg,0U);
+        snprintf(count,sizeof(count),"%u functions",menu_group_count(i));
+        ui_text(x+76U,374U,11U,count,i==selected_group?UI_ACCENT:UI_MUTED,bg,0U);
+    }
+    if(first || previous != selected_group) {
+        for(i=0U;i<MENU_GROUP_COUNT;i++) {
+            LCD_SetTextColor(i==selected_group?UI_ACCENT:UI_LINE);
+            ILI9806G_DrawCircle(382U+(uint16_t)i*18U,423U,4U,1U);
         }
     }
-    if(first) {
-        LCD_SetFont(&Font16x32);
-        LCD_SetBackColor(WHITE);
-        LCD_SetTextColor(BLUE);
-        ILI9806G_DispString_EN(12U, 400U, "LEFT/RIGHT: Select    OK: Open");
-        gui_boot_menu_badge();
-    }
-    LCD_SetBackColor(WHITE);
-    LCD_SetTextColor(BLACK);
-    previous = selected_group;
+    previous=selected_group;
 }
 
 void main_menu(uint8_t selected_item)
 {
-#define MENU_LABEL(page, label, hint) label,
-    static const char * const labels[] = { MENU_ENTRY_LIST(MENU_LABEL) };
+#define MENU_LABEL(page,label,hint) label,
+    static const char * const names[] = {MENU_ENTRY_LIST(MENU_LABEL)};
 #undef MENU_LABEL
-#define MENU_HINT(page, label, hint) hint,
-    static const char * const hints[] = { MENU_ENTRY_LIST(MENU_HINT) };
-#undef MENU_HINT
-    static const char * const groups[3] = {"CONTROL", "SETUP", "TOOLS"};
-    static uint8_t previous = 0xffU;
-    uint8_t group, first_entry, count, i, entry, first;
-    uint16_t x, y;
-    if(selected_item >= MENU_ENTRY_COUNT) selected_item = 0U;
-    group = menu_entry_group(selected_item);
-    first_entry = menu_group_first(group);
-    count = menu_group_count(group);
-    first = display_flag != 0U || previous == 0xffU || menu_entry_group(previous) != group;
+    static const char * const subtitles[] = {
+        "Manual drive", "Inputs & output", "Switch states", "System & channels", "Radio link",
+        "Firmware & memory", "Local attitude", "Position & fix", "SD / Flash storage",
+        "Hardware checks", "Storage diagnostics"
+    };
+    static const char * const groups[] = {"Control","Settings","Tools"};
+    static const uint8_t icons[] = {UI_ICON_CONTROL,UI_ICON_CHANNEL,UI_ICON_SWITCH,
+        UI_ICON_SETTINGS,UI_ICON_RADIO,UI_ICON_CHIP,UI_ICON_IMU,UI_ICON_GPS,
+        UI_ICON_FOLDER,UI_ICON_TOOLS,UI_ICON_MEMORY};
+    static uint8_t previous=255U;
+    uint8_t first, group, start, count, i, entry;
+    uint16_t x,y,bg;
+    char text[24];
+    if(selected_item>=MENU_ENTRY_COUNT) selected_item=0U;
+    group=menu_entry_group(selected_item); start=menu_group_first(group); count=menu_group_count(group);
+    first=display_flag!=0U || previous==255U || menu_entry_group(previous)!=group;
     if(first) {
-        display_flag = 0U;
-        GTP_IRQ_Disable();
-        LCD_SetTextColor(BLUE);
-        ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-        LCD_SetBackColor(BLUE);
-        LCD_SetFont(&Font16x32);
-        LCD_SetTextColor(WHITE);
-        snprintf(displayBuffer, sizeof(displayBuffer), "REMOTER / %s", groups[group]);
-        ILI9806G_DispString_EN(20U, 0U, displayBuffer);
-        LCD_SetFont(&Font8x16);
-        ILI9806G_DispString_EN(20U, 40U, "LEFT/RIGHT: Select   OK: Enter   BACK: Categories");
-        gui_clear_page_band(64U, 416U);
-    }
-    for(i = 0U; i < count; i++) {
-        entry = first_entry + i;
-        x = (i & 1U) ? 404U : 4U;
-        y = 80U + (uint16_t)(i / 2U) * 104U;
-        if(first) {
-            LCD_SetTextColor(GREY);
-            ILI9806G_DrawRectangle(x, y, 392U, 92U, 1U);
-            LCD_SetBackColor(GREY);
-            LCD_SetTextColor(BLACK);
-            LCD_SetFont(&Font16x32);
-            ILI9806G_DispString_EN(x + 24U, y + 8U, (char *)labels[entry]);
-            LCD_SetFont(&Font8x16);
-            snprintf(displayBuffer, sizeof(displayBuffer), "%-45.45s", hints[entry]);
-            ILI9806G_DispString_EN(x + 24U, y + 56U, displayBuffer);
+        display_flag=0U; GTP_IRQ_Disable();
+        ui_shell(groups[group],"Select a function", "APPLICATIONS");
+        ui_round_rect(24U,96U,160U,336U,12U,UI_SURFACE);
+        ui_text(40U,112U,16U,"WORKSPACE",UI_MUTED,UI_SURFACE,0U);
+        for(i=0U;i<MENU_GROUP_COUNT;i++) {
+            bg=i==group?UI_TINT:UI_SURFACE;
+            ui_round_rect(32U,144U+(uint16_t)i*56U,144U,44U,8U,bg);
+            ui_text(44U,158U+(uint16_t)i*56U,15U,groups[i],i==group?UI_ACCENT:UI_MUTED,bg,0U);
         }
-        if(first || entry == selected_item || entry == previous) {
-            LCD_SetTextColor(entry == selected_item ? BLUE : GREY);
-            ILI9806G_DrawRectangle(x + 4U, y + 4U, 8U, 84U, 1U);
-            LCD_SetTextColor(entry == selected_item ? BLUE : BLACK);
-            ILI9806G_DrawRectangle(x, y, 392U, 92U, 0U);
-        }
+        ui_text(40U,360U,15U,"BACK",UI_MUTED,UI_SURFACE,0U);
+        ui_text(40U,382U,15U,"Choose group",UI_MUTED,UI_SURFACE,0U);
+        ui_footer("LEFT / RIGHT  Choose function", "OK  Open    BACK  Home");
     }
-    LCD_SetFont(&Font16x32);
-    LCD_SetBackColor(WHITE);
-    LCD_SetTextColor(BLUE);
-    snprintf(displayBuffer, sizeof(displayBuffer), "Selected: %u / %u    BACK: Categories", selected_item - first_entry + 1U, count);
-    ILI9806G_DispString_EN(12U, 400U, displayBuffer);
-    if(first) gui_boot_menu_badge();
-    previous = selected_item;
+    for(i=0U;i<count;i++) {
+        entry=start+i;
+        if(!first && entry!=selected_item && entry!=previous) continue;
+        x=200U+(uint16_t)(i%3U)*196U; y=96U+(uint16_t)(i/3U)*172U;
+        bg=entry==selected_item?UI_TINT:UI_SURFACE;
+        ui_round_rect(x,y,184U,160U,12U,entry==selected_item?UI_ACCENT:UI_SURFACE);
+        ui_round_rect(x+2U,y+2U,180U,156U,10U,bg);
+        ui_round_rect(x+58U,y+14U,68U,68U,16U,UI_SURFACE);
+        ui_icon(x+68U,y+24U,48U,icons[entry],entry==selected_item?UI_ACCENT:UI_MUTED,UI_SURFACE);
+        ui_text(x+12U,y+98U,20U,names[entry],UI_INK,bg,0U);
+        ui_text(x+12U,y+124U,20U,subtitles[entry],UI_MUTED,bg,0U);
+    }
+    if(count<=3U && first) {
+        ui_text(216U,304U,65U,group==0U ? "Control is enabled only inside Robot Control." : "Changes stay local until you choose Save.",UI_MUTED,UI_BG,0U);
+        ui_text(216U,332U,65U,group==0U ? "Release DCH1 to stop. Return here to leave control." : "Use BACK while editing to cancel the current value.",UI_MUTED,UI_BG,0U);
+    }
+    snprintf(text,sizeof(text),"%u / %u",selected_item-start+1U,count);
+    ui_text(720U,60U,7U,text,UI_ACCENT,UI_BG,0U);
+    previous=selected_item;
 }
 
-void digital_channel_monitor_page(const uint8_t *raw_values,
-								  const uint8_t *stable_values)
+
+void digital_channel_monitor_page(const uint8_t *raw_values, const uint8_t *stable_values)
 {
-	static const char *channel_pin[6] =
-	{
-		"PD6", "PD3", "PA8", "PD7", "PE3", "PE2"
-	};
-	static const uint8_t channel_is_button[6] = {1U, 0U, 1U, 1U, 0U, 0U};
-	static uint8_t last_raw[6] = {0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU};
-	static uint8_t last_stable[6] = {0xffU, 0xffU, 0xffU, 0xffU, 0xffU, 0xffU};
-	uint8_t channel;
-	uint8_t first_draw = 0U;
-	uint16_t card_x;
-	uint16_t card_y;
-	uint16_t state_color;
-	const char *state_text;
+    static const char *pins[6] = {"PD6", "PD3", "PA8", "PD7", "PE3", "PE2"};
+    static const uint8_t is_button[6] = {1U, 0U, 1U, 1U, 0U, 0U};
+    static uint8_t last_raw[6], last_stable[6];
+    uint8_t first_draw = display_flag != 0U, channel, raw, stable, changed;
+    uint16_t x, y, background, color;
+    const char *state;
+    char text[32];
 
-	if(display_flag == 1U)
-	{
-		display_flag = 0U;
-		GTP_IRQ_Disable();
-		first_draw = 1U;
-		for(channel = 0U; channel < 6U; channel++)
-		{
-			last_raw[channel] = 0xffU;
-			last_stable[channel] = 0xffU;
-		}
-	}
-
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(BLUE2);
-		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-		LCD_SetBackColor(BLUE2);
-		LCD_SetTextColor(WHITE);
-		LCD_SetFont(&Font16x32);
-		ILI9806G_DispString_EN(20U, 0U, "DIGITAL CHANNEL MONITOR");
-		LCD_SetFont(&Font8x16);
-		ILI9806G_DispString_EN(20U, 36U,
-			"DCH1..DCH6 / RAW AND 30 ms DEBOUNCED VALUES");
-		gui_clear_page_content();
-
-		for(channel = 0U; channel < 6U; channel++)
-		{
-			card_x = ((channel & 1U) == 0U) ? 4U : 404U;
-			card_y = 72U + (uint16_t)(channel / 2U) * 112U;
-			LCD_SetTextColor(GREY);
-			ILI9806G_DrawRectangle(card_x, card_y, 392U, 104U, 1U);
-			LCD_SetTextColor(BLUE2);
-			ILI9806G_DrawRectangle(card_x, card_y, 392U, 104U, 0U);
-
-			LCD_SetBackColor(GREY);
-			LCD_SetTextColor(BLACK);
-			LCD_SetFont(&Font16x32);
-			snprintf(displayBuffer, sizeof(displayBuffer), "DCH%u", (uint16_t)(channel + 1U));
-			ILI9806G_DispString_EN(card_x + 16U, card_y + 4U, displayBuffer);
-			LCD_SetFont(&Font8x16);
-			snprintf(displayBuffer, sizeof(displayBuffer), "%s / %s",
-					(channel_is_button[channel] != 0U) ? "BUTTON" : "TOGGLE",
-					channel_pin[channel]);
-			ILI9806G_DispString_EN(card_x + 136U, card_y + 12U, displayBuffer);
-		}
-
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DrawRectangle(396U, 72U, 8U, 328U, 1U);
-		ILI9806G_DrawRectangle(4U, 176U, 792U, 8U, 1U);
-		ILI9806G_DrawRectangle(4U, 288U, 792U, 8U, 1U);
-		ILI9806G_DrawRectangle(4U, 400U, 792U, 80U, 1U);
-		LCD_SetBackColor(WHITE);
-		LCD_SetTextColor(BLUE2);
-		LCD_SetFont(&Font8x16);
-		ILI9806G_DispString_EN(12U, 416U,
-			"10 ms SAMPLE / 30 ms DEBOUNCE     BUTTONS ARE ACTIVE LOW");
-		ILI9806G_DispString_EN(12U, 456U, "LEFT: BACK");
-	}
-
-	for(channel = 0U; channel < 6U; channel++)
-	{
-		card_x = ((channel & 1U) == 0U) ? 4U : 404U;
-		card_y = 72U + (uint16_t)(channel / 2U) * 112U;
-
-		if((first_draw != 0U) || (raw_values[channel] != last_raw[channel]))
-		{
-			LCD_SetBackColor(GREY);
-			LCD_SetTextColor(BLACK);
-			LCD_SetFont(&Font8x16);
-			snprintf(displayBuffer, sizeof(displayBuffer), "RAW LEVEL: %u   ",
-					(uint16_t)raw_values[channel]);
-			ILI9806G_DispString_EN(card_x + 16U, card_y + 44U, displayBuffer);
-			last_raw[channel] = raw_values[channel];
-		}
-
-		if((first_draw != 0U) ||
-		   (stable_values[channel] != last_stable[channel]))
-		{
-			if(channel_is_button[channel] != 0U)
-			{
-				state_text = (stable_values[channel] == 0U) ?
-							 "PRESSED" : "RELEASED";
-				state_color = (stable_values[channel] == 0U) ? GREEN : BLACK;
-			}
-			else
-			{
-				state_text = (stable_values[channel] == 0U) ?
-							 "POSITION A" : "POSITION B";
-				state_color = (stable_values[channel] == 0U) ? RED : BLUE2;
-			}
-
-			LCD_SetBackColor(GREY);
-			LCD_SetTextColor(state_color);
-			LCD_SetFont(&Font16x32);
-			snprintf(displayBuffer, sizeof(displayBuffer), "VALUE %u  %-10s",
-					(uint16_t)stable_values[channel], state_text);
-			ILI9806G_DispString_EN(card_x + 16U, card_y + 68U, displayBuffer);
-			last_stable[channel] = stable_values[channel];
-		}
-	}
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(BLACK);
+    if(first_draw) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        ui_shell("Digital inputs", "6 INPUTS / 30 ms DEBOUNCE", "CONTROL / MONITOR");
+        ui_footer("BACK return   Buttons: active low", "RAW + STABLE LEVELS");
+    }
+    for(channel = 0U; channel < 6U; channel++) {
+        raw = raw_values ? raw_values[channel] : 0xffU;
+        stable = stable_values ? stable_values[channel] : 0xffU;
+        changed = first_draw || stable != last_stable[channel];
+        x = 24U + (uint16_t)(channel % 3U) * 256U;
+        y = 104U + (uint16_t)(channel / 3U) * 168U;
+        background = stable == 0U ? UI_TINT : UI_SURFACE;
+        color = stable > 1U ? UI_MUTED : is_button[channel] ?
+                (stable == 0U ? UI_GREEN : UI_MUTED) : UI_ACCENT;
+        if(changed) {
+            ui_round_rect(x, y, 240U, 152U, 14U, background);
+            snprintf(text, sizeof(text), "DCH%u", channel + 1U);
+            ui_text(x + 16U, y + 12U, 5U, text, UI_INK, background, 1U);
+            ui_text(x + 128U, y + 20U, 12U, channel == 0U ? "ENABLE" :
+                    is_button[channel] ? "BUTTON" : "TOGGLE", color, background, 0U);
+            snprintf(text, sizeof(text), "%s / %s", pins[channel], is_button[channel] ? "MOMENTARY" : "2 POSITION");
+            ui_text(x + 16U, y + 46U, 26U, text, UI_MUTED, background, 0U);
+            if(stable > 1U) state = "--";
+            else if(is_button[channel]) state = stable == 0U ? "PRESSED" : "RELEASED";
+            else state = stable == 0U ? "POS A" : "POS B";
+            ui_text(x + 16U, y + 68U, 8U, state, color, background, 2U);
+        }
+        if(changed || raw != last_raw[channel]) {
+            snprintf(text, sizeof(text), "RAW %c     STABLE %c", raw <= 1U ? '0' + raw : '-',
+                     stable <= 1U ? '0' + stable : '-');
+            ui_text(x + 16U, y + 128U, 26U, text, UI_MUTED, background, 0U);
+        }
+        last_raw[channel] = raw;
+        last_stable[channel] = stable;
+    }
 }
 
 static uint8_t gui_file_decode_utf8(const uint8_t *source,
@@ -985,7 +813,7 @@ static void gui_file_size_text(uint32_t size, char *text)
 {
 	if(size < 1024UL)
 	{
-		sprintf(text, "%lu B", size);
+		sprintf(text, "%lu B", (unsigned long)size);
 	}
 	else if(size < (1024UL * 1024UL))
 	{
@@ -999,476 +827,284 @@ static void gui_file_size_text(uint32_t size, char *text)
 }
 
 void file_browser_page(const char *path, const GuiFileEntry *entries,
-					   uint8_t item_count, uint8_t selected_item,
-					   uint8_t first_visible, uint16_t revision,
-					   const char *status_text)
+                       uint8_t item_count, uint8_t selected_item,
+                       uint8_t first_visible, uint16_t revision,
+                       const char *status_text)
 {
-	static uint16_t last_revision = 0xffffU;
-	static uint8_t last_selected_item = 0xffU;
-	static uint8_t last_first_visible = 0xffU;
-	char safe_text[96];
-	char size_text[16];
-	uint8_t row;
-	uint8_t item_index;
-	uint16_t row_y;
-	uint8_t first_draw = 0U;
-	uint8_t content_changed;
+    static uint16_t last_revision = 0xffffU;
+    static uint8_t last_selected = 0xffU, last_first_visible = 0xffU, last_count;
+    static char last_path[96], last_status[96];
+    uint8_t row, first_draw = 0U, content_changed, selection_changed;
+    uint16_t index, y, background, foreground;
+    char safe_path[96], safe_status[96], safe_name[96], size_text[16], count_text[32];
 
-	if(display_flag == 1)
-	{
-		display_flag = 0;
-		GTP_IRQ_Disable();
-		first_draw = 1U;
-		last_revision = 0xffffU;
-		last_selected_item = 0xffU;
-		last_first_visible = 0xffU;
-	}
-
-	content_changed = ((first_draw != 0U) || (revision != last_revision) ||
-					   (first_visible != last_first_visible)) ? 1U : 0U;
-	LCD_SetFont(&Font16x32);
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(BLUE);
-		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-		LCD_SetBackColor(BLUE);
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DispString_EN(20U, 0U, "FILE BROWSER");
-		ILI9806G_DispString_EN(20U, 32U, "SD Card  Read-only mode");
-		gui_clear_page_content();
-	}
-
-	if(content_changed != 0U)
-	{
-		LCD_SetTextColor(GREY);
-		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
-		LCD_SetBackColor(GREY);
-		LCD_SetTextColor(BLACK);
-		gui_file_display_text(safe_text, sizeof(safe_text), path, 672U);
-		strcpy(displayBuffer, "Path: ");
-		strcat(displayBuffer, safe_text);
-		ILI9806G_DispString_EN_CH(12U, 72U, displayBuffer);
-
-		for(row = 0U; row < 6U; row++)
-		{
-			item_index = (uint8_t)(first_visible + row);
-			row_y = 112U + (uint16_t)row * 48U;
-			if(item_index >= item_count)
-			{
-				LCD_SetTextColor(WHITE);
-				ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 1U);
-				ILI9806G_DrawRectangle(4U, row_y + 40U, 792U, 8U, 1U);
-				continue;
-			}
-
-			LCD_SetTextColor(GREY);
-			ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 1U);
-			LCD_SetBackColor(GREY);
-			LCD_SetTextColor(BLACK);
-			gui_file_display_text(safe_text, sizeof(safe_text),
-							  entries[item_index].name,
-							  (entries[item_index].is_directory != 0U) ? 672U : 496U);
-			if(entries[item_index].is_directory != 0U)
-			{
-				strcpy(displayBuffer, "DIR  ");
-				strcat(displayBuffer, safe_text);
-			}
-			else
-			{
-				gui_file_size_text(entries[item_index].size, size_text);
-				strcpy(displayBuffer, "FILE ");
-				strcat(displayBuffer, safe_text);
-			}
-			ILI9806G_DispString_EN_CH(20U, row_y + 4U, displayBuffer);
-			if(entries[item_index].is_directory == 0U)
-			{
-				ILI9806G_DispString_EN(620U, row_y + 4U, size_text);
-			}
-			LCD_SetTextColor(WHITE);
-			ILI9806G_DrawRectangle(4U, row_y + 40U, 792U, 8U, 1U);
-		}
-		if(item_count == 0U)
-		{
-			LCD_SetBackColor(WHITE);
-			LCD_SetTextColor(GREY);
-			ILI9806G_DispString_EN(260U, 224U, "<EMPTY DIRECTORY>");
-		}
-	}
-
-	for(row = 0U; row < 6U; row++)
-	{
-		item_index = (uint8_t)(first_visible + row);
-		if(item_index >= item_count)
-		{
-			break;
-		}
-		if((content_changed == 0U) && (item_index != selected_item) &&
-		   (item_index != last_selected_item))
-		{
-			continue;
-		}
-
-		row_y = 112U + (uint16_t)row * 48U;
-		LCD_SetTextColor((item_index == selected_item) ? BLUE : GREY);
-		ILI9806G_DrawRectangle(8U, row_y + 4U, 8U, 32U, 1U);
-		LCD_SetTextColor((item_index == selected_item) ? BLUE : BLACK);
-		ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 0U);
-	}
-
-	if(first_draw != 0U)
-	{
-		gui_clear_page_band(104U, 8U);
-		gui_clear_page_band(400U, 8U);
-		gui_clear_page_band(424U, 8U);
-		gui_clear_page_band(464U, 16U);
-	}
-	LCD_SetFont(&Font8x16);
-	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(BLUE);
-	ILI9806G_DispString_EN(12U, 408U,
-						"LEFT/RIGHT Select   OK Open   BACK Parent/Exit");
-	LCD_SetFont(&Font16x32);
-	LCD_SetTextColor(WHITE);
-	ILI9806G_DrawRectangle(4U, 432U, 792U, 32U, 1U);
-	LCD_SetTextColor(BLACK);
-	gui_file_display_text(safe_text, sizeof(safe_text), status_text, 640U);
-	strcpy(displayBuffer, "Status: ");
-	strcat(displayBuffer, safe_text);
-	ILI9806G_DispString_EN_CH(12U, 432U, displayBuffer);
-
-	last_revision = revision;
-	last_selected_item = selected_item;
-	last_first_visible = first_visible;
+    if(display_flag == 1U) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        first_draw = 1U;
+    }
+    if(!entries) item_count = 0U;
+    if(!item_count) { selected_item = 0U; first_visible = 0U; }
+    else {
+        if(selected_item >= item_count) selected_item = item_count - 1U;
+        if(first_visible >= item_count) first_visible = item_count - 1U;
+    }
+    gui_file_display_text(safe_path, sizeof(safe_path), path ? path : "", 656U);
+    gui_file_display_text(safe_status, sizeof(safe_status), status_text ? status_text : "", 752U);
+    content_changed = first_draw || revision != last_revision || first_visible != last_first_visible ||
+                      item_count != last_count || strcmp(safe_path, last_path) != 0;
+    selection_changed = selected_item != last_selected;
+    if(first_draw) {
+        ui_shell("Files", "SD CARD / BROWSE STORAGE", "TOOLS");
+        ui_round_rect(16U, 96U, 768U, 40U, 10U, UI_TINT);
+        gui_file_row_icon(32U, 102U, 1U, UI_ACCENT);
+    }
+    if(first_draw || strcmp(safe_path, last_path) != 0) {
+        ui_fill(80U, 100U, 672U, 32U, UI_TINT);
+        LCD_SetFont(&Font16x32);
+        LCD_SetTextColor(UI_ACCENT);
+        LCD_SetBackColor(UI_TINT);
+        ILI9806G_DispString_EN_CH(80U, 100U, safe_path);
+    }
+    if(content_changed) ui_fill(16U, 144U, 768U, 260U, UI_BG);
+    for(row = 0U; row < 6U; row++) {
+        index = (uint16_t)first_visible + row;
+        if(index >= item_count) break;
+        if(!content_changed && !(selection_changed && (index == selected_item || index == last_selected)))
+            continue;
+        y = 144U + (uint16_t)row * 44U;
+        background = index == selected_item ? UI_TINT : UI_SURFACE;
+        foreground = index == selected_item ? UI_ACCENT : UI_INK;
+        ui_round_rect(16U, y, 768U, 40U, 9U, background);
+        gui_file_row_icon(32U, y + 6U, entries[index].is_directory, foreground);
+        gui_file_display_text(safe_name, sizeof(safe_name), entries[index].name, 512U);
+        LCD_SetFont(&Font16x32);
+        LCD_SetTextColor(foreground);
+        LCD_SetBackColor(background);
+        ILI9806G_DispString_EN_CH(80U, y + 4U, safe_name);
+        if(entries[index].is_directory) strcpy(size_text, "FOLDER");
+        else gui_file_size_text(entries[index].size, size_text);
+        ui_text(620U, y + 12U, 16U, size_text, UI_MUTED, background, 0U);
+        ui_text(756U, y + 12U, 1U, ">", foreground, background, 0U);
+    }
+    if(content_changed && !item_count) {
+        ui_round_rect(16U, 144U, 768U, 260U, 14U, UI_SURFACE);
+        ui_icon(376U, 204U, 48U, UI_ICON_FOLDER, UI_MUTED, UI_SURFACE);
+        ui_text(312U, 276U, 24U, "This directory is empty", UI_MUTED, UI_SURFACE, 0U);
+    }
+    if(first_draw || strcmp(safe_status, last_status) != 0) {
+        ui_fill(24U, 408U, 752U, 32U, UI_BG);
+        LCD_SetFont(&Font16x32);
+        LCD_SetTextColor(UI_MUTED);
+        LCD_SetBackColor(UI_BG);
+        ILI9806G_DispString_EN_CH(24U, 408U, safe_status);
+    }
+    if(content_changed || selection_changed) {
+        snprintf(count_text, sizeof(count_text), "%u / %u FILES", item_count ? selected_item + 1U : 0U, item_count);
+        ui_footer("LEFT/RIGHT select   OK open   BACK parent/exit", count_text);
+    }
+    memcpy(last_path, safe_path, sizeof(last_path));
+    memcpy(last_status, safe_status, sizeof(last_status));
+    last_selected = selected_item;
+    last_first_visible = first_visible;
+    last_count = item_count;
+    last_revision = revision;
 }
 
 void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
-							 uint8_t selected_row, uint8_t first_visible,
-							 uint8_t total_items, uint8_t editing,
-							 uint8_t dirty, uint16_t revision,
-							 const char *status_text)
+                             uint8_t selected_row, uint8_t first_visible,
+                             uint8_t total_items, uint8_t editing,
+                             uint8_t dirty, uint16_t revision,
+                             const char *status_text)
 {
-	static uint8_t last_selected_item = 0xffU;
-	static uint8_t last_first_visible = 0xffU;
-	static uint8_t last_visible_count;
-	static uint8_t last_editing = 0xffU;
-	static uint8_t last_dirty = 0xffU;
-	static GuiParamRow last_rows[GUI_PARAM_VISIBLE_ROWS];
-	static char last_status_text[80];
-	uint8_t row;
-	uint8_t item_index;
-	uint8_t selected_item;
-	uint8_t first_draw = 0U;
-	uint8_t window_changed;
-	uint8_t state_changed;
-	uint8_t row_text_changed;
-	uint8_t indicator_changed;
-	uint16_t row_y;
-	uint16_t scroll_height;
-	uint16_t scroll_y;
-	uint16_t selection_color;
-	const char *state_text;
+    static uint8_t last_selected_row = 0xffU;
+    static uint8_t last_first_visible = 0xffU;
+    static uint8_t last_visible_count, last_total_items;
+    static uint8_t last_editing = 0xffU, last_dirty = 0xffU;
+    static GuiParamRow last_rows[GUI_PARAM_VISIBLE_ROWS];
+    static char last_status[80];
+    uint8_t row, first_draw = 0U, window_changed, selection_changed;
+    uint8_t current_selected, previous_selected;
+    uint16_t state_color;
+    GuiParamRow current;
+    char status[80], text[32];
+    const char *state_text;
 
-	if(display_flag == 1)
-	{
-		display_flag = 0;
-		GTP_IRQ_Disable();
-		first_draw = 1U;
-		last_selected_item = 0xffU;
-		last_first_visible = 0xffU;
-		last_visible_count = 0U;
-		last_editing = 0xffU;
-		last_dirty = 0xffU;
-		memset(last_rows, 0, sizeof(last_rows));
-		last_status_text[0] = '\0';
-	}
-	(void)revision;
+    if(display_flag == 1U) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        first_draw = 1U;
+    }
+    (void)revision;
+    if(visible_count > GUI_PARAM_VISIBLE_ROWS) visible_count = GUI_PARAM_VISIBLE_ROWS;
+    if(!rows || !total_items || first_visible >= total_items) visible_count = 0U;
+    else if(visible_count > (uint8_t)(total_items - first_visible))
+        visible_count = (uint8_t)(total_items - first_visible);
+    if(!visible_count || selected_row >= visible_count) selected_row = 0U;
+    if(!total_items) first_visible = 0U;
+    snprintf(status, sizeof(status), "%.79s", status_text ? status_text : "");
+    window_changed = first_draw || first_visible != last_first_visible ||
+                     visible_count != last_visible_count || total_items != last_total_items;
+    selection_changed = first_draw || selected_row != last_selected_row ||
+                        editing != last_editing;
 
-	if(visible_count == 0U)
-	{
-		return;
-	}
-	if(selected_row >= visible_count)
-	{
-		selected_row = 0U;
-	}
-	selected_item = (uint8_t)(first_visible + selected_row);
-	window_changed = ((first_draw != 0U) ||
-					  (first_visible != last_first_visible) ||
-					  (visible_count != last_visible_count)) ? 1U : 0U;
-	state_changed = ((first_draw != 0U) ||
-					 (editing != last_editing) || (dirty != last_dirty) ||
-					 (first_visible != last_first_visible) ||
-					 (strcmp(status_text, last_status_text) != 0)) ? 1U : 0U;
+    if(first_draw) {
+        ui_shell("Parameters", "CONFIGURATION / CHANNEL SETUP", "SETTINGS");
+        ui_round_rect(16U, 104U, 160U, 320U, 14U, UI_SURFACE);
+        ui_round_rect(64U, 124U, 64U, 64U, 14U, UI_TINT);
+        ui_icon(72U, 132U, 48U, UI_ICON_SETTINGS, UI_ACCENT, UI_TINT);
+        ui_text(32U, 196U, 16U, "PARAMETERS", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 284U, 16U, "CURRENT ITEM", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 360U, 16U, "Save changes via", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 382U, 16U, "SAVE ALL below", UI_MUTED, UI_SURFACE, 0U);
+    }
 
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(BLUE);
-		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-		LCD_SetBackColor(BLUE);
-		LCD_SetTextColor(WHITE);
-		LCD_SetFont(&Font16x32);
-		ILI9806G_DispString_EN(20U, 0U, "PARAMETER SETTINGS");
-		ILI9806G_DispString_EN(20U, 32U, "Scrollable configuration / explicit Flash save");
-		gui_clear_page_content();
+    if(first_draw || editing != last_editing || dirty != last_dirty) {
+        state_text = editing ? "EDITING" : dirty ? "UNSAVED" : "SAVED";
+        state_color = editing || dirty ? UI_AMBER : UI_GREEN;
+        ui_round_rect(32U, 224U, 128U, 40U, 9U, state_color);
+        ui_text(40U, 236U, 14U, state_text, UI_SURFACE, state_color, 0U);
+        ui_footer(editing ? "LEFT/RIGHT change   OK confirm   BACK cancel" :
+                  "LEFT/RIGHT select   OK edit/run   BACK return",
+                  dirty ? "CHANGES NOT SAVED" : "PARAMETER SETTINGS");
+    }
+    if(window_changed || selection_changed) {
+        snprintf(text, sizeof(text), "%u/%u",
+                 visible_count ? (uint16_t)first_visible + selected_row + 1U : 0U,
+                 (uint16_t)total_items);
+        ui_text(32U, 308U, 8U, text, UI_INK, UI_SURFACE, 1U);
+    }
 
-		LCD_SetTextColor(GREY);
-		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
-
-		gui_clear_page_band(104U, 8U);
-		gui_clear_page_band(400U, 32U);
-		LCD_SetBackColor(WHITE);
-		LCD_SetTextColor(BLUE);
-		LCD_SetFont(&Font8x16);
-		ILI9806G_DispString_EN(12U, 408U,
-			"LEFT/RIGHT Select/Change   OK Edit/Confirm   BACK Cancel/Exit");
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DrawRectangle(4U, 432U, 792U, 32U, 1U);
-		gui_clear_page_band(464U, 16U);
-	}
-
-	if(state_changed != 0U)
-	{
-		state_text = (editing != 0U) ? "EDITING" :
-					 ((dirty != 0U) ? "UNSAVED" : "SAVED");
-		LCD_SetBackColor(GREY);
-		LCD_SetTextColor((editing != 0U) ? RED :
-					 ((dirty != 0U) ? RED : BLACK));
-		LCD_SetFont(&Font8x16);
-		snprintf(displayBuffer, sizeof(displayBuffer),
-				"ITEMS %u-%u / %u     STATE: %-8s                              ",
-				(uint16_t)(first_visible + 1U),
-				(uint16_t)(first_visible + visible_count),
-				(uint16_t)total_items, state_text);
-		ILI9806G_DispString_EN(20U, 80U, displayBuffer);
-	}
-
-	for(row = 0U; row < visible_count; row++)
-	{
-		item_index = (uint8_t)(first_visible + row);
-		row_y = 112U + (uint16_t)row * 48U;
-		row_text_changed = ((window_changed != 0U) ||
-			(strcmp(rows[row].label, last_rows[row].label) != 0) ||
-			(strcmp(rows[row].value, last_rows[row].value) != 0)) ? 1U : 0U;
-		indicator_changed = ((window_changed != 0U) ||
-			(item_index == selected_item) ||
-			(item_index == last_selected_item)) ? 1U : 0U;
-
-		if((first_draw != 0U) || (row >= last_visible_count))
-		{
-			LCD_SetTextColor(GREY);
-			ILI9806G_DrawRectangle(4U, row_y, 768U, 40U, 1U);
-			LCD_SetTextColor(BLACK);
-			ILI9806G_DrawRectangle(4U, row_y, 768U, 40U, 0U);
-		}
-
-		if(row_text_changed != 0U)
-		{
-			LCD_SetBackColor(GREY);
-			LCD_SetTextColor(BLACK);
-			LCD_SetFont(&Font16x32);
-			snprintf(displayBuffer, sizeof(displayBuffer), "%-23.23s %-20.20s",
-					rows[row].label, rows[row].value);
-			ILI9806G_DispString_EN(20U, row_y + 4U, displayBuffer);
-		}
-
-		if(indicator_changed != 0U)
-		{
-			/* Narrow marker and outline avoid tearing from full-width fills. */
-			LCD_SetTextColor(GREY);
-			ILI9806G_DrawRectangle(8U, row_y + 4U, 8U, 32U, 1U);
-			LCD_SetTextColor(BLACK);
-			ILI9806G_DrawRectangle(4U, row_y, 768U, 40U, 0U);
-			if(item_index == selected_item)
-			{
-				selection_color = (editing != 0U) ? RED : BLUE;
-				LCD_SetTextColor(selection_color);
-				ILI9806G_DrawRectangle(8U, row_y + 4U, 8U, 32U, 1U);
-				ILI9806G_DrawRectangle(4U, row_y, 768U, 40U, 0U);
-			}
-		}
-
-		strcpy(last_rows[row].label, rows[row].label);
-		strcpy(last_rows[row].value, rows[row].value);
-	}
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(WHITE);
-		for(row = 0U; row < GUI_PARAM_VISIBLE_ROWS; row++)
-		{
-			row_y = 112U + (uint16_t)row * 48U;
-			if(row >= visible_count)
-			{
-				ILI9806G_DrawRectangle(4U, row_y, 792U, 40U, 1U);
-			}
-			ILI9806G_DrawRectangle(4U, row_y + 40U, 792U, 8U, 1U);
-		}
-	}
-
-	if(window_changed != 0U)
-	{
-		/* Scrollbar is redrawn only when the six-row window actually moves. */
-		LCD_SetTextColor(GREY);
-		ILI9806G_DrawRectangle(780U, 116U, 8U, 280U, 1U);
-		scroll_height = (uint16_t)(280UL * visible_count / total_items);
-		if(scroll_height < 24U)
-		{
-			scroll_height = 24U;
-		}
-		if(total_items > visible_count)
-		{
-			scroll_y = (uint16_t)(116U +
-				(256UL * first_visible / (total_items - visible_count)));
-		}
-		else
-		{
-			scroll_y = 116U;
-		}
-		LCD_SetTextColor(BLUE);
-		ILI9806G_DrawRectangle(780U, scroll_y, 8U, scroll_height, 1U);
-	}
-
-	if(state_changed != 0U)
-	{
-		LCD_SetBackColor(WHITE);
-		LCD_SetTextColor(((editing != 0U) || (dirty != 0U)) ? RED : BLACK);
-		LCD_SetFont(&Font16x32);
-		snprintf(displayBuffer, sizeof(displayBuffer), "Status: %-39.39s", status_text);
-		ILI9806G_DispString_EN(12U, 432U, displayBuffer);
-	}
-
-	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(BLACK);
-	last_selected_item = selected_item;
-	last_first_visible = first_visible;
-	last_visible_count = visible_count;
-	last_editing = editing;
-	last_dirty = dirty;
-	strncpy(last_status_text, status_text, sizeof(last_status_text) - 1U);
-	last_status_text[sizeof(last_status_text) - 1U] = '\0';
+    if(window_changed) ui_fill(192U, 104U, 580U, 284U, UI_BG);
+    for(row = 0U; row < GUI_PARAM_VISIBLE_ROWS; row++) {
+        if(row >= visible_count) {
+            if(window_changed) ui_fill(192U, 104U + (uint16_t)row * 48U, 580U, 44U, UI_BG);
+            continue;
+        }
+        memcpy(&current, &rows[row], sizeof(current));
+        current.label[GUI_PARAM_LABEL_LENGTH - 1U] = '\0';
+        current.value[GUI_PARAM_VALUE_LENGTH - 1U] = '\0';
+        current_selected = row == selected_row;
+        previous_selected = row == last_selected_row;
+        if(window_changed || strcmp(current.label, last_rows[row].label) != 0 ||
+           strcmp(current.value, last_rows[row].value) != 0 ||
+           (selection_changed && (current_selected || previous_selected))) {
+            gui_settings_row(row, (uint16_t)first_visible + row + 1U,
+                             current.label, current.value, current_selected, editing);
+        }
+        memcpy(&last_rows[row], &current, sizeof(current));
+    }
+    if(window_changed) {
+        gui_settings_scroll(first_visible, visible_count, total_items);
+        if(!visible_count) {
+            ui_round_rect(192U, 104U, 580U, 284U, 14U, UI_SURFACE);
+            ui_text(344U, 220U, 23U, "No parameters available", UI_MUTED, UI_SURFACE, 0U);
+        }
+    }
+    if(first_draw || strcmp(status, last_status) != 0 || editing != last_editing || dirty != last_dirty) {
+        ui_text(200U, 408U, 72U, status,
+                editing || dirty ? UI_AMBER : UI_MUTED, UI_BG, 0U);
+    }
+    last_selected_row = selected_row;
+    last_first_visible = first_visible;
+    last_visible_count = visible_count;
+    last_total_items = total_items;
+    last_editing = editing;
+    last_dirty = dirty;
+    memcpy(last_status, status, sizeof(last_status));
 }
 
 void nrf_settings_page(uint8_t selected_item, uint8_t editing,
-					   uint8_t enabled, uint8_t channel,
-					   uint8_t power_index, uint8_t data_rate,
-					   const char *status_text, uint8_t runtime_valid,
-					   uint8_t runtime_enabled, uint8_t runtime_channel,
-					   uint8_t runtime_power_index, uint8_t runtime_data_rate)
+                       uint8_t enabled, uint8_t channel,
+                       uint8_t power_index, uint8_t data_rate,
+                       const char *status_text, uint8_t runtime_valid,
+                       uint8_t runtime_enabled, uint8_t runtime_channel,
+                       uint8_t runtime_power_index, uint8_t runtime_data_rate)
 {
-	static const int8_t power_dbm[4] = {-18, -12, -6, 0};
-	static const char *rate_text[3] = {"250 Kbps", "1 Mbps", "2 Mbps"};
-	uint8_t i;
-	uint8_t first_draw = 0U;
-	char marker;
+    static const int8_t power_dbm[4] = {-18, -12, -6, 0};
+    static const char *rate_text[3] = {"250 Kbps", "1 Mbps", "2 Mbps"};
+    static const char *labels[6] = {"Wireless output", "RF channel", "Transmit power",
+                                   "Air data rate", "Apply & save", "Check module"};
+    static char last_values[6][24];
+    static char last_status[80];
+    static uint8_t last_runtime[5], last_selected = 0xffU, last_editing = 0xffU;
+    uint8_t runtime[5], row, first_draw = 0U, selection_changed;
+    uint8_t runtime_changed, actual_differs;
+    char values[6][24], status[80], text[24];
+    uint16_t state_color;
 
-	if(display_flag == 1)
-	{
-		display_flag = 0;
-		GTP_IRQ_Disable();
-		first_draw = 1U;
-	}
+    if(display_flag == 1U) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        first_draw = 1U;
+    }
+    if(selected_item >= 6U) selected_item = 0U;
+    if(power_index > 3U) power_index = 0U;
+    if(data_rate > 2U) data_rate = 2U;
+    if(runtime_power_index > 3U) runtime_power_index = 0U;
+    if(runtime_data_rate > 2U) runtime_data_rate = 2U;
+    enabled = enabled ? 1U : 0U;
+    runtime_enabled = runtime_enabled ? 1U : 0U;
+    runtime_valid = runtime_valid ? 1U : 0U;
+    runtime[0] = runtime_valid;
+    runtime[1] = runtime_enabled;
+    runtime[2] = runtime_channel;
+    runtime[3] = runtime_power_index;
+    runtime[4] = runtime_data_rate;
+    runtime_changed = first_draw || memcmp(runtime, last_runtime, sizeof(runtime)) != 0;
+    selection_changed = first_draw || selected_item != last_selected || editing != last_editing;
+    actual_differs = runtime_valid && (enabled != runtime_enabled || channel != runtime_channel ||
+                      power_index != runtime_power_index || data_rate != runtime_data_rate);
+    snprintf(status, sizeof(status), "%.79s", status_text ? status_text : "");
+    memset(values, 0, sizeof(values));
+    snprintf(values[0], sizeof(values[0]), "%s", enabled ? "ON" : "OFF");
+    snprintf(values[1], sizeof(values[1]), "%u / %u MHz", channel, 2400U + channel);
+    snprintf(values[2], sizeof(values[2]), "%d dBm", power_dbm[power_index]);
+    snprintf(values[3], sizeof(values[3]), "%s", rate_text[data_rate]);
+    snprintf(values[4], sizeof(values[4]), "%s", "RUN");
+    snprintf(values[5], sizeof(values[5]), "%s", "RUN");
 
-	if(power_index > 3U)
-	{
-		power_index = 0U;
-	}
-	if(data_rate > 2U)
-	{
-		data_rate = 2U;
-	}
-	if(runtime_power_index > 3U)
-	{
-		runtime_power_index = 0U;
-	}
-	if(runtime_data_rate > 2U)
-	{
-		runtime_data_rate = 2U;
-	}
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetBackColor(WHITE);
-	if(first_draw != 0U) gui_clear_page_band(LINE(0), 32U);
-	LCD_SetTextColor(BLUE);
-	ILI9806G_DispString_EN(4U, LINE(0), "NRF Wireless Settings");
-	if(first_draw != 0U) gui_clear_page_band(LINE(1), 32U);
-	ILI9806G_DispString_EN(4U, LINE(1), "LEFT/RIGHT: Select   OK: Edit/Run   BACK: Exit");
-	if(first_draw != 0U)
-	{
-		gui_clear_page_band(LINE(2), 32U);
-		LCD_SetFont(&Font16x32);
-		LCD_SetBackColor(WHITE);
-	}
-
-	for(i = 0; i < 6U; i++)
-	{
-		marker = (i == selected_item) ? ((editing != 0U) ? '*' : '>') : ' ';
-		if(i == selected_item)
-		{
-			LCD_SetBackColor((editing != 0U) ? RED : BLUE);
-			LCD_SetTextColor(WHITE);
-		}
-		else
-		{
-			LCD_SetBackColor(WHITE);
-			LCD_SetTextColor(BLACK);
-		}
-
-		switch(i)
-		{
-			case 0U:
-				snprintf(displayBuffer, sizeof(displayBuffer), "%c Wireless:   %-3s                         ", marker,
-						enabled ? "ON" : "OFF");
-				break;
-			case 1U:
-				snprintf(displayBuffer, sizeof(displayBuffer), "%c RF Channel: %3u  (%4u MHz)              ", marker,
-						channel, 2400U + channel);
-				break;
-			case 2U:
-				snprintf(displayBuffer, sizeof(displayBuffer), "%c TX Power:   %3d dBm                     ", marker,
-						power_dbm[power_index]);
-				break;
-			case 3U:
-				snprintf(displayBuffer, sizeof(displayBuffer), "%c Air Rate:   %-8s                    ", marker,
-						rate_text[data_rate]);
-				break;
-			case 4U:
-				snprintf(displayBuffer, sizeof(displayBuffer), "%c Apply & Save                              ", marker);
-				break;
-			default:
-				snprintf(displayBuffer, sizeof(displayBuffer), "%c Check Module Connection                   ", marker);
-				break;
-		}
-		if(first_draw != 0U) gui_clear_page_band(LINE(i + 3U), 32U);
-		ILI9806G_DispString_EN(4U, LINE(i + 3U), displayBuffer);
-	}
-
-	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(BLUE);
-	if(first_draw != 0U) gui_clear_page_band(LINE(9), 32U);
-	snprintf(displayBuffer, sizeof(displayBuffer), "Connection: %-35s", runtime_valid ? "OK" : "FAILED");
-	ILI9806G_DispString_EN(4U, LINE(9), displayBuffer);
-	if(runtime_valid != 0U)
-	{
-		snprintf(displayBuffer, sizeof(displayBuffer), "Actual: %-3s CH%3u %3d dBm %-8s          ",
-				runtime_enabled ? "ON" : "OFF", runtime_channel,
-				power_dbm[runtime_power_index], rate_text[runtime_data_rate]);
-	}
-	else
-	{
-		snprintf(displayBuffer, sizeof(displayBuffer), "Actual: register readback unavailable          ");
-	}
-	if(first_draw != 0U) gui_clear_page_band(LINE(10), 32U);
-	ILI9806G_DispString_EN(4U, LINE(10), displayBuffer);
-	if(first_draw != 0U) gui_clear_page_band(LINE(11), 32U);
-	snprintf(displayBuffer, sizeof(displayBuffer), "Result: %-38s", status_text);
-	ILI9806G_DispString_EN(4U, LINE(11), displayBuffer);
-	if(first_draw != 0U)
-	{
-		gui_clear_page_band(LINE(12), 32U);
-		gui_clear_page_band(LINE(13), 32U);
-	}
-	LCD_SetTextColor(BLACK);
-	ILI9806G_DispString_EN(4U, LINE(13), "Blue=selected  Red=editing  OK=confirm");
-	if(first_draw != 0U) gui_clear_page_band(LINE(14), 32U);
+    if(first_draw) {
+        ui_shell("Wireless", "NRF24 / OUTPUT CONFIGURATION", "SETTINGS");
+        ui_round_rect(16U, 104U, 160U, 320U, 14U, UI_SURFACE);
+        ui_round_rect(64U, 124U, 64U, 64U, 14U, UI_TINT);
+        ui_icon(72U, 132U, 48U, UI_ICON_RADIO, UI_ACCENT, UI_TINT);
+        ui_text(32U, 196U, 16U, "MODULE READBACK", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 268U, 16U, "ACTUAL OUTPUT", UI_MUTED, UI_SURFACE, 0U);
+    }
+    if(runtime_changed) {
+        state_color = runtime_valid ? UI_GREEN : UI_RED;
+        ui_round_rect(32U, 224U, 128U, 32U, 8U, state_color);
+        ui_text(40U, 232U, 14U, runtime_valid ? "MODULE OK" : "UNAVAILABLE",
+                UI_SURFACE, state_color, 0U);
+        ui_text(32U, 292U, 8U, runtime_valid ? (runtime_enabled ? "ON" : "OFF") : "--",
+                runtime_valid ? UI_INK : UI_MUTED, UI_SURFACE, 1U);
+        snprintf(text, sizeof(text), runtime_valid ? "CH%u  %uMHz" : "CH --",
+                 runtime_channel, 2400U + runtime_channel);
+        ui_text(32U, 336U, 16U, text, UI_MUTED, UI_SURFACE, 0U);
+        snprintf(text, sizeof(text), runtime_valid ? "%d dBm" : "-- dBm", power_dbm[runtime_power_index]);
+        ui_text(32U, 360U, 16U, text, UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 384U, 16U, runtime_valid ? rate_text[runtime_data_rate] : "--",
+                UI_MUTED, UI_SURFACE, 0U);
+    }
+    for(row = 0U; row < 6U; row++) {
+        if(first_draw || strcmp(values[row], last_values[row]) != 0 ||
+           (selection_changed && (row == selected_item || row == last_selected))) {
+            gui_settings_row(row, row + 1U, labels[row], values[row], row == selected_item, editing);
+        }
+    }
+    if(first_draw || selection_changed || runtime_changed ||
+       memcmp(values, last_values, sizeof(values)) != 0 || strcmp(status, last_status) != 0) {
+        ui_text(200U, 408U, 72U, status, UI_MUTED, UI_BG, 0U);
+        ui_footer(editing ? "LEFT/RIGHT change   OK confirm   BACK cancel" :
+                  "LEFT/RIGHT select   OK edit/run   BACK return",
+                  editing ? "EDITING" : actual_differs ? "PENDING APPLY" : "WIRELESS SETTINGS");
+    }
+    memcpy(last_values, values, sizeof(last_values));
+    memcpy(last_runtime, runtime, sizeof(last_runtime));
+    memcpy(last_status, status, sizeof(last_status));
+    last_selected = selected_item;
+    last_editing = editing;
 }
 
 typedef struct
@@ -1495,510 +1131,355 @@ typedef struct
 	double pdop;
 } gui_gps_snapshot_t;
 
-static void gui_gps_draw_card(uint16_t x, uint16_t y, uint16_t width,
-							  uint16_t height, const char *title)
-{
-	LCD_SetTextColor(GREY);
-	ILI9806G_DrawRectangle(x, y, width, height, 1U);
-	LCD_SetTextColor(BLUE2);
-	ILI9806G_DrawRectangle(x, y, width, height, 0U);
-	LCD_SetFont(&Font8x16);
-	LCD_SetBackColor(GREY);
-	LCD_SetTextColor(BLACK);
-	ILI9806G_DispString_EN(x + 12U, y + 8U, (char *)title);
-}
-
 void system_data_read_and_set(void)
 {
-	static gui_gps_snapshot_t previous;
-	static uint8_t snapshot_valid;
-	gui_gps_snapshot_t current;
-	uint8_t first_draw = 0U;
-	uint8_t position_valid;
-	uint8_t time_valid;
-	uint16_t status_color;
-	uint32_t gps_level;
-	uint32_t bds_level;
-	int total_inuse;
-	int total_inview;
-	char latitude_hemisphere;
-	char longitude_hemisphere;
-	char mode;
-	double latitude;
-	double longitude;
-	const char *fix_text;
-	const char *signal_text;
+    static gui_gps_snapshot_t previous;
+    static uint8_t snapshot_valid;
+    gui_gps_snapshot_t current;
+    uint8_t fresh = gps_data_is_fresh();
+    uint8_t position_valid, time_valid, i;
+    uint16_t color;
+    const char *fix_text;
+    char text[80];
+    double latitude, longitude;
 
-	memset(&current, 0, sizeof(current));
-	current.sig = gps_data_is_fresh() ? info.sig : 0;
-	current.fix = gps_data_is_fresh() ? info.fix : 1;
-	current.mode = info.mode;
-	current.gps_inuse = info.satinfo.inuse;
-	current.gps_inview = info.satinfo.inview;
-	current.bds_inuse = info.BDsatinfo.inuse;
-	current.bds_inview = info.BDsatinfo.inview;
-	current.year = gps_time_is_fresh() ? beiJingTime.year : 0;
-	current.month = beiJingTime.mon;
-	current.day = beiJingTime.day;
-	current.hour = beiJingTime.hour;
-	current.minute = beiJingTime.min;
-	current.second = beiJingTime.sec;
-	current.latitude = deg_lat;
-	current.longitude = deg_lon;
-	current.altitude = info.elv;
-	current.speed = info.speed;
-	current.course = info.direction;
-	current.hdop = info.HDOP;
-	current.pdop = info.PDOP;
+    memset(&current, 0, sizeof(current));
+    current.sig = fresh ? info.sig : 0;
+    current.fix = fresh ? info.fix : 1;
+    current.mode = info.mode;
+    current.gps_inuse = fresh ? info.satinfo.inuse : -1;
+    current.gps_inview = fresh ? info.satinfo.inview : -1;
+    current.bds_inuse = fresh ? info.BDsatinfo.inuse : -1;
+    current.bds_inview = fresh ? info.BDsatinfo.inview : -1;
+    current.year = gps_time_is_fresh() ? beiJingTime.year : 0;
+    current.month = beiJingTime.mon; current.day = beiJingTime.day;
+    current.hour = beiJingTime.hour; current.minute = beiJingTime.min;
+    current.second = beiJingTime.sec;
+    current.latitude = deg_lat; current.longitude = deg_lon;
+    current.altitude = info.elv; current.speed = info.speed;
+    current.course = info.direction; current.hdop = info.HDOP; current.pdop = info.PDOP;
 
-	if(display_flag == 1)
-	{
-		display_flag = 0;
-		GTP_IRQ_Disable();
-		first_draw = 1U;
-		snapshot_valid = 0U;
-	}
-
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(BLUE2);
-		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-		LCD_SetFont(&Font16x32);
-		LCD_SetBackColor(BLUE2);
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DispString_EN(20U, 0U, "GPS / BDS NAVIGATION");
-		LCD_SetFont(&Font8x16);
-		ILI9806G_DispString_EN(20U, 36U, "LIVE NMEA POSITION AND RECEIVER STATUS");
-		gui_clear_page_content();
-
-		LCD_SetTextColor(GREY);
-		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
-		LCD_SetTextColor(BLUE2);
-		ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 0U);
-
-		gui_gps_draw_card(4U, 112U, 500U, 136U, "POSITION");
-		gui_gps_draw_card(512U, 112U, 284U, 136U, "SOLUTION");
-		gui_gps_draw_card(4U, 256U, 252U, 96U, "GPS SATELLITES");
-		gui_gps_draw_card(264U, 256U, 252U, 96U, "BDS SATELLITES");
-		gui_gps_draw_card(524U, 256U, 272U, 96U, "NMEA LOCAL TIME");
-		gui_gps_draw_card(4U, 360U, 252U, 80U, "ALTITUDE");
-		gui_gps_draw_card(264U, 360U, 252U, 80U, "GROUND SPEED");
-		gui_gps_draw_card(524U, 360U, 272U, 80U, "TRUE COURSE");
-
-		gui_clear_page_band(104U, 8U);
-		gui_clear_page_band(248U, 8U);
-		gui_clear_page_band(352U, 8U);
-		gui_clear_page_band(440U, 40U);
-		ILI9806G_Fill(504U, 112U, 512U, 248U, WHITE);
-		ILI9806G_Fill(256U, 256U, 264U, 440U, WHITE);
-		ILI9806G_Fill(516U, 256U, 524U, 440U, WHITE);
-		LCD_SetFont(&Font8x16);
-		LCD_SetBackColor(WHITE);
-		LCD_SetTextColor(BLACK);
-		ILI9806G_DispString_EN(12U, 456U, "LEFT: BACK");
-		LCD_SetTextColor(BLUE2);
-		ILI9806G_DispString_EN(596U, 456U, "GNSS DATA / LIVE");
-	}
-
-	if((snapshot_valid != 0U) &&
-	   (memcmp(&current, &previous, sizeof(current)) == 0))
-	{
-		return;
-	}
-
-	previous = current;
-	snapshot_valid = 1U;
-	position_valid = ((current.sig > 0) && (current.fix >= 2)) ? 1U : 0U;
-	time_valid = ((current.year >= 100) && (current.month >= 1) &&
-				  (current.month <= 12) && (current.day >= 1) &&
-				  (current.day <= 31)) ? 1U : 0U;
-	mode = ((current.mode >= 32) && (current.mode <= 126)) ?
-		   (char)current.mode : '-';
-
-	if(position_valid == 0U)
-	{
-		fix_text = "NO FIX";
-		status_color = RED;
-	}
-	else if(current.sig == 2)
-	{
-		fix_text = "DGNSS FIX";
-		status_color = GREEN;
-	}
-	else if(current.fix >= 3)
-	{
-		fix_text = "3D FIX";
-		status_color = GREEN;
-	}
-	else
-	{
-		fix_text = "2D FIX";
-		status_color = YELLOW;
-	}
-
-	switch(current.sig)
-	{
-		case 1: signal_text = "STANDARD"; break;
-		case 2: signal_text = "DIFFERENTIAL"; break;
-		case 3: signal_text = "SENSITIVE"; break;
-		default: signal_text = "INVALID"; break;
-	}
-
-	total_inuse = current.gps_inuse + current.bds_inuse;
-	total_inview = current.gps_inview + current.bds_inview;
-	LCD_SetFont(&Font8x16);
-	LCD_SetBackColor(GREY);
-	LCD_SetTextColor(status_color);
-	snprintf(displayBuffer, sizeof(displayBuffer), "%-10s", fix_text);
-	ILI9806G_DispString_EN(20U, 80U, displayBuffer);
-	LCD_SetTextColor(BLACK);
-	snprintf(displayBuffer, sizeof(displayBuffer),
-			"MODE:%c  SIGNAL:%-12s  USED:%02d  VIEW:%02d  HDOP:%5.2f    ",
-			mode, signal_text, total_inuse, total_inview, current.hdop);
-	ILI9806G_DispString_EN(116U, 80U, displayBuffer);
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetBackColor(GREY);
-	LCD_SetTextColor(BLUE2);
-	if(position_valid != 0U)
-	{
-		latitude = current.latitude;
-		longitude = current.longitude;
-		latitude_hemisphere = (latitude < 0.0) ? 'S' : 'N';
-		longitude_hemisphere = (longitude < 0.0) ? 'W' : 'E';
-		if(latitude < 0.0) latitude = -latitude;
-		if(longitude < 0.0) longitude = -longitude;
-		snprintf(displayBuffer, sizeof(displayBuffer), "LAT  %c %10.6f deg   ", latitude_hemisphere, latitude);
-		ILI9806G_DispString_EN(20U, 144U, displayBuffer);
-		snprintf(displayBuffer, sizeof(displayBuffer), "LON  %c %10.6f deg   ", longitude_hemisphere, longitude);
-		ILI9806G_DispString_EN(20U, 192U, displayBuffer);
-	}
-	else
-	{
-		ILI9806G_DispString_EN(20U, 144U, "LAT  -- NO VALID POSITION ");
-		ILI9806G_DispString_EN(20U, 192U, "LON  -- NO VALID POSITION ");
-	}
-
-	LCD_SetTextColor(status_color);
-	snprintf(displayBuffer, sizeof(displayBuffer), "%-13s", fix_text);
-	ILI9806G_DispString_EN(528U, 144U, displayBuffer);
-	LCD_SetFont(&Font8x16);
-	LCD_SetTextColor(BLACK);
-	snprintf(displayBuffer, sizeof(displayBuffer), "QUALITY: %-14s  ", signal_text);
-	ILI9806G_DispString_EN(528U, 184U, displayBuffer);
-	snprintf(displayBuffer, sizeof(displayBuffer), "HDOP:%5.2f  PDOP:%5.2f      ", current.hdop, current.pdop);
-	ILI9806G_DispString_EN(528U, 208U, displayBuffer);
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetTextColor(BLUE2);
-	snprintf(displayBuffer, sizeof(displayBuffer), "USED %02d / %02d ", current.gps_inuse, current.gps_inview);
-	ILI9806G_DispString_EN(20U, 280U, displayBuffer);
-	snprintf(displayBuffer, sizeof(displayBuffer), "USED %02d / %02d ", current.bds_inuse, current.bds_inview);
-	ILI9806G_DispString_EN(280U, 280U, displayBuffer);
-
-	gps_level = (current.gps_inuse <= 0) ? 0UL :
-				((current.gps_inuse >= 12) ? 1000UL :
-				 (uint32_t)current.gps_inuse * 1000UL / 12UL);
-	bds_level = (current.bds_inuse <= 0) ? 0UL :
-				((current.bds_inuse >= 12) ? 1000UL :
-				 (uint32_t)current.bds_inuse * 1000UL / 12UL);
-	gui_draw_progress_bar(20U, 328U, 220U, 12U, gps_level, BLUE2);
-	gui_draw_progress_bar(280U, 328U, 220U, 12U, bds_level, GREEN);
-
-	LCD_SetBackColor(GREY);
-	if(time_valid != 0U)
-	{
-		LCD_SetFont(&Font16x32);
-		LCD_SetTextColor(BLUE2);
-		snprintf(displayBuffer, sizeof(displayBuffer), "%02d:%02d:%02d   ", current.hour,
-				current.minute, current.second);
-		ILI9806G_DispString_EN(540U, 280U, displayBuffer);
-		LCD_SetFont(&Font8x16);
-		LCD_SetTextColor(BLACK);
-		snprintf(displayBuffer, sizeof(displayBuffer), "%04d/%02d/%02d           ", current.year + 1900,
-				current.month, current.day);
-		ILI9806G_DispString_EN(540U, 328U, displayBuffer);
-	}
-	else
-	{
-		LCD_SetFont(&Font16x32);
-		LCD_SetTextColor(RED);
-		ILI9806G_DispString_EN(540U, 280U, "WAITING...     ");
-		LCD_SetFont(&Font8x16);
-		LCD_SetTextColor(BLACK);
-		ILI9806G_DispString_EN(540U, 328U, "NO VALID NMEA TIME        ");
-	}
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetBackColor(GREY);
-	LCD_SetTextColor(BLUE2);
-	if(position_valid != 0U)
-	{
-		snprintf(displayBuffer, sizeof(displayBuffer), "%7.1f m   ", current.altitude);
-		ILI9806G_DispString_EN(20U, 392U, displayBuffer);
-		snprintf(displayBuffer, sizeof(displayBuffer), "%7.1f km/h", current.speed);
-		ILI9806G_DispString_EN(280U, 392U, displayBuffer);
-		snprintf(displayBuffer, sizeof(displayBuffer), "%6.1f deg     ", current.course);
-		ILI9806G_DispString_EN(540U, 392U, displayBuffer);
-	}
-	else
-	{
-		ILI9806G_DispString_EN(20U, 392U, "--           ");
-		ILI9806G_DispString_EN(280U, 392U, "--           ");
-		ILI9806G_DispString_EN(540U, 392U, "--             ");
-	}
-
-	LCD_SetFont(&Font16x32);
-	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(BLACK);
+    if(display_flag != 0U) {
+        display_flag = 0U; GTP_IRQ_Disable(); snapshot_valid = 0U;
+        ui_shell("Satellite navigation", "LOCAL GNSS / POSITION + TIME", "TOOLS");
+        ui_round_rect(24U,96U,480U,140U,12U,UI_SURFACE);
+        ui_round_rect(520U,96U,256U,140U,12U,UI_SURFACE);
+        ui_text(40U,108U,36U,"POSITION / WGS84",UI_MUTED,UI_SURFACE,0U);
+        ui_text(536U,108U,28U,"FIX QUALITY",UI_MUTED,UI_SURFACE,0U);
+        for(i=0U;i<3U;i++) {
+            uint16_t x = 24U + 256U*i;
+            ui_round_rect(x,248U,240U,96U,12U,UI_SURFACE);
+            ui_round_rect(x,356U,240U,76U,12U,UI_SURFACE);
+        }
+        ui_text(40U,258U,26U,"GPS / USED : IN VIEW",UI_MUTED,UI_SURFACE,0U);
+        ui_text(296U,258U,26U,"BDS / USED : IN VIEW",UI_MUTED,UI_SURFACE,0U);
+        ui_text(552U,258U,26U,"NMEA TIME / UTC+8",UI_MUTED,UI_SURFACE,0U);
+        ui_text(40U,366U,26U,"ALTITUDE / m",UI_MUTED,UI_SURFACE,0U);
+        ui_text(296U,366U,26U,"GROUND SPEED / km/h",UI_MUTED,UI_SURFACE,0U);
+        ui_text(552U,366U,26U,"TRUE COURSE / deg",UI_MUTED,UI_SURFACE,0U);
+        ui_footer("BACK  Return", "LOCAL GNSS");
+    }
+    if(snapshot_valid && memcmp(&current,&previous,sizeof(current)) == 0) return;
+    previous = current; snapshot_valid = 1U;
+    position_valid = current.sig > 0 && current.fix >= 2 &&
+        current.latitude >= -90.0 && current.latitude <= 90.0 &&
+        current.longitude >= -180.0 && current.longitude <= 180.0;
+    time_valid = current.year >= 100 && current.month >= 1 && current.month <= 12 &&
+        current.day >= 1 && current.day <= 31 && current.hour >= 0 && current.hour <= 23 &&
+        current.minute >= 0 && current.minute <= 59 && current.second >= 0 && current.second <= 60;
+    color = position_valid ? UI_GREEN : UI_MUTED;
+    fix_text = !position_valid ? "NO FIX" : current.sig == 2 ? "DGNSS FIX" :
+        current.fix >= 3 ? "3D FIX" : "2D FIX";
+    if(position_valid) {
+        latitude = current.latitude < 0.0 ? -current.latitude : current.latitude;
+        longitude = current.longitude < 0.0 ? -current.longitude : current.longitude;
+        snprintf(text,sizeof(text),"LAT  %c %10.6f",current.latitude < 0.0 ? 'S' : 'N',latitude);
+        ui_text(40U,132U,28U,text,UI_INK,UI_SURFACE,1U);
+        snprintf(text,sizeof(text),"LON  %c %10.6f",current.longitude < 0.0 ? 'W' : 'E',longitude);
+        ui_text(40U,180U,28U,text,UI_INK,UI_SURFACE,1U);
+    } else {
+        ui_text(40U,132U,28U,"LAT  -- NO VALID POSITION",UI_MUTED,UI_SURFACE,1U);
+        ui_text(40U,180U,28U,"LON  -- NO VALID POSITION",UI_MUTED,UI_SURFACE,1U);
+    }
+    ui_text(536U,132U,14U,fix_text,color,UI_SURFACE,1U);
+    ui_text(536U,178U,28U,fresh ? "NMEA DATA RECEIVED" : "WAITING FOR NMEA",UI_MUTED,UI_SURFACE,0U);
+    if(position_valid) snprintf(text,sizeof(text),"HDOP %.2f  PDOP %.2f",current.hdop,current.pdop);
+    else strcpy(text,"HDOP --    PDOP --");
+    ui_text(536U,204U,28U,text,UI_MUTED,UI_SURFACE,0U);
+    for(i=0U;i<2U;i++) {
+        uint16_t x = 40U + 256U*i;
+        int used = i ? current.bds_inuse : current.gps_inuse;
+        int view = i ? current.bds_inview : current.gps_inview;
+        uint16_t width = used <= 0 ? 0U : used >= 12 ? 208U : (uint16_t)(used*208/12);
+        if(fresh) snprintf(text,sizeof(text),"%02d : %02d",used,view);
+        else strcpy(text,"-- : --");
+        ui_text(x,278U,13U,text,fresh ? UI_INK : UI_MUTED,UI_SURFACE,1U);
+        ui_fill(x,324U,208U,6U,UI_TRACK);
+        ui_fill(x,324U,width,6U,i ? UI_GREEN : UI_ACCENT);
+    }
+    if(time_valid) snprintf(text,sizeof(text),"%02d:%02d:%02d",current.hour,current.minute,current.second);
+    else strcpy(text,"WAITING");
+    ui_text(552U,274U,13U,text,time_valid ? UI_INK : UI_MUTED,UI_SURFACE,1U);
+    if(time_valid) snprintf(text,sizeof(text),"%04d-%02d-%02d",current.year+1900,current.month,current.day);
+    else strcpy(text,"NO VALID NMEA TIME");
+    ui_text(552U,320U,26U,text,UI_MUTED,UI_SURFACE,0U);
+    for(i=0U;i<3U;i++) {
+        double value = i == 0U ? current.altitude : i == 1U ? current.speed : current.course;
+        if(position_valid && value > -1000000.0 && value < 1000000.0)
+            snprintf(text,sizeof(text),"%.2f",value);
+        else strcpy(text,"--");
+        ui_text(40U+256U*i,390U,13U,text,position_valid ? UI_INK : UI_MUTED,UI_SURFACE,1U);
+    }
 }
 
 void channel_monitor_page(void)
 {
-	static const uint16_t card_y[5] = {80U, 144U, 208U, 272U, 336U};
-	static uint16_t previous_bar_width[10], previous_value[10];
-	static GuiAnalogFilter filters[10];
-	/* ADC values are considered on every live frame. */
-	uint8_t draw_text;
-	uint16_t channel_value[10];
-	uint8_t i;
-	uint8_t first_draw = 0U;
-
-	if(display_flag == 1)
-	{
-		display_flag = 0;
-		GTP_IRQ_Disable();
-		first_draw = 1U;
-	}
-
-	for(i = 0U; i < 7U; i++)
-	{
-		channel_value[i] = gui_analog_filter_update(&filters[i], ADC1_Value[i], first_draw);
-	}
-	for(i = 0U; i < 3U; i++)
-	{
-		channel_value[i + 7U] = gui_analog_filter_update(&filters[i + 7U], ADC3_Value[i], first_draw);
-	}
-	draw_text = 1U;
-
-	LCD_SetFont(&Font16x32);
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(BLUE);
-		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-		LCD_SetBackColor(BLUE);
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DispString_EN(20U, 0U, "CHANNEL MONITOR");
-		ILI9806G_DispString_EN(20U, 32U, "RAW: A01..A09 + BAT / A09 is a button");
-		gui_clear_page_content();
-	}
-
-	for(i = 0U; i < 5U; i++)
-	{
-		gui_draw_channel_card(4U, card_y[i], i, channel_value[i], BLUE,
-						  &previous_bar_width[i], &previous_value[i], draw_text, first_draw);
-		gui_draw_channel_card(404U, card_y[i], i + 5U,
-						  channel_value[i + 5U], GREEN,
-						  &previous_bar_width[i + 5U], &previous_value[i + 5U],
-						  draw_text, first_draw);
-	}
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DrawRectangle(396U, 72U, 8U, 328U, 1U);
-		for(i = 0U; i < 4U; i++)
-		{
-			ILI9806G_DrawRectangle(4U, 126U + (uint16_t)i * 64U,
-								  792U, 18U, 1U);
-		}
-		gui_clear_page_band(382U, 42U);
-		gui_clear_page_band(456U, 24U);
-		LCD_SetBackColor(WHITE);
-		LCD_SetTextColor(BLUE);
-		LCD_SetFont(&Font16x32);
-		ILI9806G_DispString_EN(4U, 424U,
-			"LEFT/RIGHT/OK: Output view  BACK: Up");
-	}
-
-	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(BLACK);
+    /* Battery and the joystick button are intentionally outside the axis table. */
+    static const uint8_t order[8] = {0U,1U,2U,3U,4U,5U,7U,8U};
+    static const char * const labels[8] = {
+        "A01  KNOB", "A02  LEFT Y", "A03  LEFT X", "A04  KNOB",
+        "A05  RIGHT Y", "A06  RIGHT X", "A07  AUX", "A08  AUX"
+    };
+    static GuiAnalogFilter filters[10];
+    static uint16_t previous_value[10];
+    static int16_t previous_bar[8];
+    uint16_t values[10], x, y;
+    uint8_t i, channel, first = display_flag != 0U;
+    int16_t normalized;
+    if(first) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        ui_shell("Channel monitor", "", "CONTROL / INPUTS");
+        gui_monitor_tabs(0U);
+        ui_round_rect(24U,104U,368U,266U,12U,UI_SURFACE);
+        ui_round_rect(408U,104U,368U,266U,12U,UI_SURFACE);
+        ui_text(40U,116U,24U,"ANALOG INPUT / A01 - A04",UI_MUTED,UI_SURFACE,0U);
+        ui_text(424U,116U,24U,"ANALOG INPUT / A05 - A08",UI_MUTED,UI_SURFACE,0U);
+        ui_text(320U,116U,6U,"12 BIT",UI_MUTED,UI_SURFACE,0U);
+        ui_text(704U,116U,6U,"12 BIT",UI_MUTED,UI_SURFACE,0U);
+        ui_round_rect(24U,382U,368U,50U,10U,UI_SURFACE);
+        ui_round_rect(408U,382U,368U,50U,10U,UI_SURFACE);
+        ui_text(40U,390U,26U,"A09  JOYSTICK BUTTON",UI_INK,UI_SURFACE,0U);
+        ui_text(40U,410U,26U,"ADC sample / pull-up input",UI_MUTED,UI_SURFACE,0U);
+        ui_text(424U,390U,26U,"BAT  REMOTE BATTERY",UI_INK,UI_SURFACE,0U);
+        ui_text(424U,410U,26U,"ADC sample / local battery",UI_MUTED,UI_SURFACE,0U);
+        ui_footer("LEFT / RIGHT / OK: Switch view", "BACK: Control menu");
+    }
+    /* Keep the established display-only filter and live frame cadence. */
+    for(i = 0U; i < 7U; i++)
+        values[i] = gui_analog_filter_update(&filters[i],ADC1_Value[i],first);
+    for(i = 0U; i < 3U; i++)
+        values[i + 7U] = gui_analog_filter_update(&filters[i + 7U],ADC3_Value[i],first);
+    for(i = 0U; i < 8U; i++) {
+        channel = order[i];
+        x = i < 4U ? 40U : 424U;
+        y = 146U + (uint16_t)(i % 4U) * 54U;
+        if(first) ui_text(x,y + 6U,18U,labels[i],UI_INK,UI_SURFACE,0U);
+        if(first || values[channel] != previous_value[channel]) {
+            snprintf(displayBuffer,sizeof(displayBuffer),"%4u",values[channel]);
+            ui_text(x + 264U,y,4U,displayBuffer,UI_ACCENT,UI_SURFACE,1U);
+            previous_value[channel] = values[channel];
+        }
+        /* The raw center means ADC midpoint, not a calibrated control value. */
+        normalized = (int16_t)((int32_t)values[channel] * 2000L / 4095L - 1000L);
+        ui_bipolar_bar(x,y + 36U,328U,8U,normalized,&previous_bar[i],first);
+    }
+    if(first || values[9] != previous_value[9]) {
+        snprintf(displayBuffer,sizeof(displayBuffer),"%4u",values[9]);
+        ui_text(304U,392U,4U,displayBuffer,UI_ACCENT,UI_SURFACE,1U);
+        previous_value[9] = values[9];
+    }
+    if(first || values[6] != previous_value[6]) {
+        snprintf(displayBuffer,sizeof(displayBuffer),"%4u",values[6]);
+        ui_text(688U,392U,4U,displayBuffer,UI_ACCENT,UI_SURFACE,1U);
+        previous_value[6] = values[6];
+    }
+    LCD_SetFont(&Font16x32); LCD_SetBackColor(UI_BG); LCD_SetTextColor(UI_INK);
 }
 
 /* Input values come from the same sample and normalization as the control task.
  * TX fields show the last packet queued to the radio, never a GUI reconstruction. */
 void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
 {
-    static const char * const names[6] = {"A1", "A2 Y", "A3 X", "A4", "A5", "A6 YAW"};
+    static const char * const names[6] = {"A01", "A02 Y", "A03 X", "A04", "A05", "A06 YAW"};
     static ControlLinkSnapshot previous;
     static uint8_t previous_reverse[6];
-    static uint16_t bar_width[6];
+    static int16_t bar_position[6];
     static uint32_t text_ms;
-    unsigned long now;
-    uint8_t first = display_flag != 0U, i, update_text;
-    uint16_t y;
+    unsigned long ticks;
+    uint8_t i, first = display_flag != 0U, update_text, live;
+    uint16_t y, state_color;
     int16_t value;
+    const char *state;
     if(!snapshot) return;
-    get_tick_count(&now);
-    update_text = first || (uint32_t)(now - text_ms) >= 100U;
+    get_tick_count(&ticks);
+    update_text = first || (uint32_t)((uint32_t)ticks - text_ms) >= 100U;
     if(first) {
         display_flag = 0U;
         GTP_IRQ_Disable();
-        LCD_SetTextColor(BLUE);
-        ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-        LCD_SetFont(&Font16x32);
-        LCD_SetBackColor(BLUE);
-        LCD_SetTextColor(WHITE);
-        ILI9806G_DispString_EN(20U, 0U, "CHANNEL MONITOR / OUTPUT");
-        LCD_SetFont(&Font8x16);
-        ILI9806G_DispString_EN(20U, 40U, "LEFT/RIGHT/OK: Raw view   BACK: Up");
-        gui_clear_page_content();
-        LCD_SetTextColor(GREY);
-        ILI9806G_DrawRectangle(4U, 80U, 448U, 300U, 1U);
-        ILI9806G_DrawRectangle(468U, 80U, 328U, 300U, 1U);
-        LCD_SetBackColor(GREY);
-        LCD_SetTextColor(BLUE);
-        ILI9806G_DispString_EN(16U, 86U, "INPUT      RAW     CALIBRATED   REV");
-        ILI9806G_DispString_EN(480U, 86U, "LAST QUEUED RC v1 FRAME");
-        LCD_SetBackColor(WHITE);
-        LCD_SetTextColor(BLACK);
-        ILI9806G_DispString_EN(12U, 420U, "Input: endpoints -> trim -> reverse -> clamp -> 5% deadband");
-        ILI9806G_DispString_EN(12U, 444U, "TX: X=-A3  Y=A2  Heading=-A6(%) x 1.8 deg    Radio ACK is not execution feedback");
-        ILI9806G_DispString_EN(12U, 464U, "A7/A8/A9 and battery are in RAW view. This monitor cannot arm the robot.");
+        ui_shell("Channel monitor", "", "CONTROL / OUTPUT");
+        gui_monitor_tabs(1U);
+        ui_round_rect(24U,104U,424U,284U,12U,UI_SURFACE);
+        ui_round_rect(464U,104U,312U,284U,12U,UI_SURFACE);
+        ui_text(40U,118U,8U,"INPUT",UI_MUTED,UI_SURFACE,0U);
+        ui_text(128U,118U,6U,"RAW",UI_MUTED,UI_SURFACE,0U);
+        ui_text(224U,118U,12U,"CALIBRATED",UI_MUTED,UI_SURFACE,0U);
+        ui_text(400U,118U,3U,"REV",UI_MUTED,UI_SURFACE,0U);
+        ui_text(480U,118U,35U,"LAST QUEUED FRAME / RC v1",UI_MUTED,UI_SURFACE,0U);
+        ui_fill(40U,142U,392U,1U,UI_LINE);
+        ui_fill(480U,180U,280U,1U,UI_LINE);
+        ui_text(480U,192U,7U,"X / Y",UI_MUTED,UI_SURFACE,0U);
+        ui_text(480U,232U,9U,"HEADING",UI_MUTED,UI_SURFACE,0U);
+        ui_text(480U,258U,9U,"LIMIT",UI_MUTED,UI_SURFACE,0U);
+        ui_fill(480U,284U,280U,1U,UI_LINE);
+        ui_text(480U,368U,35U,"Radio ACK is not execution feedback",UI_MUTED,UI_SURFACE,0U);
+        ui_text(24U,418U,64U,"Stick mapping: X=-A03   Y=A02   Heading=-A06",UI_MUTED,UI_BG,0U);
+        ui_text(632U,418U,18U,"MONITOR ONLY",UI_MUTED,UI_BG,0U);
+        ui_footer("LEFT / RIGHT / OK: Switch view", "BACK: Control menu");
     }
-    LCD_SetFont(&Font8x16);
     for(i = 0U; i < 6U; i++) {
-        y = 112U + (uint16_t)i * 44U;
+        y = 150U + (uint16_t)i * 38U;
         value = snapshot->calibrated[i];
         if(value > 1000) value = 1000;
         if(value < -1000) value = -1000;
-        LCD_SetBackColor(GREY);
-        LCD_SetTextColor(BLACK);
-        if(first) ILI9806G_DispString_EN(16U, y, (char *)names[i]);
+        if(first) ui_text(40U,y,9U,names[i],UI_INK,UI_SURFACE,0U);
         if(update_text && (first || snapshot->raw[i] != previous.raw[i] ||
-           value != previous.calibrated[i] || param.chReverse[i] != previous_reverse[i])) {
-            snprintf(displayBuffer, sizeof(displayBuffer), "%4u    %c%3u.%u%%      %s",
-                snapshot->raw[i], value < 0 ? '-' : '+',
+            value != previous.calibrated[i] || param.chReverse[i] != previous_reverse[i])) {
+            snprintf(displayBuffer,sizeof(displayBuffer),"%4u",snapshot->raw[i]);
+            ui_text(128U,y,5U,displayBuffer,UI_MUTED,UI_SURFACE,0U);
+            snprintf(displayBuffer,sizeof(displayBuffer),"%c%3u.%u%%",value < 0 ? '-' : '+',
                 (unsigned)(value < 0 ? -value : value) / 10U,
-                (unsigned)(value < 0 ? -value : value) % 10U,
-                param.chReverse[i] ? "ON " : "OFF");
-            ILI9806G_DispString_EN(104U, y, displayBuffer);
+                (unsigned)(value < 0 ? -value : value) % 10U);
+            ui_text(224U,y,9U,displayBuffer,UI_ACCENT,UI_SURFACE,0U);
+            ui_text(400U,y,3U,param.chReverse[i] ? "ON" : "--",
+                param.chReverse[i] ? UI_ACCENT : UI_MUTED,UI_SURFACE,0U);
             previous.raw[i] = snapshot->raw[i];
             previous.calibrated[i] = value;
             previous_reverse[i] = param.chReverse[i];
         }
-        gui_update_progress_bar(104U, y + 20U, 328U, 12U,
-            (uint32_t)(value + 1000) / 2U, BLUE2, &bar_width[i], first);
-        LCD_SetTextColor(RED);
-        ILI9806G_DrawLine(268U, y + 18U, 268U, y + 33U);
+        ui_bipolar_bar(128U,y + 22U,296U,7U,value,&bar_position[i],first);
     }
     if(update_text) {
-        LCD_SetBackColor(GREY);
-        LCD_SetTextColor(snapshot->sent && snapshot->tx_age_ms <= 100U ? BLUE : RED);
-        snprintf(displayBuffer, sizeof(displayBuffer), "%-36s", !snapshot->sent ? "NOT SENT" :
-            snapshot->tx_age_ms > 100U ? "STALE / LAST PACKET ONLY" :
-            snapshot->transmitted.armed ? "ARMED IN LAST PACKET" : "DISARMED / ZERO MOTION");
-        ILI9806G_DispString_EN(480U, 112U, displayBuffer);
-        LCD_SetTextColor(BLACK);
-        snprintf(displayBuffer, sizeof(displayBuffer), "Seq:%5u     age:%5u ms   ",
-            snapshot->transmitted.sequence, snapshot->tx_age_ms);
-        ILI9806G_DispString_EN(480U, 144U, displayBuffer);
-        snprintf(displayBuffer, sizeof(displayBuffer), "X:%+5d   Y:%+5d             ",
-            snapshot->transmitted.x, snapshot->transmitted.y);
-        ILI9806G_DispString_EN(480U, 176U, displayBuffer);
-        snprintf(displayBuffer, sizeof(displayBuffer), "Heading:%+5d x0.1 deg       ", snapshot->transmitted.heading);
-        ILI9806G_DispString_EN(480U, 208U, displayBuffer);
-        snprintf(displayBuffer, sizeof(displayBuffer), "Limit:%4u  DCH:0x%02X       ",
-            snapshot->transmitted.limit, snapshot->transmitted.digital);
-        ILI9806G_DispString_EN(480U, 240U, displayBuffer);
+        live = snapshot->sent && snapshot->tx_age_ms <= 100U;
+        state = !snapshot->sent ? "NOT SENT" : !live ? "STALE FRAME" :
+            snapshot->transmitted.armed ? "OUTPUT ENABLED" : "OUTPUT DISARMED";
+        state_color = !live ? UI_AMBER : snapshot->transmitted.armed ? UI_GREEN : UI_MUTED;
+        ui_text(480U,148U,17U,state,state_color,UI_SURFACE,1U);
+        if(snapshot->sent)
+            snprintf(displayBuffer,sizeof(displayBuffer),"%+5d %+5d",snapshot->transmitted.x,snapshot->transmitted.y);
+        else snprintf(displayBuffer,sizeof(displayBuffer),"  --     --");
+        ui_text(576U,184U,11U,displayBuffer,UI_INK,UI_SURFACE,1U);
+        if(snapshot->sent)
+            snprintf(displayBuffer,sizeof(displayBuffer),"%+5d x0.1 deg",snapshot->transmitted.heading);
+        else snprintf(displayBuffer,sizeof(displayBuffer),"--");
+        ui_text(584U,232U,22U,displayBuffer,UI_INK,UI_SURFACE,0U);
+        if(snapshot->sent)
+            snprintf(displayBuffer,sizeof(displayBuffer),"%4u  DCH:0x%02X",snapshot->transmitted.limit,snapshot->transmitted.digital);
+        else snprintf(displayBuffer,sizeof(displayBuffer),"--   DCH:--");
+        ui_text(584U,258U,22U,displayBuffer,UI_INK,UI_SURFACE,0U);
+        if(snapshot->sent)
+            snprintf(displayBuffer,sizeof(displayBuffer),"SEQ %5u    FRAME AGE %5u ms",snapshot->transmitted.sequence,snapshot->tx_age_ms);
+        else snprintf(displayBuffer,sizeof(displayBuffer),"SEQ --       FRAME AGE --");
+        ui_text(480U,290U,35U,displayBuffer,UI_MUTED,UI_SURFACE,0U);
         if(snapshot->ack_seen)
-            snprintf(displayBuffer, sizeof(displayBuffer), "Radio ACK age: %5u ms       ", snapshot->ack_age_ms);
-        else snprintf(displayBuffer, sizeof(displayBuffer), "%-36s", "Radio ACK: NONE");
-        ILI9806G_DispString_EN(480U, 272U, displayBuffer);
-        snprintf(displayBuffer, sizeof(displayBuffer), "Sent:%10lu ACK:%10lu",
-            (unsigned long)snapshot->tx_started, (unsigned long)snapshot->tx_acked);
-        ILI9806G_DispString_EN(480U, 304U, displayBuffer);
-        snprintf(displayBuffer, sizeof(displayBuffer), "Failed:%10lu                 ", (unsigned long)snapshot->tx_failed);
-        ILI9806G_DispString_EN(480U, 336U, displayBuffer);
-        LCD_SetBackColor(WHITE);
-        LCD_SetTextColor(snapshot->sampled && snapshot->input_fresh && snapshot->sample_age_ms <= 100U ? BLUE : RED);
-        snprintf(displayBuffer, sizeof(displayBuffer), "Input: %-10s age:%5u ms   %-40.40s",
-            !snapshot->sampled ? "NO SAMPLE" : !snapshot->input_fresh || snapshot->sample_age_ms > 100U ? "STALE" : "LIVE",
-            snapshot->sample_age_ms, control_link_status());
-        ILI9806G_DispString_EN(12U, 394U, displayBuffer);
-        text_ms = (uint32_t)now;
+            snprintf(displayBuffer,sizeof(displayBuffer),"RADIO ACK   %5u ms ago",snapshot->ack_age_ms);
+        else snprintf(displayBuffer,sizeof(displayBuffer),"RADIO ACK   NONE");
+        ui_text(480U,310U,35U,displayBuffer,snapshot->ack_seen ? UI_GREEN : UI_AMBER,UI_SURFACE,0U);
+        snprintf(displayBuffer,sizeof(displayBuffer),"TX %10lu   ACK %10lu",(unsigned long)snapshot->tx_started,(unsigned long)snapshot->tx_acked);
+        ui_text(480U,330U,35U,displayBuffer,UI_MUTED,UI_SURFACE,0U);
+        snprintf(displayBuffer,sizeof(displayBuffer),"FAILED %10lu",(unsigned long)snapshot->tx_failed);
+        ui_text(480U,348U,35U,displayBuffer,UI_MUTED,UI_SURFACE,0U);
+        live = snapshot->sampled && snapshot->input_fresh && snapshot->sample_age_ms <= 100U;
+        if(snapshot->sampled)
+            snprintf(displayBuffer,sizeof(displayBuffer),"INPUT %-5s  AGE %5u ms",live ? "LIVE" : "STALE",snapshot->sample_age_ms);
+        else snprintf(displayBuffer,sizeof(displayBuffer),"INPUT NO SAMPLE");
+        ui_text(24U,396U,34U,displayBuffer,live ? UI_GREEN : UI_AMBER,UI_BG,0U);
+        ui_text(328U,396U,56U,control_link_status(),UI_MUTED,UI_BG,0U);
+        text_ms = (uint32_t)ticks;
     }
-    LCD_SetBackColor(WHITE);
-    LCD_SetTextColor(BLACK);
+    LCD_SetFont(&Font16x32); LCD_SetBackColor(UI_BG); LCD_SetTextColor(UI_INK);
 }
 
 void imu6050_information(void)
 {
-	static uint16_t previous_bar_width[3];
-	uint8_t first_draw = 0U;
+    static const char *names[3] = {"PITCH", "ROLL", "YAW"};
+    static const float limits[3] = {90.0f, 180.0f, 180.0f};
+    static const uint16_t colors[3] = {UI_ACCENT, UI_GREEN, UI_AMBER};
+    static int16_t old_bar[3];
+    static char last_angles[3][16], last_temp[16], last_acc[64], last_gyro[64];
+    static uint8_t last_valid = 0xffU;
+    static uint32_t last_numeric_ms;
+    unsigned long ticks;
+    uint32_t now;
+    uint8_t first_draw = display_flag != 0U, valid, state_changed, i;
+    uint16_t x;
+    int16_t meter;
+    float angles[3], limited;
+    char text[64], angle[16];
 
-	if(display_flag == 1)
-	{
-		display_flag = 0;
-		GTP_IRQ_Disable();
-		first_draw = 1U;
-	}
-
-	LCD_SetFont(&Font16x32);
-	if(first_draw != 0U)
-	{
-		LCD_SetTextColor(BLUE);
-		ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-		LCD_SetBackColor(BLUE);
-		LCD_SetTextColor(WHITE);
-		ILI9806G_DispString_EN(20U, 0U, "IMU / MPU6050");
-		ILI9806G_DispString_EN(20U, 32U, "DMP attitude / 100 Hz sensor / 20 FPS UI");
-		gui_clear_page_content();
-
-		LCD_SetTextColor(GREY);
-		ILI9806G_DrawRectangle(4U, 396U, 792U, 80U, 1U);
-	}
-
-	gui_draw_imu_axis(76U, "PITCH", pitch, 90.0f, BLUE,
-					   &previous_bar_width[0], first_draw);
-	gui_draw_imu_axis(172U, "ROLL", roll, 180.0f, GREEN,
-					   &previous_bar_width[1], first_draw);
-	gui_draw_imu_axis(268U, "YAW", yaw, 180.0f, RED,
-					   &previous_bar_width[2], first_draw);
-	if(first_draw != 0U)
-	{
-		gui_clear_page_band(72U, 4U);
-		gui_clear_page_band(156U, 16U);
-		gui_clear_page_band(252U, 16U);
-		gui_clear_page_band(348U, 48U);
-		gui_clear_page_band(476U, 4U);
-	}
-
-	LCD_SetBackColor(GREY);
-	LCD_SetTextColor(imu_data_valid ? GREEN : RED);
-	snprintf(displayBuffer, sizeof(displayBuffer), "%-7s TEMP:%5.1f C  ACC:%6d %6d %6d ",
-			imu_data_valid ? "ONLINE" : "WAITING", (float)temp / 100.0f,
-			aacx, aacy, aacz);
-	ILI9806G_DispString_EN(12U, 400U, displayBuffer);
-	LCD_SetTextColor(BLACK);
-	snprintf(displayBuffer, sizeof(displayBuffer), "GYRO:%6d %6d %6d             BACK=Exit ",
-			gyrox, gyroy, gyroz);
-	ILI9806G_DispString_EN(12U, 436U, displayBuffer);
-
-	LCD_SetBackColor(WHITE);
-	LCD_SetTextColor(BLACK);
-}
-
-static void gui_robot_card(uint16_t x, uint16_t y, uint16_t width,
-						   uint16_t height, const char *title)
-{
-	LCD_SetTextColor(GREY);
-	ILI9806G_DrawRectangle(x, y, width, height, 1U);
-	LCD_SetTextColor(BLUE2);
-	ILI9806G_DrawRectangle(x, y, width, height, 0U);
-	LCD_SetFont(&Font8x16);
-	LCD_SetBackColor(GREY);
-	LCD_SetTextColor(BLUE2);
-	ILI9806G_DispString_EN(x + 12U, y + 4U, (char *)title);
+    get_tick_count(&ticks);
+    now = (uint32_t)ticks;
+    angles[0] = pitch; angles[1] = roll; angles[2] = yaw;
+    valid = imu_data_valid ? 1U : 0U;
+    for(i = 0U; i < 3U; i++)
+        if(!(angles[i] >= -3600.0f && angles[i] <= 3600.0f)) valid = 0U;
+    state_changed = first_draw || valid != last_valid;
+    if(!state_changed && (uint32_t)(now - last_numeric_ms) < 100U) return;
+    last_numeric_ms = now;
+    if(first_draw) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        ui_shell("Attitude", "MPU6050 / LOCAL IMU", "TOOLS / SENSORS");
+        for(i = 0U; i < 3U; i++) {
+            x = 24U + (uint16_t)i * 256U;
+            ui_round_rect(x, 104U, 240U, 204U, 14U, UI_SURFACE);
+            ui_text(x + 16U, 120U, 26U, names[i], colors[i], UI_SURFACE, 0U);
+            ui_text(x + 16U, 212U, 26U, "DEGREES", UI_MUTED, UI_SURFACE, 0U);
+            snprintf(text, sizeof(text), "-%3.0f       0       +%3.0f", limits[i], limits[i]);
+            ui_text(x + 16U, 278U, 26U, text, UI_MUTED, UI_SURFACE, 0U);
+        }
+        ui_round_rect(24U, 320U, 752U, 112U, 14U, UI_SURFACE);
+        ui_text(40U, 332U, 14U, "SENSOR STATE", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(432U, 332U, 20U, "TEMPERATURE / C", UI_MUTED, UI_SURFACE, 0U);
+        ui_footer("BACK return", "LOCAL SENSOR / 100 ms UI");
+    }
+    for(i = 0U; i < 3U; i++) {
+        x = 24U + (uint16_t)i * 256U;
+        if(valid) snprintf(angle, sizeof(angle), "%+6.1f", angles[i]);
+        else strcpy(angle, "--");
+        if(state_changed || strcmp(angle, last_angles[i]) != 0) {
+            ui_text(x + 16U, 152U, 8U, angle, valid ? UI_INK : UI_MUTED, UI_SURFACE, 2U);
+            strcpy(last_angles[i], angle);
+        }
+        limited = angles[i];
+        if(limited < -limits[i]) limited = -limits[i];
+        if(limited > limits[i]) limited = limits[i];
+        meter = valid ? (int16_t)(limited * 1000.0f / limits[i]) : 0;
+        ui_bipolar_bar(x + 16U, 248U, 208U, 10U, meter, &old_bar[i], state_changed);
+    }
+    if(state_changed) {
+        ui_text(168U, 332U, 25U, valid ? "LIVE / DMP READY" : "WAITING FOR VALID SAMPLE",
+                valid ? UI_GREEN : UI_AMBER, UI_SURFACE, 0U);
+    }
+    if(valid) snprintf(angle, sizeof(angle), "%5.1f", (float)temp / 100.0f);
+    else strcpy(angle, "--");
+    if(state_changed || strcmp(angle, last_temp) != 0) {
+        ui_text(620U, 326U, 8U, angle, valid ? UI_INK : UI_MUTED, UI_SURFACE, 1U);
+        strcpy(last_temp, angle);
+    }
+    if(valid) snprintf(text, sizeof(text), "ACC RAW   X %+6d     Y %+6d     Z %+6d", aacx, aacy, aacz);
+    else strcpy(text, "ACC RAW   X --         Y --         Z --");
+    if(state_changed || strcmp(text, last_acc) != 0) {
+        ui_text(40U, 372U, 90U, text, UI_MUTED, UI_SURFACE, 0U);
+        strcpy(last_acc, text);
+    }
+    if(valid) snprintf(text, sizeof(text), "GYRO RAW  X %+6d     Y %+6d     Z %+6d", gyrox, gyroy, gyroz);
+    else strcpy(text, "GYRO RAW  X --         Y --         Z --");
+    if(state_changed || strcmp(text, last_gyro) != 0) {
+        ui_text(40U, 404U, 90U, text, UI_MUTED, UI_SURFACE, 0U);
+        strcpy(last_gyro, text);
+    }
+    last_valid = valid;
 }
 
 /* CHANNEL MONITOR mapping (zero-based ADC1_Value indices):
@@ -2011,53 +1492,35 @@ static void gui_robot_card(uint16_t x, uint16_t y, uint16_t width,
 
 static int16_t gui_robot_stick_value(uint16_t raw, uint8_t channel)
 {
-	uint16_t lower = param.chLower[channel];
-	uint16_t middle = param.chMiddle[channel];
-	uint16_t upper = param.chUpper[channel];
-	uint16_t range;
-	int32_t value;
-
-	if((lower >= middle) || (middle >= upper))
-	{
-		lower = 0U;
-		middle = 2047U;
-		upper = 4095U;
-	}
-	if(raw >= middle)
-	{
-		range = upper - middle;
-		value = ((int32_t)raw - middle) * 1000L / range;
-	}
-	else
-	{
-		range = middle - lower;
-		value = -((int32_t)middle - raw) * 1000L / range;
-	}
-	value += param.PWMadjustValue[channel];
-	if(value > 1000L) value = 1000L;
-	if(value < -1000L) value = -1000L;
-	if(param.chReverse[channel] != 0U) value = -value;
-	/* Match the control path neutral band without changing its input. */
-	if(value >= -50L && value <= 50L) value = 0L;
-	return (int16_t)value;
+    uint16_t lower = param.chLower[channel];
+    uint16_t middle = param.chMiddle[channel];
+    uint16_t upper = param.chUpper[channel];
+    uint16_t range;
+    int32_t value;
+    if((lower >= middle) || (middle >= upper)) {
+        lower = 0U; middle = 2047U; upper = 4095U;
+    }
+    if(raw >= middle) {
+        range = upper - middle;
+        value = ((int32_t)raw - middle) * 1000L / range;
+    } else {
+        range = middle - lower;
+        value = -((int32_t)middle - raw) * 1000L / range;
+    }
+    value += param.PWMadjustValue[channel];
+    if(value > 1000L) value = 1000L;
+    if(value < -1000L) value = -1000L;
+    if(param.chReverse[channel] != 0U) value = -value;
+    if(value >= -50L && value <= 50L) value = 0L;
+    return (int16_t)value;
 }
 
 /* Padded, single-line text never crosses its card or wraps into another row. */
-static void gui_robot_text(uint16_t x, uint16_t y, uint8_t columns, const char *text)
-{
-    char line[96];
-    uint8_t i;
-    if(columns >= sizeof(line)) columns = sizeof(line) - 1U;
-    for(i = 0U; i < columns; i++) line[i] = *text ? *text++ : ' ';
-    line[columns] = '\0';
-    ILI9806G_DispString_EN(x, y, line);
-}
-
 /* Commit final pixels directly: old/new overlapping marker pixels never go
  * through a blank intermediate frame. The static circle is outside this patch. */
 static void gui_robot_dot_patch(uint16_t center_x, uint16_t center_y,
-                                uint16_t patch_x, uint16_t patch_y,
-                                uint16_t dot_x, uint16_t dot_y, uint16_t color)
+    uint16_t patch_x, uint16_t patch_y, uint16_t dot_x, uint16_t dot_y,
+    uint16_t color)
 {
     static uint16_t pixels[17U * 17U];
     uint16_t row, column, x, y, pixel;
@@ -2066,30 +1529,27 @@ static void gui_robot_dot_patch(uint16_t center_x, uint16_t center_y,
         y = patch_y + row;
         for(column = 0U; column < 17U; column++) {
             x = patch_x + column;
-            pixel = (x == center_x || y == center_y) ? WHITE : GREY;
+            pixel = (x == center_x || y == center_y) ? UI_LINE : UI_SURFACE;
             dx = (int32_t)x - dot_x; dy = (int32_t)y - dot_y;
             if(dx * dx + dy * dy <= 64L) pixel = color;
             pixels[row * 17U + column] = pixel;
         }
     }
-    LCD_BlitRGB565(patch_x, patch_y, 17U, 17U, pixels);
+    LCD_BlitRGB565(patch_x,patch_y,17U,17U,pixels);
 }
 
 static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
-                                 uint16_t raw_x, uint16_t raw_y,
-                                 int16_t control_x, int16_t control_y,
-                                 uint16_t color, uint16_t *old_x,
-                                 uint16_t *old_y, uint16_t *old_raw_x,
-                                 uint16_t *old_raw_y, uint8_t draw_text,
-                                 uint8_t first_draw)
+    uint16_t raw_x, uint16_t raw_y, int16_t control_x, int16_t control_y,
+    uint16_t color, uint16_t *old_x, uint16_t *old_y,
+    uint16_t *old_raw_x, uint16_t *old_raw_y,
+    uint8_t draw_text, uint8_t first_draw)
 {
     int32_t dx = (int32_t)control_x * 44L / 1000L;
     int32_t dy = -(int32_t)control_y * 44L / 1000L;
     int32_t radius2 = dx * dx + dy * dy;
-    uint16_t norm = 45U, dot_x, dot_y, text_x = center_x - 104U;
+    uint16_t norm = 45U, dot_x, dot_y, text_x = center_x - 88U;
     int32_t move_x, move_y;
     uint8_t centered;
-    /* Keep both 17x17 dirty rectangles inside the static outline. */
     if(radius2 > 44L * 44L) {
         while((int32_t)norm * norm < radius2) norm++;
         dx = dx * 44L / norm; dy = dy * 44L / norm;
@@ -2099,26 +1559,29 @@ static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
     move_x = (int32_t)dot_x - *old_x; move_y = (int32_t)dot_y - *old_y;
     centered = control_x == 0 && control_y == 0;
     if(first_draw) {
-        LCD_SetTextColor(WHITE);
-        ILI9806G_DrawLine(center_x - 56U, center_y, center_x + 56U, center_y);
-        ILI9806G_DrawLine(center_x, center_y - 56U, center_x, center_y + 56U);
+        LCD_SetTextColor(UI_LINE);
+        ILI9806G_DrawLine(center_x - 56U,center_y,center_x + 56U,center_y);
+        ILI9806G_DrawLine(center_x,center_y - 56U,center_x,center_y + 56U);
+        ILI9806G_DrawCircle(center_x,center_y,56U,0U);
+        /* The corner ticks give both sticks the same instrument scale. */
         LCD_SetTextColor(color);
-        ILI9806G_DrawCircle(center_x, center_y, 56U, 0U);
+        ILI9806G_DrawLine(center_x - 62U,center_y,center_x - 57U,center_y);
+        ILI9806G_DrawLine(center_x + 57U,center_y,center_x + 62U,center_y);
+        ILI9806G_DrawLine(center_x,center_y - 62U,center_x,center_y - 57U);
+        ILI9806G_DrawLine(center_x,center_y + 57U,center_x,center_y + 62U);
     }
     if(first_draw || move_x >= 2L || move_x <= -2L || move_y >= 2L || move_y <= -2L ||
-       (centered && (move_x || move_y))) {
-        gui_robot_dot_patch(center_x, center_y, dot_x - 8U, dot_y - 8U, dot_x, dot_y, color);
+        (centered && (move_x || move_y))) {
+        gui_robot_dot_patch(center_x,center_y,dot_x - 8U,dot_y - 8U,dot_x,dot_y,color);
         if(!first_draw)
-            gui_robot_dot_patch(center_x, center_y, *old_x - 8U, *old_y - 8U, dot_x, dot_y, color);
+            gui_robot_dot_patch(center_x,center_y,*old_x - 8U,*old_y - 8U,dot_x,dot_y,color);
         *old_x = dot_x; *old_y = dot_y;
     }
     if(!first_draw && (!draw_text || (raw_x == *old_raw_x && raw_y == *old_raw_y))) return;
-    LCD_SetFont(&Font16x32); LCD_SetBackColor(GREY); LCD_SetTextColor(BLACK);
-    snprintf(displayBuffer, sizeof(displayBuffer), "X%+5d Y%+5d", control_x, control_y);
-    gui_robot_text(text_x, 416U, 13U, displayBuffer);
-    LCD_SetFont(&Font8x16);
-    snprintf(displayBuffer, sizeof(displayBuffer), "ADC X:%4u Y:%4u", raw_x, raw_y);
-    gui_robot_text(text_x, 452U, 26U, displayBuffer);
+    snprintf(displayBuffer,sizeof(displayBuffer),"X%+5d Y%+5d",control_x,control_y);
+    ui_text(text_x,306U,22U,displayBuffer,color,UI_SURFACE,0U);
+    snprintf(displayBuffer,sizeof(displayBuffer),"ADC X:%4u Y:%4u",raw_x,raw_y);
+    ui_text(text_x,326U,22U,displayBuffer,UI_MUTED,UI_SURFACE,0U);
     *old_raw_x = raw_x; *old_raw_y = raw_y;
 }
 
@@ -2126,113 +1589,104 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
 {
     static GuiRobotTelemetry previous;
     static uint8_t snapshot_valid;
-    static uint16_t battery_bar_width;
     static uint16_t old_dot_x[2], old_dot_y[2], old_raw_x[2], old_raw_y[2];
     static GuiRobotFilter filters[4];
     static uint32_t last_numeric_ms;
     static char previous_status[48];
     unsigned long ticks;
     uint32_t now;
-    uint8_t draw_text, first_draw = 0U, telemetry_changed, battery, card;
-    uint16_t raw[4];
+    uint8_t draw_text, first_draw = display_flag != 0U, telemetry_changed, battery;
+    uint16_t raw[4], state_color;
     int16_t left_x, left_y, right_x, right_y;
-    const char *fix_text, *status;
+    const char *fix_text, *status, *state_label;
+    char number[5][12];
     if(!telemetry) return;
     get_tick_count(&ticks); now = (uint32_t)ticks;
-    if(display_flag == 1U) {
-        display_flag = 0U; GTP_IRQ_Disable(); first_draw = 1U;
-        snapshot_valid = 0U; battery_bar_width = 0U;
+    if(first_draw) {
+        display_flag = 0U; GTP_IRQ_Disable();
+        snapshot_valid = 0U;
         old_raw_x[0] = old_raw_x[1] = old_raw_y[0] = old_raw_y[1] = 0xffffU;
         previous_status[0] = '\0';
+        ui_shell("Robot control", "LIVE STICKS / ROBOT TELEMETRY", "CONTROL / DASHBOARD");
+        ui_round_rect(24U,96U,752U,40U,10U,UI_SURFACE);
+        ui_round_rect(24U,148U,208U,200U,12U,UI_SURFACE);
+        ui_round_rect(568U,148U,208U,200U,12U,UI_SURFACE);
+        ui_round_rect(248U,148U,304U,110U,12U,UI_SURFACE);
+        ui_round_rect(248U,270U,144U,78U,12U,UI_SURFACE);
+        ui_round_rect(408U,270U,144U,78U,12U,UI_SURFACE);
+        ui_text(40U,158U,22U,"LEFT / MOTION",UI_ACCENT,UI_SURFACE,0U);
+        ui_text(584U,158U,22U,"RIGHT / HEADING",UI_GREEN,UI_SURFACE,0U);
+        ui_text(268U,160U,32U,"ROBOT SPEED",UI_MUTED,UI_SURFACE,0U);
+        ui_text(496U,214U,4U,"m/s",UI_MUTED,UI_SURFACE,0U);
+        ui_text(264U,282U,15U,"ROBOT VOLTAGE",UI_MUTED,UI_SURFACE,0U);
+        ui_text(424U,282U,14U,"HEADING / deg",UI_MUTED,UI_SURFACE,0U);
+        ui_round_rect(24U,360U,752U,76U,10U,UI_SURFACE);
+        ui_footer("DCH1: Hold to enable after ready", "BACK: Stop and return");
     }
-    if(first_draw) {
-        LCD_SetTextColor(BLUE2);
-        ILI9806G_DrawRectangle(4U, 0U, 792U, 64U, 1U);
-        LCD_SetBackColor(BLUE2); LCD_SetTextColor(WHITE); LCD_SetFont(&Font16x32);
-        gui_robot_text(20U, 0U, 40U, "ROBOT CONTROL / TELEMETRY");
-        gui_clear_page_content();
-        LCD_SetTextColor(GREY);
-        ILI9806G_DrawRectangle(4U, 72U, 792U, 32U, 1U);
-        gui_robot_card(4U, 112U, 260U, 152U, "MOTION / POSITION");
-        gui_robot_card(272U, 112U, 260U, 152U, "ATTITUDE");
-        gui_robot_card(540U, 112U, 256U, 152U, "POWER / GPS STATUS");
-        gui_robot_card(4U, 272U, 260U, 204U, "LEFT JOYSTICK / CH03-X CH02-Y");
-        gui_robot_card(272U, 272U, 256U, 204U, "ACCELERATION / GPS");
-        gui_robot_card(536U, 272U, 260U, 204U, "RIGHT JOYSTICK / CH06-X CH05-Y");
-        gui_clear_page_band(104U, 8U); gui_clear_page_band(264U, 8U);
-        gui_clear_page_band(476U, 4U);
-        ILI9806G_Fill(264U, 112U, 272U, 476U, WHITE);
-        ILI9806G_Fill(532U, 112U, 540U, 264U, WHITE);
-        ILI9806G_Fill(528U, 272U, 536U, 476U, WHITE);
-    }
-    /* A wall-clock gate is stable even if menu or LCD processing is delayed. */
+    /* Preserve the existing wall-clock gate and display-only joystick filter. */
     draw_text = first_draw || (uint32_t)(now - last_numeric_ms) >= 250U;
     if(draw_text) last_numeric_ms = now;
     telemetry_changed = !snapshot_valid || previous.link_online != telemetry->link_online ||
-        (telemetry->link_online && draw_text && memcmp(&previous, telemetry, sizeof(previous)) != 0);
+        (telemetry->link_online && draw_text && memcmp(&previous,telemetry,sizeof(previous)) != 0);
     if(telemetry_changed) {
         previous = *telemetry; snapshot_valid = 1U;
-        LCD_SetFont(&Font8x16); LCD_SetBackColor(GREY);
-        LCD_SetTextColor(telemetry->link_online ? GREEN : RED);
-        gui_robot_text(16U, 80U, 14U, telemetry->link_online ? "DATA:ONLINE" : "DATA:NONE");
-        LCD_SetTextColor(BLACK);
         if(!telemetry->link_online) {
-            static const uint16_t x[] = {20U,288U,556U,288U};
-            static const uint16_t y[] = {136U,136U,136U,296U};
-            gui_robot_text(144U, 80U, 80U, "NO ROBOT TELEMETRY                       BACK:RETURN");
-            /* Do not draw numeric placeholders and then attempt to cover them. */
-            ILI9806G_Fill(12U,132U,256U,256U,GREY);
-            ILI9806G_Fill(280U,132U,524U,256U,GREY);
-            ILI9806G_Fill(548U,132U,788U,256U,GREY);
-            ILI9806G_Fill(280U,292U,520U,468U,GREY);
-            LCD_SetFont(&Font16x32); LCD_SetTextColor(RED);
-            for(card = 0U; card < 4U; card++) gui_robot_text(x[card],y[card],14U,"NO TELEMETRY");
-            battery_bar_width = 0U;
+            ui_text(280U,184U,8U,"--",UI_MUTED,UI_SURFACE,2U);
+            ui_text(268U,238U,32U,"NO ROBOT TELEMETRY",UI_AMBER,UI_SURFACE,0U);
+            ui_text(264U,306U,7U,"--",UI_MUTED,UI_SURFACE,1U);
+            ui_text(424U,306U,7U,"--",UI_MUTED,UI_SURFACE,1U);
+            ui_text(40U,364U,90U,"ROBOT TELEMETRY / WAITING FOR RECEIVER",UI_AMBER,UI_SURFACE,0U);
+            ui_text(40U,382U,90U,"POS X --   Y --   Z --       ROLL --   PITCH --",UI_MUTED,UI_SURFACE,0U);
+            ui_text(40U,400U,90U,"ACC X --   Y --   Z --       BAT --   GPS --   SAT --",UI_MUTED,UI_SURFACE,0U);
+            ui_text(40U,418U,90U,"LAT --          LON --          ALT --",UI_MUTED,UI_SURFACE,0U);
         } else {
             battery = telemetry->battery_percent > 100U ? 100U : telemetry->battery_percent;
             fix_text = telemetry->gps_fix >= 3U ? "3D" : telemetry->gps_fix == 2U ? "2D" : "NO";
-            snprintf(displayBuffer,sizeof(displayBuffer),"PKT:%08lu AGE:%5ums GPS:%s SAT:%02u BACK:RETURN",
-                     (unsigned long)telemetry->packet_count,telemetry->packet_age_ms,fix_text,telemetry->satellites);
-            gui_robot_text(144U,80U,80U,displayBuffer);
-            LCD_SetFont(&Font16x32);
-            snprintf(displayBuffer,sizeof(displayBuffer),"SPD %+6.2f",telemetry->speed_mps);
-            gui_robot_text(20U,136U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"X%+5.1f Y%+5.1f",telemetry->position_x_m,telemetry->position_y_m);
-            gui_robot_text(20U,174U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"Z %+6.2f m",telemetry->position_z_m);
-            gui_robot_text(20U,212U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"ROLL %+6.1f",telemetry->roll_deg);
-            gui_robot_text(288U,136U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"PITCH%+6.1f",telemetry->pitch_deg);
-            gui_robot_text(288U,174U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"YAW %+7.2f",telemetry->yaw_deg);
-            gui_robot_text(288U,212U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"VOLT %6.2f V",telemetry->voltage_v);
-            gui_robot_text(556U,136U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"BAT %3u%%",battery);
-            gui_robot_text(556U,174U,14U,displayBuffer);
-            gui_update_progress_bar(556U,214U,220U,16U,(uint32_t)battery*10UL,
-                battery>20U ? GREEN : RED,&battery_bar_width,first_draw || !battery_bar_width);
-            LCD_SetFont(&Font8x16);
-            snprintf(displayBuffer,sizeof(displayBuffer),"GPS:%s SAT:%02u ALT:%+.1fm",fix_text,telemetry->satellites,telemetry->gps_altitude_m);
-            gui_robot_text(556U,240U,28U,displayBuffer);
-            LCD_SetFont(&Font16x32);
-            snprintf(displayBuffer,sizeof(displayBuffer),"X%+5.2f Y%+5.2f",telemetry->acceleration_x_mps2,telemetry->acceleration_y_mps2);
-            gui_robot_text(288U,296U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"AZ %+6.2f m/s2",telemetry->acceleration_z_mps2);
-            gui_robot_text(288U,332U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"N %+10.5f",telemetry->latitude_deg);
-            gui_robot_text(288U,368U,14U,displayBuffer);
-            snprintf(displayBuffer,sizeof(displayBuffer),"E %+10.5f",telemetry->longitude_deg);
-            gui_robot_text(288U,404U,14U,displayBuffer);
+            gui_robot_format_value(number[0],sizeof(number[0]),8U,"%6.2f",telemetry->speed_mps);
+            ui_text(280U,184U,8U,number[0],UI_ACCENT,UI_SURFACE,2U);
+            ui_text(268U,238U,32U,"ROBOT TELEMETRY / LIVE",UI_GREEN,UI_SURFACE,0U);
+            gui_robot_format_value(number[0],sizeof(number[0]),5U,"%5.2f",telemetry->voltage_v);
+            snprintf(displayBuffer,sizeof(displayBuffer),"%s V",number[0]);
+            ui_text(264U,306U,7U,displayBuffer,UI_INK,UI_SURFACE,1U);
+            gui_robot_format_value(number[0],sizeof(number[0]),7U,"%6.1f",telemetry->yaw_deg);
+            ui_text(424U,306U,7U,number[0],UI_INK,UI_SURFACE,1U);
+            snprintf(displayBuffer,sizeof(displayBuffer),"ROBOT TELEMETRY / LIVE     RX %10lu    AGE %5u ms",
+                (unsigned long)telemetry->packet_count,telemetry->packet_age_ms);
+            ui_text(40U,364U,90U,displayBuffer,UI_GREEN,UI_SURFACE,0U);
+            gui_robot_format_value(number[0],sizeof(number[0]),11U,"%+7.2f",telemetry->position_x_m);
+            gui_robot_format_value(number[1],sizeof(number[1]),11U,"%+7.2f",telemetry->position_y_m);
+            gui_robot_format_value(number[2],sizeof(number[2]),11U,"%+7.2f",telemetry->position_z_m);
+            gui_robot_format_value(number[3],sizeof(number[3]),7U,"%+6.1f",telemetry->roll_deg);
+            gui_robot_format_value(number[4],sizeof(number[4]),7U,"%+6.1f",telemetry->pitch_deg);
+            snprintf(displayBuffer,sizeof(displayBuffer),"POS X%7s Y%7s Z%7s m     ROLL%6s PITCH%6s deg",
+                number[0],number[1],number[2],number[3],number[4]);
+            ui_text(40U,382U,90U,displayBuffer,UI_MUTED,UI_SURFACE,0U);
+            gui_robot_format_value(number[0],sizeof(number[0]),7U,"%+6.2f",telemetry->acceleration_x_mps2);
+            gui_robot_format_value(number[1],sizeof(number[1]),7U,"%+6.2f",telemetry->acceleration_y_mps2);
+            gui_robot_format_value(number[2],sizeof(number[2]),7U,"%+6.2f",telemetry->acceleration_z_mps2);
+            snprintf(displayBuffer,sizeof(displayBuffer),"ACC X%6s Y%6s Z%6s m/s2    BAT %3u%%   GPS %s   SAT %02u",
+                number[0],number[1],number[2],battery,fix_text,telemetry->satellites);
+            ui_text(40U,400U,90U,displayBuffer,UI_MUTED,UI_SURFACE,0U);
+            gui_robot_format_value(number[0],sizeof(number[0]),10U,"%+10.5f",telemetry->latitude_deg);
+            gui_robot_format_value(number[1],sizeof(number[1]),11U,"%+11.5f",telemetry->longitude_deg);
+            gui_robot_format_value(number[2],sizeof(number[2]),10U,"%+8.1f",telemetry->gps_altitude_m);
+            snprintf(displayBuffer,sizeof(displayBuffer),"LAT %10s    LON %11s    ALT %8s m",
+                number[0],number[1],number[2]);
+            ui_text(40U,418U,90U,displayBuffer,UI_MUTED,UI_SURFACE,0U);
         }
     }
     status = control_link_status();
     if(first_draw || strcmp(previous_status,status)) {
         snprintf(previous_status,sizeof(previous_status),"%s",status);
-        LCD_SetFont(&Font8x16); LCD_SetBackColor(BLUE2); LCD_SetTextColor(WHITE);
-        snprintf(displayBuffer,sizeof(displayBuffer),"CONTROL: %s",previous_status);
-        gui_robot_text(20U,40U,95U,displayBuffer);
+        if(strncmp(status,"ENABLED",7U) == 0) {
+            state_label = "OUTPUT ENABLED"; state_color = UI_GREEN;
+        } else if(strncmp(status,"READY",5U) == 0) {
+            state_label = "READY TO ENABLE"; state_color = UI_ACCENT;
+        } else {
+            state_label = "OUTPUT INHIBITED"; state_color = UI_AMBER;
+        }
+        ui_text(40U,108U,23U,state_label,state_color,UI_SURFACE,0U);
+        ui_text(272U,108U,60U,previous_status,UI_INK,UI_SURFACE,0U);
     }
     raw[0] = gui_robot_filter_update(&filters[0],ADC1_Value[ROBOT_LEFT_X_ADC_INDEX],first_draw);
     raw[1] = gui_robot_filter_update(&filters[1],ADC1_Value[ROBOT_LEFT_Y_ADC_INDEX],first_draw);
@@ -2242,9 +1696,9 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
     left_y = gui_robot_stick_value(raw[1],ROBOT_LEFT_Y_ADC_INDEX);
     right_x = -gui_robot_stick_value(raw[2],ROBOT_RIGHT_X_ADC_INDEX);
     right_y = gui_robot_stick_value(raw[3],ROBOT_RIGHT_Y_ADC_INDEX);
-    gui_robot_draw_stick(134U,356U,raw[0],raw[1],left_x,left_y,BLUE2,
+    gui_robot_draw_stick(128U,238U,raw[0],raw[1],left_x,left_y,UI_ACCENT,
         &old_dot_x[0],&old_dot_y[0],&old_raw_x[0],&old_raw_y[0],draw_text,first_draw);
-    gui_robot_draw_stick(666U,356U,raw[2],raw[3],right_x,right_y,GREEN,
+    gui_robot_draw_stick(672U,238U,raw[2],raw[3],right_x,right_y,UI_GREEN,
         &old_dot_x[1],&old_dot_y[1],&old_raw_x[1],&old_raw_y[1],draw_text,first_draw);
-    LCD_SetBackColor(WHITE); LCD_SetTextColor(BLACK);
+    LCD_SetFont(&Font16x32); LCD_SetBackColor(UI_BG); LCD_SetTextColor(UI_INK);
 }

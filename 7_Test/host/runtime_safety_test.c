@@ -61,13 +61,13 @@ static const uint8_t nrf_power_register[4] = {0x09U, 0x0bU, 0x0dU, 0x0fU};
 #define GREEN 0x07e0U
 #define RED 0xf800U
 #define YELLOW 0xffe0U
-static unsigned Font16x32, Font8x16;
+static unsigned Font16x32, Font8x16, Font24x48;
 static uint8_t display_flag;
 static uint16_t ADC1_Value[8];
 static struct { uint32_t before; char text[100]; uint32_t after; } text_guard;
 #define displayBuffer text_guard.text
 static unsigned rendered_strings;
-static char last_link[16];
+static char last_link[96];
 static char gps_position_text[100], gps_time_text[100];
 static struct {
     int sig, fix, mode;
@@ -86,6 +86,8 @@ static void GTP_IRQ_Disable(void) {}
 #define LCD_SetBackColor ignore_draw
 #define LCD_SetFont(font) ((void)(font))
 #define ILI9806G_DrawRectangle ignore_draw
+#define ILI9806G_DrawLine ignore_draw
+#define ILI9806G_DrawCircle ignore_draw
 #define ILI9806G_Fill ignore_draw
 #define gui_robot_card ignore_draw
 #define gui_gps_draw_card ignore_draw
@@ -101,11 +103,12 @@ static void ILI9806G_DispString_EN(unsigned x, unsigned y, const char *text)
     (void)x; (void)y;
     assert(text_guard.before == 0x12345678UL && text_guard.after == 0x87654321UL);
     assert(strlen(text) < sizeof(displayBuffer));
-    if(strncmp(text, "DATA:", 5U) == 0) snprintf(last_link, sizeof(last_link), "%s", text);
-    if(x == 20U && y == 144U) snprintf(gps_position_text, sizeof(gps_position_text), "%s", text);
-    if(x == 540U && y == 280U) snprintf(gps_time_text, sizeof(gps_time_text), "%s", text);
+    if(x == 40U && y == 364U) snprintf(last_link, sizeof(last_link), "%s", text);
+    if(x == 40U && y == 132U) snprintf(gps_position_text, sizeof(gps_position_text), "%s", text);
+    if(x == 552U && y == 274U) snprintf(gps_time_text, sizeof(gps_time_text), "%s", text);
     rendered_strings++;
 }
+#include "gui_theme.h"
 #include "runtime_safety_impl.inc"
 
 static void test_ticks_and_atomic_flags(void)
@@ -209,12 +212,12 @@ static void test_bounded_formatting(void)
     extreme.battery_percent = extreme.satellites = extreme.gps_fix = 255U;
     display_flag = 1U;
     robot_control_page(&extreme);
-    assert(strncmp(last_link, "DATA:NONE", 9U) == 0);
+    assert(strstr(last_link, "WAITING FOR RECEIVER") != 0);
     offline_strings = rendered_strings;
     memcpy(&extreme.speed_mps, &nan_bits, sizeof(nan_bits));
     extreme.link_online = 1U;
     robot_control_page(&extreme);
-    assert(strncmp(last_link, "DATA:ONLINE", 11U) == 0 && rendered_strings > offline_strings);
+    assert(strstr(last_link, "TELEMETRY / LIVE") != 0 && rendered_strings > offline_strings);
     memset(&param_edit, 0xff, sizeof(param_edit));
     param_edit.warnBatVolt = FLT_MAX;
     param_edit.RecWarnBatVolt = -FLT_MAX;

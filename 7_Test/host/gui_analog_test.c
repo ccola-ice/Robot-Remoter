@@ -10,7 +10,7 @@
 
 enum { WHITE, GREY, BLACK, BLUE, BLUE2, GREEN, RED };
 enum { LCD_X_LENGTH = 800, LCD_Y_LENGTH = 480 };
-static int Font16x32, Font8x16;
+static int Font16x32, Font8x16, Font24x48;
 static uint16_t ADC1_Value[7], ADC3_Value[3];
 static struct { uint16_t chLower[7], chMiddle[7], chUpper[7]; uint8_t chReverse[7]; int PWMadjustValue[7]; } param;
 static const char *fake_status = "DISARMED";
@@ -29,9 +29,10 @@ static uint8_t checking_output;
 static unsigned output_texts;
 static char output_tx_state[80], output_input_state[100], output_ack_state[80];
 static char output_values[6][80];
+static char output_reverse[6][8];
 
 static void LCD_SetFont(void *font)
-{ font_width = font == &Font8x16 ? 8U : 16U; font_height = font_width * 2U; }
+{ font_width = font == &Font8x16 ? 8U : font == &Font24x48 ? 24U : 16U; font_height = font_width * 2U; }
 static void LCD_SetBackColor(uint16_t color) { (void)color; }
 static void LCD_SetTextColor(uint16_t color) { (void)color; }
 static void GTP_IRQ_Disable(void) {}
@@ -55,42 +56,52 @@ static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
     if(checking_output) {
         unsigned right = x + (unsigned)strlen(text) * font_width;
         assert(right <= LCD_X_LENGTH && y + font_height <= LCD_Y_LENGTH);
-        if(y >= 80U && y < 380U) assert(right <= (x < 468U ? 452U : 796U));
+        if(y >= 104U && y < 388U) assert(right <= (x < 464U ? 448U : 776U));
         output_texts++;
-        if(x == 480U && y == 112U) strcpy(output_tx_state, text);
-        if(x == 480U && y == 272U) strcpy(output_ack_state, text);
-        if(x == 12U && y == 394U) strcpy(output_input_state, text);
-        if(x == 104U && y >= 112U && y <= 332U && (y - 112U) % 44U == 0U)
-            strcpy(output_values[(y - 112U) / 44U], text);
+        if(x == 480U && y == 148U) strcpy(output_tx_state, text);
+        if(x == 480U && y == 310U) strcpy(output_ack_state, text);
+        if(x == 24U && y == 396U) strcpy(output_input_state, text);
+        if(x == 224U && y >= 150U && y <= 340U && (y - 150U) % 38U == 0U)
+            strcpy(output_values[(y - 150U) / 38U], text);
+        if(x == 400U && y >= 150U && y <= 340U && (y - 150U) % 38U == 0U)
+            strcpy(output_reverse[(y - 150U) / 38U], text);
     }
     if(checking_robot) {
         unsigned right = x + (unsigned)strlen(text) * font_width;
         assert(right <= LCD_X_LENGTH && y + font_height <= LCD_Y_LENGTH);
-        if(y >= 112U && y < 272U)
-            assert(right <= (x < 264U ? 264U : x < 532U ? 532U : 796U));
-        if(y >= 272U)
-            assert(right <= (x < 264U ? 264U : x < 528U ? 528U : 796U));
-        if(y == 136U || y == 174U || y == 212U || y == 240U ||
-           y == 296U || y == 332U || y == 368U || y == 404U) {
-            if(strncmp(text, "NO TELEMETRY", 12U)) numeric_telemetry_texts++;
+        if(y >= 148U && y < 348U) {
+            if(x < 232U) assert(right <= 232U);
+            else if(x >= 568U) assert(right <= 776U);
+            else if(y >= 270U) assert(right <= (x < 408U ? 392U : 552U));
+            else assert(right <= 552U);
         }
-        if(y == 40U) status_texts++;
-        if(y == 452U) {
+        if((x == 280U && y == 184U) || ((x == 264U || x == 424U) && y == 306U) ||
+           (x == 40U && (y == 382U || y == 400U || y == 418U))) {
+            if(strstr(text, "--") == NULL) numeric_telemetry_texts++;
+        }
+        if(x == 40U && y == 108U) status_texts++;
+        if(y == 326U) {
             unsigned raw_x, raw_y, side = x < 400U ? 0U : 1U;
             assert(sscanf(text, "ADC X:%u Y:%u", &raw_x, &raw_y) == 2);
             text_raw_x[side] = (uint16_t)raw_x; text_raw_y[side] = (uint16_t)raw_y;
         }
     }
-    if((x == 92U || x == 492U) && y >= 87U && y <= 343U && (y - 87U) % 64U == 0U)
+    if((x == 304U || x == 688U) && y >= 146U && y <= 308U && (y - 146U) % 54U == 0U)
     {
-        displayed_adc[(y - 87U) / 64U + (x == 492U ? 5U : 0U)] = (uint16_t)atoi(text);
+        static const unsigned order[] = {0U,1U,2U,3U,4U,5U,7U,8U};
+        displayed_adc[order[(y - 146U) / 54U + (x == 688U ? 4U : 0U)]] = (uint16_t)atoi(text);
         adc_texts++;
     }
-    if(y == 416U || y == 452U) stick_texts++;
-    if(x == 16U && y == 80U) telemetry_texts++;
+    if((x == 304U || x == 688U) && y == 392U) {
+        displayed_adc[x == 304U ? 9U : 6U] = (uint16_t)atoi(text);
+        adc_texts++;
+    }
+    if((x == 40U || x == 584U) && (y == 306U || y == 326U)) stick_texts++;
+    if(x == 40U && y == 364U) telemetry_texts++;
 }
 
 /* Runner extracts these complete functions from the production gui.c. */
+#include "gui_theme.h"
 #include "gui_analog_functions.inc"
 
 static void test_filter(void)
@@ -150,7 +161,7 @@ static void robot_enter(GuiRobotTelemetry *telemetry, uint32_t now)
     circles = lines = blits = fills = stick_texts = telemetry_texts = 0U;
     numeric_telemetry_texts = status_texts = 0U;
     robot_control_page(telemetry);
-    assert(circles == 2U && lines == 4U && blits == 2U);
+    assert(circles == 2U && lines == 12U && blits == 2U);
 }
 
 static void test_robot_noise_and_response(void)
@@ -179,7 +190,7 @@ static void test_robot_noise_and_response(void)
     ADC1_Value[2] = 4095U;
     fake_ms += 20U; robot_control_page(&telemetry);
     fake_ms += 20U; robot_control_page(&telemetry);
-    assert(blits == 2U && circles == 2U && lines == 4U);
+    assert(blits == 2U && circles == 2U && lines == 12U);
     ADC1_Value[2] = 0U;
     fake_ms += 20U; robot_control_page(&telemetry);
     fake_ms += 20U; robot_control_page(&telemetry);
@@ -239,7 +250,7 @@ static void test_robot_telemetry_and_bounds(void)
     telemetry.battery_percent = telemetry.satellites = telemetry.gps_fix = UINT8_MAX;
     before = telemetry_texts;
     robot_control_page(&telemetry);
-    assert(telemetry_texts == before + 1U && numeric_telemetry_texts == 13U);
+    assert(telemetry_texts == before + 1U && numeric_telemetry_texts == 6U);
     before = telemetry_texts;
     for(i = 1U; i <= 1000U; i++) {
         fake_ms = i; telemetry.packet_count++; robot_control_page(&telemetry);
@@ -259,18 +270,18 @@ static void test_robot_telemetry_and_bounds(void)
 static void test_dot_pixel_gate(void)
 {
     uint16_t x = 0U, y = 0U, raw_x = 0U, raw_y = 0U;
-    gui_robot_draw_stick(134U, 356U, 2047U, 2047U, 0, 0, BLUE,
+    gui_robot_draw_stick(128U, 238U, 2047U, 2047U, 0, 0, BLUE,
                          &x, &y, &raw_x, &raw_y, 1U, 1U);
     circles = lines = blits = stick_texts = 0U;
-    gui_robot_draw_stick(134U, 356U, 2057U, 2047U, 5, 0, BLUE,
+    gui_robot_draw_stick(128U, 238U, 2057U, 2047U, 5, 0, BLUE,
                          &x, &y, &raw_x, &raw_y, 1U, 0U);
     assert(circles == 0U && lines == 0U && blits == 0U && stick_texts == 2U);
-    gui_robot_draw_stick(134U, 356U, 2100U, 2047U, 25, 0, BLUE,
+    gui_robot_draw_stick(128U, 238U, 2100U, 2047U, 25, 0, BLUE,
                          &x, &y, &raw_x, &raw_y, 0U, 0U);
-    assert(blits == 0U && x == 134U);
-    gui_robot_draw_stick(134U, 356U, 2200U, 2047U, 100, 0, BLUE,
+    assert(blits == 0U && x == 128U);
+    gui_robot_draw_stick(128U, 238U, 2200U, 2047U, 100, 0, BLUE,
                          &x, &y, &raw_x, &raw_y, 0U, 0U);
-    assert(blits == 2U && circles == 0U && lines == 0U && x > 134U);
+    assert(blits == 2U && circles == 0U && lines == 0U && x > 128U);
 }
 
 static void test_output_monitor(void)
@@ -302,19 +313,19 @@ static void test_output_monitor(void)
     fake_ms = 99U; channel_output_monitor_page(&snapshot);
     assert(output_texts == before); /* Bars react without defeating text cadence. */
     fake_ms = 100U; channel_output_monitor_page(&snapshot);
-    assert(strstr(output_tx_state, "ARMED IN LAST PACKET"));
+    assert(strstr(output_tx_state, "OUTPUT ENABLED"));
     assert(strstr(output_input_state, "LIVE"));
     assert(strstr(output_ack_state, "100 ms"));
     assert(strstr(output_values[0], "+100.0%") && strstr(output_values[1], "-100.0%"));
-    assert(strstr(output_values[0], "OFF") && strstr(output_values[1], "ON"));
+    assert(strstr(output_reverse[0], "--") && strstr(output_reverse[1], "ON"));
     snapshot.sample_age_ms = snapshot.tx_age_ms = UINT16_MAX;
     fake_ms = 200U; channel_output_monitor_page(&snapshot);
-    assert(strstr(output_tx_state, "STALE / LAST PACKET ONLY"));
+    assert(strstr(output_tx_state, "STALE FRAME"));
     assert(strstr(output_input_state, "STALE"));
     snapshot.sample_age_ms = snapshot.tx_age_ms = 0U;
     snapshot.input_fresh = 0U; snapshot.transmitted.armed = 0U;
     fake_ms = 300U; channel_output_monitor_page(&snapshot);
-    assert(strstr(output_tx_state, "DISARMED / ZERO MOTION"));
+    assert(strstr(output_tx_state, "OUTPUT DISARMED"));
     assert(strstr(output_input_state, "STALE")); /* An old sample is not live just because age is zero. */
     snapshot.input_fresh = 1U;
     for(i = 0U; i < 6U; i++) { snapshot.raw[i] = 0U; snapshot.calibrated[i] = 0; }

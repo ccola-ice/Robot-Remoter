@@ -7,7 +7,7 @@ function Get-Functions([string]$source, [string[]]$names) {
     $bodies = @()
     $prototypes = @()
     foreach($name in $names) {
-        $pattern = '(?ms)^(?:static )?(?:__inline )?(?:void|uint16_t|int16_t|sFONT\s*\*)\s+' + $name + '\s*\([^;]*?\)\s*\{.*?^\}'
+        $pattern = '(?ms)^(?:static )?(?:__inline )?(?:void|uint8_t|uint16_t|int16_t|sFONT\s*\*)\s+' + $name + '\s*\([^;]*?\)\s*\{.*?^\}'
         $matches = [regex]::Matches($source, $pattern)
         if($matches.Count -ne 1) { throw "Expected one function: $name" }
         $body = $matches[0].Value
@@ -32,10 +32,13 @@ try {
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_driver.inc'), ($forward + [Environment]::NewLine + $block + $drawFunctions))
     $gui = [IO.File]::ReadAllText((Join-Path $repo '1_App/gui.c'), $enc)
     $mapping = ([regex]::Matches($gui, '(?m)^#define ROBOT_\w+[^\r\n]*') | ForEach-Object { $_.Value }) -join [Environment]::NewLine
-    $guiFunctions = Get-Functions $gui @('gui_prepare_page', 'gui_clear_page_band', 'gui_clear_page_content',
-        'gui_update_progress_bar', 'gui_draw_channel_card', 'menu_group_page', 'main_menu',
+    $guiFunctions = Get-Functions $gui @('gui_prepare_page', 'gui_clock_overlay',
+        'gui_dashboard_status', 'menu_group_page', 'main_menu', 'gui_monitor_tabs',
         'channel_monitor_page', 'channel_output_monitor_page',
-        'gui_robot_card', 'gui_robot_stick_value', 'gui_robot_text', 'gui_robot_dot_patch', 'gui_robot_draw_stick', 'robot_control_page')
+        'gui_robot_stick_value', 'gui_robot_dot_patch', 'gui_robot_draw_stick', 'gui_robot_format_value', 'robot_control_page',
+        'gui_file_decode_utf8', 'gui_file_source_is_utf8', 'gui_file_display_text', 'gui_file_size_text',
+        'gui_settings_row', 'gui_settings_scroll', 'gui_file_row_icon',
+        'parameter_settings_page', 'nrf_settings_page', 'file_browser_page')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_gui.inc'), ($mapping + [Environment]::NewLine + $guiFunctions))
     $diag = [IO.File]::ReadAllText((Join-Path $repo '1_App/diagnostics.c'), $enc)
     $start = $diag.IndexOf('#define DIAG_LINE_CACHE_COUNT')
@@ -62,6 +65,16 @@ static void FLASH_Read_Data(uint8_t *buffer, unsigned address, unsigned size)
         & $exe ([IO.Path]::GetFullPath($PreviewDirectory))
     } else { & $exe }
     if($LASTEXITCODE -ne 0) { throw 'LCD page tests failed.' }
+    if ($PreviewDirectory) {
+        Add-Type -AssemblyName System.Drawing
+        Get-ChildItem -LiteralPath ([IO.Path]::GetFullPath($PreviewDirectory)) -Filter '*.bmp' | ForEach-Object {
+            $bitmap = [Drawing.Image]::FromFile($_.FullName)
+            try {
+                if ($bitmap.Width -ne 800 -or $bitmap.Height -ne 480) { throw 'Preview dimensions changed.' }
+                $bitmap.Save([IO.Path]::ChangeExtension($_.FullName, '.png'), [Drawing.Imaging.ImageFormat]::Png)
+            } finally { $bitmap.Dispose() }
+        }
+    }
 } finally {
     $resolved = [IO.Path]::GetFullPath($temp)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())

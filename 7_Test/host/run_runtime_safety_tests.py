@@ -37,8 +37,7 @@ pieces += [function(main, 'static uint8_t take_tick(')]
 pieces += [menu[menu.index('static GuiRobotTelemetry robot_telemetry;'):menu.index('static uint8_t menu_nrf_power_index(')]]
 pieces += [function(menu, name) for name in ['static uint8_t menu_nrf_power_index(',
            'static uint8_t menu_param_supported(', 'static void menu_param_format_item(']]
-pieces += [function(gui, 'static void gui_robot_text('),
-           function(gui, 'void robot_control_page(')]
+pieces += [function(gui, 'static void gui_robot_format_value('), function(gui, 'void robot_control_page(')]
 snapshot_end = gui.index('} gui_gps_snapshot_t;') + len('} gui_gps_snapshot_t;')
 snapshot_start = gui.rfind('typedef struct', 0, snapshot_end)
 pieces += [gui[snapshot_start:snapshot_end], function(gui, 'void system_data_read_and_set(void)')]
