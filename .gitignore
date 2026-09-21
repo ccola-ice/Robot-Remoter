@@ -1,0 +1,84 @@
+# 默认忽略非代码文件，允许遍历目录，以便保留下面列出的源码和必要工程文件。
+*
+!*/
+!.gitignore
+!.gitattributes
+
+# C/C++ 源码、头文件、汇编及代码片段（包含内置字库数据）。
+!*.c
+!*.h
+!*.cc
+!*.cpp
+!*.cxx
+!*.hpp
+!*.hxx
+!*.s
+!*.S
+!*.asm
+!*.inc
+
+# 构建、测试和代码生成脚本。
+!*.py
+!*.ps1
+!*.bat
+!*.cmd
+!*.sh
+!*.ftl
+!Makefile
+!makefile
+!*.mk
+!CMakeLists.txt
+!*.cmake
+
+# 链接脚本和源码格式配置。
+!*.ld
+!*.lds
+!*.sct
+!*.icf
+!.clang-format
+
+# 保留 EIDE / Keil 工程定义和构建任务，忽略个人编辑器状态。
+!/VSCode EIDE Project/.eide/eide.yml
+!/VSCode EIDE Project/.eide/env.ini
+!/VSCode EIDE Project/.eide/files.options.yml
+!/VSCode EIDE Project/.eide/remoter.st.option.bytes.ini
+!/VSCode EIDE Project/VSCode EIDE Project.code-workspace
+!/VSCode EIDE Project/.vscode/tasks.json
+!/MDK Project/Remoter.uvprojx
+!/MDK Project/Remoter.uvoptx
+!/MDK Project/DebugConfig/Remoter_STM32F407ZGTx.dbgconf
+
+# 当前 EIDE 配置引用的芯片包：保留设备描述、烧录算法和寄存器定义。
+!/VSCode EIDE Project/.pack/**/*.pdsc
+!/VSCode EIDE Project/.pack/**/package.xml
+!/VSCode EIDE Project/.pack/**/*.FLM
+!/VSCode EIDE Project/.pack/**/*.svd
+
+# 字库生成与测试依赖的清单，以及随第三方源码/字体分发的许可证。
+!/5_ModuleDrivers/fonts/ui_font_manifest.json
+!/5_ModuleDrivers/fonts/UI_FONT_LICENSES.txt
+!/5_ModuleDrivers/fonts/ui_font_OFL.txt
+!LICENSE
+!LICENSE.*
+!COPYING
+!COPYING.*
+!NOTICE
+!NOTICE.*
+
+# 构建产物、缓存和本地工具目录整体忽略，目录内的生成代码也不跟踪。
+build/
+bin/
+obj/
+out/
+cmake-build-*/
+CMakeFiles/
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+.idea/
+.agents/
+.codex/
+/MDK Project/Output/
+/MDK Project/Listing/

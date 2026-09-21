@@ -1,20 +1,21 @@
-# dot files
+# 源码和必要工程文件的保留规则统一由仓库根目录 .gitignore 管理。
+# 以下为 EIDE 本地状态。
 /.vscode/launch.json
 /.settings
 /.eide/log
 /.eide.usr.ctx.json
 
-# project out
+# 编译输出。
 /build
 /bin
 /obj
 /out
 
-# eide template
+# EIDE 导出模板。
 *.ept
 *.eide-template
 
-# Verified repair staging, local build products and rollback copies
+# 本地修复暂存、验证产物和备份。
 /.repair/
 /.repair-build/
 /.repair-config/
