@@ -1,403 +1,295 @@
 #include "bsp_rtc.h"
 #include "bsp_SysTick.h"
-#include "bsp_usart_debug.h"
-#include "bsp_fsmc_lcd.h"
+#include <string.h>
 
-#define RTC_PRINT
+#define RTC_SOURCE_TAG 0x43544d00UL
+#define RTC_SOURCE_REGISTER RTC_BKP_DR1
+#define RTC_SOURCE_CHECK_REGISTER RTC_BKP_DR2
+#define RTC_EXPECTED_PRER (((uint32_t)ASYNCHPREDIV << 16) | SYNCHPREDIV)
 
-static uint8_t RTC_IsLeapYear(uint16_t year)
+static uint8_t rtc_ready;
+
+static void rtc_backup_access(void)
 {
-	return (uint8_t)(((year % 4U) == 0U) &&
-	                (((year % 100U) != 0U) || ((year % 400U) == 0U)));
-}
-
-static uint8_t RTC_DaysInMonth(uint16_t year, uint8_t month)
-{
-	static const uint8_t days[12] =
-	{
-		31U, 28U, 31U, 30U, 31U, 30U,
-		31U, 31U, 30U, 31U, 30U, 31U
-	};
-
-	if ((month == 0U) || (month > 12U))
-	{
-		return 0U;
-	}
-
-	if ((month == 2U) && RTC_IsLeapYear(year))
-	{
-		return 29U;
-	}
-
-	return days[month - 1U];
-}
-
-/* STM32 RTC weekday: Monday = 1, ..., Sunday = 7. */
-static uint8_t RTC_CalculateWeekday(uint16_t year, uint8_t month, uint8_t day)
-{
-	static const uint8_t month_offset[12] =
-	{
-		0U, 3U, 2U, 5U, 0U, 3U, 5U, 1U, 4U, 6U, 2U, 4U
-	};
-	uint16_t adjusted_year = year;
-	uint8_t weekday;
-
-	if (month < 3U)
-	{
-		adjusted_year--;
-	}
-
-	weekday = (uint8_t)((adjusted_year + adjusted_year / 4U - adjusted_year / 100U +
-	                     adjusted_year / 400U + month_offset[month - 1U] + day) % 7U);
-
-	return (weekday == 0U) ? 7U : weekday;
-}
-
-static uint8_t RTC_CompileMonth(void)
-{
-	const char *date = __DATE__;
-
-	if ((date[0] == 'J') && (date[1] == 'a')) return 1U;
-	if ((date[0] == 'F')) return 2U;
-	if ((date[0] == 'M') && (date[2] == 'r')) return 3U;
-	if ((date[0] == 'A') && (date[1] == 'p')) return 4U;
-	if ((date[0] == 'M') && (date[2] == 'y')) return 5U;
-	if ((date[0] == 'J') && (date[2] == 'n')) return 6U;
-	if ((date[0] == 'J') && (date[2] == 'l')) return 7U;
-	if ((date[0] == 'A') && (date[1] == 'u')) return 8U;
-	if ((date[0] == 'S')) return 9U;
-	if ((date[0] == 'O')) return 10U;
-	if ((date[0] == 'N')) return 11U;
-	return 12U;
-}
-
-/**
-  * @brief  设置时间和日期
-  * @param  无
-  * @retval 无
-  */
-void RTC_TimeAndDate_Set(void)
-{
-	RTC_TimeTypeDef RTC_TimeStructure;
-	RTC_DateTypeDef RTC_DateStructure;
-	const char *compile_date = __DATE__;
-	const char *compile_time = __TIME__;
-	uint16_t year = (uint16_t)((compile_date[7] - '0') * 1000 +
-	                           (compile_date[8] - '0') * 100 +
-	                           (compile_date[9] - '0') * 10 +
-	                           (compile_date[10] - '0'));
-	uint8_t month = RTC_CompileMonth();
-	uint8_t day = (uint8_t)(((compile_date[4] == ' ') ? 0 : (compile_date[4] - '0')) * 10 +
-	                        (compile_date[5] - '0'));
-
-	/* 首次启动使用本次固件的编译时间，避免继续使用历史固定日期。 */
-	RTC_TimeStructure.RTC_H12 = RTC_H12_AMorPM;
-	RTC_TimeStructure.RTC_Hours = (uint8_t)((compile_time[0] - '0') * 10 + (compile_time[1] - '0'));
-	RTC_TimeStructure.RTC_Minutes = (uint8_t)((compile_time[3] - '0') * 10 + (compile_time[4] - '0'));
-	RTC_TimeStructure.RTC_Seconds = (uint8_t)((compile_time[6] - '0') * 10 + (compile_time[7] - '0'));
-
-	RTC_DateStructure.RTC_WeekDay = RTC_CalculateWeekday(year, month, day);
-	RTC_DateStructure.RTC_Date = day;
-	RTC_DateStructure.RTC_Month = month;
-	RTC_DateStructure.RTC_Year = (uint8_t)(year - 2000U);
-
-	if ((RTC_SetDate(RTC_Format_BINorBCD, &RTC_DateStructure) == SUCCESS) &&
-	    (RTC_SetTime(RTC_Format_BINorBCD, &RTC_TimeStructure) == SUCCESS))
-	{
-		RTC_WriteBackupRegister(RTC_BKP_DRX, RTC_BKP_DATA);
-	}
-}
-
-/**
-  * @brief  使用外部可靠日历时间校准RTC
-  * @retval 1: 已校准，0: 输入无效、无需校准或写入失败
-  */
-uint8_t RTC_SynchronizeCalendar(uint16_t year, uint8_t month, uint8_t day,
-                                uint8_t hour, uint8_t minute, uint8_t second)
-{
-	RTC_TimeTypeDef current_time;
-	RTC_DateTypeDef current_date;
-	RTC_TimeTypeDef target_time;
-	RTC_DateTypeDef target_date;
-	int16_t second_error;
-
-	if ((year < 2000U) || (year > 2099U) ||
-	    (month == 0U) || (month > 12U) ||
-	    (day == 0U) || (day > RTC_DaysInMonth(year, month)) ||
-	    (hour > 23U) || (minute > 59U) || (second > 59U))
-	{
-		return 0U;
-	}
-
-	RTC_GetTime(RTC_Format_BIN, &current_time);
-	RTC_GetDate(RTC_Format_BIN, &current_date);
-
-	second_error = (int16_t)current_time.RTC_Seconds - (int16_t)second;
-	if ((current_date.RTC_Year == (uint8_t)(year - 2000U)) &&
-	    (current_date.RTC_Month == month) &&
-	    (current_date.RTC_Date == day) &&
-	    (current_time.RTC_Hours == hour) &&
-	    (current_time.RTC_Minutes == minute) &&
-	    (second_error >= -1) && (second_error <= 1))
-	{
-		return 0U;
-	}
-
-	target_date.RTC_WeekDay = RTC_CalculateWeekday(year, month, day);
-	target_date.RTC_Date = day;
-	target_date.RTC_Month = month;
-	target_date.RTC_Year = (uint8_t)(year - 2000U);
-
-	target_time.RTC_H12 = RTC_H12_AM;
-	target_time.RTC_Hours = hour;
-	target_time.RTC_Minutes = minute;
-	target_time.RTC_Seconds = second;
-
-	if ((RTC_SetDate(RTC_Format_BIN, &target_date) == ERROR) ||
-	    (RTC_SetTime(RTC_Format_BIN, &target_time) == ERROR))
-	{
-		return 0U;
-	}
-
-	RTC_WriteBackupRegister(RTC_BKP_DRX, RTC_BKP_DATA);
-	return 1U;
-}
-
-/**
-  * @brief  显示时间和日期
-  * @param  无
-  * @retval 无
-  */
-void RTC_TimeAndDate_Show(void)
-{
-	static uint8_t Rtctmp = 0xffU;
-	RTC_TimeTypeDef RTC_TimeStructure;
-	RTC_DateTypeDef RTC_DateStructure;
-	
-    // 获取日历
-    RTC_GetTime(RTC_Format_BIN, &RTC_TimeStructure);
-    RTC_GetDate(RTC_Format_BIN, &RTC_DateStructure);
-    
-    // 每秒打印一次
-    if(Rtctmp != RTC_TimeStructure.RTC_Seconds)
-    {
-		    #ifdef RTC_PRINT		
-        // 打印日期
-        //printf("The Date :  Y:20%0.2d - M:%0.2d - D:%0.2d - W:%0.2d\r\n", 
-        // RTC_DateStructure.RTC_Year,
-        // RTC_DateStructure.RTC_Month,
-        // RTC_DateStructure.RTC_Date,
-        // RTC_DateStructure.RTC_WeekDay);
-		    #endif
-
-        #ifdef RTC_PRINT
-        // 打印时间
-        //printf("The Time :  %0.2d:%0.2d:%0.2d \r\n\r\n", 
-        // RTC_TimeStructure.RTC_Hours,
-        // RTC_TimeStructure.RTC_Minutes,
-        // RTC_TimeStructure.RTC_Seconds);
-        #endif
-
-        // //液晶显示日期
-        // //先把要显示的数据用sprintf函数转换为字符串，然后才能用液晶显示函数显示
-        // sprintf(LCDTemp,"The Date:Y:20%0.2d-M:%0.2d-D:%0.2d-W:%0.2d", 
-        // RTC_DateStructure.RTC_Year,
-        // RTC_DateStructure.RTC_Month, 
-        // RTC_DateStructure.RTC_Date,
-        // RTC_DateStructure.RTC_WeekDay);
-		    // ILI9806G_DispStringLine_EN(4,LCDTemp);
-        
-        // //液晶显示时间
-        // sprintf(LCDTemp,"The Time :  %0.2d:%0.2d:%0.2d", 
-        // RTC_TimeStructure.RTC_Hours, 
-        // RTC_TimeStructure.RTC_Minutes, 
-        // RTC_TimeStructure.RTC_Seconds);
-		    // ILI9806G_DispStringLine_EN(5,LCDTemp);
-        
-        (void)RTC->DR;
-    }
-    Rtctmp = RTC_TimeStructure.RTC_Seconds;	
-}
-
-/**
-  * @brief  RTC配置：选择RTC时钟源，设置RTC_CLK的分频系数
-  * @param  无
-  * @retval 无
-  */
-uint8_t RTC_CLK_Config(void)
-{  
-	  RTC_InitTypeDef RTC_InitStructure;
-    uint16_t startup_ms = 0U;
-	
-	  /*使能 PWR 时钟*/
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
-    /* PWR_CR:DBF置1，使能RTC、RTC备份寄存器和备份SRAM的访问 */
     PWR_BackupAccessCmd(ENABLE);
+}
 
-#if defined (RTC_CLOCK_SOURCE_LSI) 
-  /* 使用LSI作为RTC时钟源会有误差 
-	 * 默认选择LSE作为RTC的时钟源
-	 */
-  /* 使能LSI */ 
-  RCC_LSICmd(ENABLE);
-  /* 等待LSI稳定 */  
-  while(RCC_GetFlagStatus(RCC_FLAG_LSIRDY) == RESET)
-  {
-    if(startup_ms++ >= 100U) return 1U;
-    Delay_ms(1U);
-  }
-  /* 选择LSI做为RTC的时钟源 */
-  RCC_RTCCLKConfig(RCC_RTCCLKSource_LSI);
+static uint8_t rtc_clock_running(void)
+{
+    return (RCC->BDCR & RCC_BDCR_RTCSEL) == RCC_RTCCLKSource_LSE &&
+           (RCC->BDCR & (RCC_BDCR_RTCEN | RCC_BDCR_LSERDY | RCC_BDCR_LSEON)) ==
+               (RCC_BDCR_RTCEN | RCC_BDCR_LSERDY | RCC_BDCR_LSEON) &&
+           !(RCC->BDCR & RCC_BDCR_LSEBYP) && !(RTC->ISR & RTC_ISR_INIT) &&
+           (RTC->PRER & (RTC_PRER_PREDIV_A | RTC_PRER_PREDIV_S)) == RTC_EXPECTED_PRER &&
+           !(RTC->CR & RTC_CR_FMT);
+}
 
-#elif defined (RTC_CLOCK_SOURCE_LSE)
+static void rtc_mark_source(RtcTimeSource source)
+{
+    uint32_t value = source == RTC_TIME_UNSET ? 0UL : RTC_SOURCE_TAG | (uint32_t)source;
+    /* Commit source last; a reset while setting time must not retain trust. */
+    RTC_WriteBackupRegister(RTC_SOURCE_REGISTER, 0UL);
+    RTC_WriteBackupRegister(RTC_SOURCE_CHECK_REGISTER, ~value);
+    RTC_WriteBackupRegister(RTC_SOURCE_REGISTER, value);
+}
 
-  /* 使能LSE */ 
-  RCC_LSEConfig(RCC_LSE_ON);
-   /* 等待LSE稳定 */   
-  while(RCC_GetFlagStatus(RCC_FLAG_LSERDY) == RESET)
-  {
-    if(startup_ms++ >= 3000U) return 1U;
-    Delay_ms(1U);
-  }
-  /* 选择LSE做为RTC的时钟源 */
-  RCC_RTCCLKConfig(RCC_RTCCLKSource_LSE);    
+static RtcTimeSource rtc_saved_source(void)
+{
+    uint32_t value = RTC_ReadBackupRegister(RTC_SOURCE_REGISTER);
+    if(RTC_ReadBackupRegister(RTC_BKP_DRX) != RTC_BKP_DATA ||
+       RTC_ReadBackupRegister(RTC_SOURCE_CHECK_REGISTER) != ~value) return RTC_TIME_UNSET;
+    if(value == (RTC_SOURCE_TAG | RTC_TIME_MANUAL)) return RTC_TIME_MANUAL;
+    if(value == (RTC_SOURCE_TAG | RTC_TIME_GPS)) return RTC_TIME_GPS;
+    return RTC_TIME_UNSET;
+}
 
-#endif /* RTC_CLOCK_SOURCE_LSI */
-
-  /* 使能RTC时钟 */
-  RCC_RTCCLKCmd(ENABLE);
-
-  /* 等待 RTC APB 寄存器同步 */
-  if(RTC_WaitForSynchro() == ERROR) return 2U;
-   
-/*=====================初始化同步/异步预分频器的值======================*/
-	/* 驱动日历的时钟ck_spare = LSE/[(255+1)*(127+1)] = 1HZ */
-	
-	/* 设置异步预分频器的值 */
-	RTC_InitStructure.RTC_AsynchPrediv = ASYNCHPREDIV;
-	/* 设置同步预分频器的值 */
-	RTC_InitStructure.RTC_SynchPrediv = SYNCHPREDIV;	
-	RTC_InitStructure.RTC_HourFormat = RTC_HourFormat_24; 
-	/* 用RTC_InitStructure的内容初始化RTC寄存器 */
-	if (RTC_Init(&RTC_InitStructure) == ERROR) return 3U;
+static uint8_t rtc_can_access(void)
+{
+    if(!rtc_ready) return 0U;
+    if(rtc_clock_running()) return 1U;
+    /* A detected oscillator/configuration interruption loses the claim of
+     * continuous time even if the hardware starts running again later. */
+    if(rtc_saved_source() != RTC_TIME_UNSET) {
+        rtc_backup_access();
+        rtc_mark_source(RTC_TIME_UNSET);
+    }
     return 0U;
 }
 
-/**
-  * @brief  RTC配置：选择RTC时钟源，设置RTC_CLK的分频系数
-  * @param  无
-  * @retval 无
-  */
-#define LSE_STARTUP_TIMEOUT     ((uint16_t)0x05000)
-void RTC_CLK_Config_Backup(void)
-{  
-    __IO uint16_t StartUpCounter = 0;
-	FlagStatus LSEStatus = RESET;	
-	RTC_InitTypeDef RTC_InitStructure;
-	
-	/* 使能 PWR 时钟 */
-  RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
-  /* PWR_CR:DBF置1，使能RTC、RTC备份寄存器和备份SRAM的访问 */
-  PWR_BackupAccessCmd(ENABLE);
-	
-/*=========================选择RTC时钟源==============================*/
-    /* 默认使用LSE，如果LSE出故障则使用LSI */
-  /* 使能LSE */
-  RCC_LSEConfig(RCC_LSE_ON);	
-	
-	/* 等待LSE启动稳定，如果超时则退出 */
-  do
-  {
-    LSEStatus = RCC_GetFlagStatus(RCC_FLAG_LSERDY);
-    StartUpCounter++;
-  }while((LSEStatus == RESET) && (StartUpCounter != LSE_STARTUP_TIMEOUT));
-	
-	
-	if(LSEStatus == SET )
-  {
-		printf("\n\r LSE 启动成功 \r\n");
-		/* 选择LSE作为RTC的时钟源 */
-		RCC_RTCCLKConfig(RCC_RTCCLKSource_LSE);
-  }
-	else
-	{
-		printf("\n\r LSE 故障，转为使用LSI \r\n");
-		
-		/* 使能LSI */	
-		RCC_LSICmd(ENABLE);
-		/* 等待LSI稳定 */ 
-		while(RCC_GetFlagStatus(RCC_FLAG_LSIRDY) == RESET)
-		{			
-		}
-		
-		printf("\n\r LSI 启动成功 \r\n");
-		/* 选择LSI作为RTC的时钟源 */
-		RCC_RTCCLKConfig(RCC_RTCCLKSource_LSI);
-	}
-	
-  /* 使能 RTC 时钟 */
-  RCC_RTCCLKCmd(ENABLE);
-  /* 等待 RTC APB 寄存器同步 */
-  RTC_WaitForSynchro();
-
-/*=====================初始化同步/异步预分频器的值======================*/
-	/* 驱动日历的时钟ck_spare = LSE/[(255+1)*(127+1)] = 1HZ */
-	
-	/* 设置异步预分频器的值为127 */
-	RTC_InitStructure.RTC_AsynchPrediv = 0x7F;
-	/* 设置同步预分频器的值为255 */
-	RTC_InitStructure.RTC_SynchPrediv = 0xFF;	
-	RTC_InitStructure.RTC_HourFormat = RTC_HourFormat_24; 
-	/* 用RTC_InitStructure的内容初始化RTC寄存器 */
-	if (RTC_Init(&RTC_InitStructure) == ERROR)
-	{
-		printf("\n\r RTC 时钟初始化失败 \r\n");
-	}	
-}
-
-//RTC功能
-uint8_t RTC_Config(void)         
+static ErrorStatus rtc_wait_sync(void)
 {
-    /*
-	 * 当我们配置过RTC时间之后就往备份寄存器0写入一个数据做标记
-	 * 所以每次程序重新运行的时候就通过检测备份寄存器0的值来判断
-	 * RTC 是否已经配置过，如果配置过那就继续运行，如果没有配置过
-	 * 就初始化RTC，配置RTC的时间。
-	 */
-   
-    /* RTC配置：选择时钟源，设置RTC_CLK的分频系数 */
-    if(RTC_CLK_Config() != 0U) return 1U;
-
-    if (RTC_ReadBackupRegister(RTC_BKP_DRX) != RTC_BKP_DATA)
-    {
-        /* 设置时间和日期 */
-		  RTC_TimeAndDate_Set();
-    }
-    else
-    {
-        /* 检查是否电源复位 */
-        if (RCC_GetFlagStatus(RCC_FLAG_PORRST) != RESET)
-        {
-            printf("\r\n 发生电源复位....\r\n");
-        }
-        /* 检查是否外部复位 */
-        else if (RCC_GetFlagStatus(RCC_FLAG_PINRST) != RESET)
-        {
-            printf("\r\n 发生外部复位....\r\n");
-        }
-
-        printf("\r\n 不需要重新配置RTC....\r\n");
-    
-        /* 使能 PWR 时钟 */
-        RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
-        /* PWR_CR:DBF置1，使能RTC、RTC备份寄存器和备份SRAM的访问 */
-        PWR_BackupAccessCmd(ENABLE);
-        /* 等待 RTC APB 寄存器同步 */
-        if(RTC_WaitForSynchro() == ERROR) return 2U;   
-    } 
-    return RTC_ReadBackupRegister(RTC_BKP_DRX) == RTC_BKP_DATA ? 0U : 3U;
+    /* In bypass mode no shadow-register synchronization is needed. */
+    return RTC->CR & RTC_CR_BYPSHAD ? SUCCESS : RTC_WaitForSynchro();
 }
 
+static uint8_t rtc_bcd_decode(uint8_t bcd, uint8_t *value)
+{
+    if((bcd & 15U) > 9U || (bcd >> 4) > 9U) return 0U;
+    *value = (uint8_t)((bcd >> 4) * 10U + (bcd & 15U));
+    return 1U;
+}
 
+static uint32_t rtc_bcd_encode(uint8_t value)
+{
+    return (uint32_t)((value / 10U) * 16U + value % 10U);
+}
 
-/**********************************END OF FILE*************************************/
+static uint8_t rtc_read_pair(RtcCalendar *value)
+{
+    RTC_TimeTypeDef time;
+    RTC_DateTypeDef date;
+    uint8_t year;
+    /* Reading time latches the date shadow; reading date releases that latch. */
+    RTC_GetTime(RTC_Format_BCD, &time);
+    RTC_GetDate(RTC_Format_BCD, &date);
+    memset(value, 0, sizeof(*value));
+    if(!rtc_bcd_decode(time.RTC_Hours, &value->hour) ||
+       !rtc_bcd_decode(time.RTC_Minutes, &value->minute) ||
+       !rtc_bcd_decode(time.RTC_Seconds, &value->second) ||
+       !rtc_bcd_decode(date.RTC_Year, &year) ||
+       !rtc_bcd_decode(date.RTC_Month, &value->month) ||
+       !rtc_bcd_decode(date.RTC_Date, &value->day)) return RTC_CALENDAR_READ_ERROR;
+    value->year = 2000U + year;
+    if(RTC->CR & RTC_CR_FMT) {
+        if(!value->hour || value->hour > 12U) return RTC_CALENDAR_READ_ERROR;
+        value->hour = (uint8_t)(value->hour % 12U + (time.RTC_H12 == RTC_H12_PM ? 12U : 0U));
+    }
+    if(!RTC_CalendarValidate(value)) return RTC_CALENDAR_READ_ERROR;
+    value->weekday = RTC_CalendarWeekday(value->year, value->month, value->day);
+    return RTC_CALENDAR_OK;
+}
+
+static uint8_t rtc_read_raw(RtcCalendar *value)
+{
+    RtcCalendar first, second;
+    uint8_t attempt;
+    /* Two identical snapshots also work with a legacy BYPSHAD setting, and
+     * tolerate a date rollover between accesses without returning mixed days. */
+    for(attempt = 0U; attempt < 3U; attempt++) {
+        if(rtc_read_pair(&first) != RTC_CALENDAR_OK ||
+           rtc_read_pair(&second) != RTC_CALENDAR_OK) continue;
+        if(memcmp(&first, &second, sizeof(first)) == 0) {
+            *value = second;
+            return RTC_CALENDAR_OK;
+        }
+    }
+    return RTC_CALENDAR_READ_ERROR;
+}
+
+uint8_t RTC_ReadCalendar(RtcCalendar *calendar)
+{
+    if(!calendar) return RTC_CALENDAR_ARGUMENT_ERROR;
+    memset(calendar, 0, sizeof(*calendar));
+    if(!rtc_can_access()) return RTC_CALENDAR_CLOCK_ERROR;
+    if(!(RTC->CR & RTC_CR_BYPSHAD) && !(RTC->ISR & RTC_ISR_RSF)) return RTC_CALENDAR_READ_ERROR;
+    return rtc_read_raw(calendar);
+}
+
+RtcTimeSource RTC_TimeSource(void)
+{
+    RtcCalendar current;
+    if(RTC_ReadCalendar(&current) != RTC_CALENDAR_OK) return RTC_TIME_UNSET;
+    return rtc_saved_source();
+}
+
+uint8_t RTC_TimeIsValid(void)
+{
+    return RTC_TimeSource() != RTC_TIME_UNSET;
+}
+
+static uint32_t rtc_seconds(const RtcCalendar *calendar)
+{
+    uint32_t days = calendar->day - 1U;
+    uint16_t year;
+    uint8_t month;
+    for(year = 2000U; year < calendar->year; year++) days += year % 4U == 0U ? 366UL : 365UL;
+    for(month = 1U; month < calendar->month; month++) days += RTC_CalendarDaysInMonth(calendar->year, month);
+    return ((days * 24UL + calendar->hour) * 60UL + calendar->minute) * 60UL + calendar->second;
+}
+
+static uint8_t rtc_write_calendar(const RtcCalendar *calendar, RtcTimeSource source)
+{
+    RtcCalendar verify;
+    uint32_t target_seconds, read_seconds;
+    rtc_backup_access();
+    RTC_WriteProtectionCmd(DISABLE);
+    if(RTC_EnterInitMode() == ERROR) {
+        RTC_ExitInitMode();
+        RTC_WriteProtectionCmd(ENABLE);
+        return RTC_CALENDAR_WRITE_ERROR;
+    }
+    rtc_mark_source(RTC_TIME_UNSET);
+    /* One INIT interval freezes the counter while BOTH registers change.
+     * Two separate RTC_SetDate/RTC_SetTime calls expose a mixed date/time. */
+    RTC->TR = rtc_bcd_encode(calendar->hour) << 16 |
+              rtc_bcd_encode(calendar->minute) << 8 | rtc_bcd_encode(calendar->second);
+    RTC->DR = rtc_bcd_encode((uint8_t)(calendar->year - 2000U)) << 16 |
+              (uint32_t)RTC_CalendarWeekday(calendar->year, calendar->month, calendar->day) << 13 |
+              rtc_bcd_encode(calendar->month) << 8 | rtc_bcd_encode(calendar->day);
+    RTC_ExitInitMode();
+    RTC_WriteProtectionCmd(ENABLE);
+    if(rtc_wait_sync() == ERROR || rtc_read_raw(&verify) != RTC_CALENDAR_OK)
+        return RTC_CALENDAR_WRITE_ERROR;
+    target_seconds = rtc_seconds(calendar);
+    read_seconds = rtc_seconds(&verify);
+    if(read_seconds != target_seconds && read_seconds != target_seconds + 1UL)
+        return RTC_CALENDAR_WRITE_ERROR;
+    RTC_WriteBackupRegister(RTC_BKP_DRX, RTC_BKP_DATA);
+    rtc_mark_source(source);
+    return RTC_CALENDAR_OK;
+}
+
+uint8_t RTC_SetCalendar(const RtcCalendar *calendar, RtcTimeSource source)
+{
+    if(!RTC_CalendarValidate(calendar) || (source != RTC_TIME_MANUAL && source != RTC_TIME_GPS))
+        return RTC_CALENDAR_ARGUMENT_ERROR;
+    if(!rtc_can_access()) return RTC_CALENDAR_CLOCK_ERROR;
+    return rtc_write_calendar(calendar, source);
+}
+
+static uint8_t rtc_start_lse(void)
+{
+    uint16_t elapsed;
+    /* ST's RCC_LSEConfig first turns the oscillator OFF. Do not call it on
+     * every normal reset: that would interrupt a retained running calendar. */
+    if(!(RCC->BDCR & RCC_BDCR_LSEON) || (RCC->BDCR & RCC_BDCR_LSEBYP)) RCC_LSEConfig(RCC_LSE_ON);
+    for(elapsed = 0U; elapsed < 3000U; elapsed++) {
+        if(RCC_GetFlagStatus(RCC_FLAG_LSERDY) != RESET) return RTC_CALENDAR_OK;
+        Delay_ms(1U);
+    }
+    return RTC_CALENDAR_CLOCK_ERROR;
+}
+
+uint8_t RTC_Config(void)
+{
+    RTC_InitTypeDef init;
+    RtcCalendar retained, current;
+    static const RtcCalendar baseline = {2000U,1U,1U,6U,0U,0U,0U};
+    uint32_t old_bdcr, old_prer, old_cr, old_isr, backup[20];
+    uint8_t had_calendar = 0U, reset_domain = 0U, repair, i;
+    RtcTimeSource source;
+
+    rtc_ready = 0U;
+    rtc_backup_access();
+    old_bdcr = RCC->BDCR; old_prer = RTC->PRER; old_cr = RTC->CR; old_isr = RTC->ISR;
+    source = rtc_saved_source();
+    if((old_bdcr & RCC_BDCR_RTCEN) && (old_bdcr & RCC_BDCR_RTCSEL)) {
+        (void)rtc_wait_sync();
+        if(rtc_read_raw(&retained) == RTC_CALENDAR_OK) had_calendar = 1U;
+    }
+    if(rtc_start_lse() != RTC_CALENDAR_OK) return RTC_CALENDAR_CLOCK_ERROR;
+
+    if((old_bdcr & RCC_BDCR_RTCSEL) && (old_bdcr & RCC_BDCR_RTCSEL) != RCC_RTCCLKSource_LSE) {
+        /* RTCSEL cannot be replaced by OR-ing a new source. Preserve the
+         * representable civil time and unrelated backup registers first. */
+        for(i = 0U; i < 20U; i++) backup[i] = RTC_ReadBackupRegister(i);
+        RCC_BackupResetCmd(ENABLE);
+        RCC_BackupResetCmd(DISABLE);
+        reset_domain = 1U;
+        if(rtc_start_lse() != RTC_CALENDAR_OK) return RTC_CALENDAR_CLOCK_ERROR;
+        for(i = 3U; i < 20U; i++) RTC_WriteBackupRegister(i, backup[i]);
+    }
+    if((RCC->BDCR & RCC_BDCR_RTCSEL) != RCC_RTCCLKSource_LSE) RCC_RTCCLKConfig(RCC_RTCCLKSource_LSE);
+    RCC_RTCCLKCmd(ENABLE);
+    if(rtc_wait_sync() == ERROR) return RTC_CALENDAR_CLOCK_ERROR;
+    if(!had_calendar && !reset_domain && (old_bdcr & RCC_BDCR_RTCSEL) == RCC_RTCCLKSource_LSE &&
+       rtc_read_raw(&retained) == RTC_CALENDAR_OK) had_calendar = 1U;
+
+    repair = reset_domain || !(old_bdcr & RCC_BDCR_RTCEN) ||
+        !(old_bdcr & RCC_BDCR_LSERDY) || (old_bdcr & RCC_BDCR_LSEBYP) ||
+        (old_prer & (RTC_PRER_PREDIV_A | RTC_PRER_PREDIV_S)) != RTC_EXPECTED_PRER ||
+        (old_cr & RTC_CR_FMT) || (old_isr & RTC_ISR_INIT);
+    if(repair || !had_calendar) {
+        rtc_mark_source(RTC_TIME_UNSET);
+        init.RTC_AsynchPrediv = ASYNCHPREDIV;
+        init.RTC_SynchPrediv = SYNCHPREDIV;
+        init.RTC_HourFormat = RTC_HourFormat_24;
+        if(RTC_Init(&init) == ERROR) {
+            RTC_ExitInitMode();
+            RTC_WriteProtectionCmd(ENABLE);
+            return RTC_CALENDAR_CLOCK_ERROR;
+        }
+        if(rtc_write_calendar(had_calendar ? &retained : &baseline, RTC_TIME_UNSET) != RTC_CALENDAR_OK)
+            return RTC_CALENDAR_WRITE_ERROR;
+    } else {
+        /* Legacy magic only means initialized; compiler-based timestamps
+         * must stay untrusted until a manual or explicit GPS set succeeds. */
+        RTC_WriteBackupRegister(RTC_BKP_DRX, RTC_BKP_DATA);
+        if(source == RTC_TIME_UNSET) rtc_mark_source(RTC_TIME_UNSET);
+    }
+    if(!rtc_clock_running() || rtc_read_raw(&current) != RTC_CALENDAR_OK) return RTC_CALENDAR_READ_ERROR;
+    rtc_ready = 1U;
+    return RTC_CALENDAR_OK;
+}
+
+uint8_t RTC_CLK_Config(void) { return RTC_Config(); }
+
+void RTC_TimeAndDate_Set(void)
+{
+    RtcCalendar current;
+    static const RtcCalendar baseline = {2000U,1U,1U,6U,0U,0U,0U};
+    if(rtc_ready && rtc_clock_running() && rtc_read_raw(&current) != RTC_CALENDAR_OK)
+        (void)rtc_write_calendar(&baseline, RTC_TIME_UNSET);
+}
+
+void RTC_TimeAndDate_Show(void)
+{
+    RtcCalendar current;
+    (void)RTC_ReadCalendar(&current);
+}
+
+uint8_t RTC_SynchronizeCalendar(uint16_t year, uint8_t month, uint8_t day,
+                                uint8_t hour, uint8_t minute, uint8_t second)
+{
+    RtcCalendar requested, current;
+    uint32_t a, b;
+    requested.year = year; requested.month = month; requested.day = day;
+    requested.weekday = 0U; requested.hour = hour; requested.minute = minute; requested.second = second;
+    if(!RTC_CalendarValidate(&requested)) return 0U;
+    if(RTC_TimeIsValid() && RTC_ReadCalendar(&current) == RTC_CALENDAR_OK) {
+        a = rtc_seconds(&requested); b = rtc_seconds(&current);
+        if(a == b || a + 1UL == b || b + 1UL == a) return 0U;
+    }
+    return RTC_SetCalendar(&requested, RTC_TIME_GPS) == RTC_CALENDAR_OK;
+}

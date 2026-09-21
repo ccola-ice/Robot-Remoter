@@ -2,23 +2,27 @@
 <html lang="zh-CN">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>机器人遥控器 · 新页面预览</title>
+<title>机器人遥控器 · 页面预览</title>
 <style>
 body{margin:0;background:#edf2f7;color:#1c2c40;font-family:system-ui,"Microsoft YaHei",sans-serif}main{max-width:1664px;margin:auto;padding:28px}h1{font-size:24px;margin:0 0 12px}p{color:#52657a;line-height:1.6}nav{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}nav a{padding:8px 12px;border-radius:8px;background:white;color:#176caf;text-decoration:none}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,600px),1fr));gap:24px}figure{margin:0;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px #1c2c4010}figcaption{padding:14px 20px;font-size:16px;font-weight:600}img{display:block;width:100%;height:auto;image-rendering:pixelated}a{color:inherit}small{font-weight:400;color:#647589;margin-left:12px}
 </style>
 <main>
-<h1>机器人遥控器 · 页面重设计</h1>
-<p>以下画面由实际 C 页面函数、LCD 绘制代码和项目字体生成，原始尺寸均为 800 × 480。为主机模拟预览，输入、电量、文件及无线状态为演示数据；机器人遥测保持未连接状态。中文使用主机模拟外部字库，实板字形以板上已烧录的 GB2312 字库为准；模拟字体没有进入固件。</p>
-<nav><a href="#home">首页</a><a href="#apps">功能图标</a><a href="#raw">原始采样</a><a href="#output">通道输出</a><a href="#robot">机器人控制</a><a href="#params">参数设置</a><a href="#wireless">无线设置</a><a href="#files">文件浏览</a></nav>
+<h1>机器人遥控器 · 字体、日历与菜单页面</h1>
+<p>以下画面由实际 C 页面函数、LCD 绘制代码和项目 ASCII 字库生成，原始尺寸为 800 × 480。中文使用主机模拟的外部 GB2312 字库，实板字形以已烧录字库为准；模拟字库没有进入固件。日期、输入、电量、文件和无线状态为演示数据，机器人遥测保持未连接状态。</p>
+<p>设置列表采用固定 32 px 加粗文字；上/下支持长按连发。日历入口在“设置 → 日历时钟”，支持手动设置与 GPS 校时。<a href="../字体长按与日历时钟.md">操作与验证说明</a></p>
+<nav><a href="#params">参数设置</a><a href="#calendar">日历时钟</a><a href="#edit">日期时间设置</a><a href="#settings">设置菜单</a><a href="#wireless">无线设置</a><a href="#home">首页</a><a href="#apps">工具菜单</a><a href="#raw">原始采样</a><a href="#output">通道输出</a><a href="#robot">机器人控制</a><a href="#files">文件浏览</a></nav>
 <div class="grid">
-<figure id="home"><figcaption>首页 <small>大图标入口与实时状态</small></figcaption><a href="category-home.png"><img src="category-home.png" width="800" height="480" alt="首页"></a></figure>
-<figure id="apps"><figcaption>功能图标 <small>工作分类与应用入口</small></figcaption><a href="function-icons.png"><img src="function-icons.png" width="800" height="480" alt="功能图标"></a></figure>
-<figure id="raw"><figcaption>原始采样 <small>数值与中心刻度行程条</small></figcaption><a href="channel-raw.png"><img src="channel-raw.png" width="800" height="480" alt="原始采样"></a></figure>
-<figure id="output"><figcaption>通道输出 <small>校准输入与实际发送帧</small></figcaption><a href="channel-output.png"><img src="channel-output.png" width="800" height="480" alt="通道输出"></a></figure>
-<figure id="robot"><figcaption>机器人控制 <small>左右摇杆与遥测仪表</small></figcaption><a href="robot-control.png"><img src="robot-control.png" width="800" height="480" alt="机器人控制"></a></figure>
-<figure id="params"><figcaption>参数设置 <small>当前项、状态和参数列表</small></figcaption><a href="parameter-settings.png"><img src="parameter-settings.png" width="800" height="480" alt="参数设置"></a></figure>
-<figure id="wireless"><figcaption>无线设置 <small>模块实际状态与配置列表</small></figcaption><a href="wireless-settings.png"><img src="wireless-settings.png" width="800" height="480" alt="无线设置"></a></figure>
-<figure id="files"><figcaption>文件浏览 <small>路径、文件类型与大小</small></figcaption><a href="file-browser.png"><img src="file-browser.png" width="800" height="480" alt="文件浏览"></a></figure>
+<figure id="params"><figcaption>参数设置<small>固定 32 px 加粗名称和数值</small></figcaption><a href="parameter-settings.png"><img src="parameter-settings.png" width="800" height="480" alt="参数设置"></a></figure>
+<figure id="calendar"><figcaption>日历时钟<small>月历、当前日期时间与校时来源</small></figcaption><a href="calendar.png"><img src="calendar.png" width="800" height="480" alt="日历时钟"></a></figure>
+<figure id="edit"><figcaption>日期时间设置<small>逐字段修改并确认保存</small></figcaption><a href="calendar-edit.png"><img src="calendar-edit.png" width="800" height="480" alt="日期时间设置"></a></figure>
+<figure id="settings"><figcaption>设置菜单<small>参数、无线和日历三个入口</small></figcaption><a href="settings-menu.png"><img src="settings-menu.png" width="800" height="480" alt="设置菜单"></a></figure>
+<figure id="wireless"><figcaption>无线设置<small>固定字号配置列表与当前生效值</small></figcaption><a href="wireless-settings.png"><img src="wireless-settings.png" width="800" height="480" alt="无线设置"></a></figure>
+<figure id="home"><figcaption>首页<small>大图标入口与实时状态</small></figcaption><a href="category-home.png"><img src="category-home.png" width="800" height="480" alt="首页"></a></figure>
+<figure id="apps"><figcaption>工具菜单<small>工具分类与应用入口</small></figcaption><a href="function-icons.png"><img src="function-icons.png" width="800" height="480" alt="工具菜单"></a></figure>
+<figure id="raw"><figcaption>原始采样<small>数值与中心刻度行程条</small></figcaption><a href="channel-raw.png"><img src="channel-raw.png" width="800" height="480" alt="原始采样"></a></figure>
+<figure id="output"><figcaption>通道输出<small>校准输入与实际发送帧</small></figcaption><a href="channel-output.png"><img src="channel-output.png" width="800" height="480" alt="通道输出"></a></figure>
+<figure id="robot"><figcaption>机器人控制<small>左右摇杆与遥测仪表</small></figcaption><a href="robot-control.png"><img src="robot-control.png" width="800" height="480" alt="机器人控制"></a></figure>
+<figure id="files"><figcaption>文件浏览<small>路径、文件类型与大小</small></figcaption><a href="file-browser.png"><img src="file-browser.png" width="800" height="480" alt="文件浏览"></a></figure>
 </div>
 </main>
 </html>

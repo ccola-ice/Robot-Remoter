@@ -110,6 +110,8 @@ static void capture_text(unsigned x, unsigned y, const char *text)
 }
 static void ILI9806G_DispString_EN(unsigned x, unsigned y, const char *text)
 { (void)x; (void)y; assert(strlen(text) < sizeof(displayBuffer)); }
+static void LCD_DispString_EN_Bold(uint16_t x, uint16_t y, const char *text)
+{ ILI9806G_DispString_EN(x, y, text); }
 static int GetGBKCode(uint8_t *bitmap, uint16_t code)
 { (void)code; memset(bitmap,0x55,128U); return 0; }
 uint8_t FLASH_GetIoError(void) { return 0U; }

@@ -49,5 +49,6 @@ with tempfile.TemporaryDirectory(prefix='remoter-runtime-') as folder:
     subprocess.run([sys.argv[1] if len(sys.argv) > 1 else 'gcc', '-std=gnu99', '-O2',
                     '-Wall', '-Wextra', '-Werror', '-Wno-format-truncation',
                     '-I', str(tmp), '-I', str(root / '1_App'), '-I', str(root / '5_ModuleDrivers'),
+                    '-I', str(root / '5_SystemDrivers'),
                     str(host / 'runtime_safety_test.c'), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

@@ -76,18 +76,29 @@ static const char *gui_control_status_text(const char *status)
 
 void gui_clock_overlay(void)
 {
-    RTC_TimeTypeDef rtc_time;
-    RTC_DateTypeDef rtc_date;
+    static char last_date[32], last_time[32];
+    static const char *weekdays[7] = {"\322\273","\266\376","\310\375","\313\304","\316\345","\301\371","\310\325"};
+    RtcCalendar now;
     ControlLinkSnapshot link;
     uint32_t mv;
-    char text[24];
-    RTC_GetTime(RTC_Format_BIN, &rtc_time);
-    /* Reading the date unlocks the STM32 RTC shadow registers. */
-    RTC_GetDate(RTC_Format_BIN, &rtc_date);
-    (void)rtc_date;
-    if(!clock_force_redraw && clock_last_seconds == rtc_time.RTC_Seconds) return;
+    uint8_t readable;
+    char text[24], date_text[32], time_text[32];
+    memset(&now,0,sizeof(now));
+    readable = RTC_ReadCalendar(&now) == 0U;
+    if(readable) {
+        snprintf(date_text,sizeof(date_text),"%04u-%02u-%02u \326\334%s",now.year,now.month,now.day,
+            now.weekday >= 1U && now.weekday <= 7U ? weekdays[now.weekday-1U] : "?");
+        snprintf(time_text,sizeof(time_text),"%02u:%02u:%02u%s",now.hour,now.minute,now.second,
+            RTC_TimeIsValid() ? "" : " \316\264\320\243\312\261");
+    } else {
+        strcpy(date_text,"\310\325\306\332\266\301\310\241\312\247\260\334");
+        strcpy(time_text,"--:--:--");
+    }
+    if(!clock_force_redraw && clock_last_seconds == now.second &&
+       strcmp(last_date,date_text) == 0 && strcmp(last_time,time_text) == 0) return;
     clock_force_redraw = 0U;
-    clock_last_seconds = rtc_time.RTC_Seconds;
+    clock_last_seconds = now.second;
+    strcpy(last_date,date_text); strcpy(last_time,time_text);
     memset(&link,0,sizeof(link));
     control_link_get_snapshot(&link);
     if(link.sampled && link.input_fresh && link.sample_age_ms <= 100UL && ADC1_Value[6] <= 4095U) {
@@ -95,15 +106,13 @@ void gui_clock_overlay(void)
         snprintf(text,sizeof(text),"TX %lu.%02luV",(unsigned long)(mv/1000UL),
             (unsigned long)((mv%1000UL)/10UL));
     } else strcpy(text,"TX --.--V");
-    ui_fill(500U,0U,300U,32U,UI_INK);
-    ui_text(508U,8U,12U,text,WHITE,UI_INK,0U);
-    ui_text(612U,8U,12U,!param.NRF_Mode ? "RF OFF" :
+    ui_fill(480U,0U,320U,32U,UI_INK);
+    ui_text(480U,8U,10U,text,WHITE,UI_INK,0U);
+    ui_text(568U,8U,8U,!param.NRF_Mode ? "RF OFF" :
         link.ack_seen && link.ack_age_ms < 150UL ? "RF ACK" : "RF WAIT",WHITE,UI_INK,0U);
-    snprintf(text,sizeof(text),"%02u:%02u:%02u",rtc_time.RTC_Hours,rtc_time.RTC_Minutes,rtc_time.RTC_Seconds);
-    ui_text(716U,8U,8U,text,WHITE,UI_INK,0U);
-    LCD_SetFont(&Font16x32);
-    LCD_SetBackColor(WHITE);
-    LCD_SetTextColor(BLACK);
+    ui_text(640U,0U,17U,date_text,WHITE,UI_INK,0U);
+    ui_text(640U,16U,17U,time_text,readable && RTC_TimeIsValid() ? WHITE : UI_AMBER,UI_INK,0U);
+    LCD_SetFont(&Font16x32); LCD_SetBackColor(WHITE); LCD_SetTextColor(BLACK);
 }
 
 static const BootReport *boot_last_report;
@@ -252,18 +261,15 @@ static void gui_settings_row(uint8_t row, uint16_t number,
     uint16_t y = 104U + (uint16_t)row * 48U;
     uint16_t background = selected ? (editing ? UI_AMBER : UI_TINT) : UI_SURFACE;
     uint16_t foreground = selected ? (editing ? UI_SURFACE : UI_ACCENT) : UI_INK;
-    uint8_t value_large = strlen(value) <= 17U ? 1U : 0U;
     char index_text[5];
-
     ui_round_rect(192U, y, 580U, 44U, 10U, background);
     snprintf(index_text, sizeof(index_text), "%02u", number);
-    ui_text(204U, y + 14U, 3U, index_text,
-            selected ? foreground : UI_MUTED, background, 0U);
-    ui_text(240U, y + 14U, 24U, label, foreground, background, 0U);
-    ui_text(464U, y + (value_large ? 6U : 14U),
-            value_large ? 17U : 34U, value, foreground, background, value_large);
-    ui_text(748U, y + 14U, 1U, selected && editing ? "*" : ">",
-            selected ? foreground : UI_MUTED, background, 0U);
+    ui_text(204U, y + 6U, 2U, index_text,
+            selected ? foreground : UI_MUTED, background, 3U);
+    ui_text(244U, y + 6U, 14U, label, foreground, background, 3U);
+    ui_text(480U, y + 6U, 16U, value, foreground, background, 3U);
+    ui_text(748U, y + 6U, 1U, selected && editing ? "*" : ">",
+            selected ? foreground : UI_MUTED, background, 3U);
 }
 
 static void gui_settings_scroll(uint8_t first_visible, uint8_t visible_count,
@@ -463,7 +469,7 @@ void menu_group_page(uint8_t selected_group)
     if(first) {
         display_flag = 0U; GTP_IRQ_Disable();
         ui_shell("\322\243\277\330\306\367\326\367\322\263", "\307\353\321\241\324\361\271\246\304\334\267\326\300\340", "\326\367\322\263");
-        ui_footer("\327\363\323\322 \321\241\324\361\267\326\300\340", "OK \275\370\310\353");
+        ui_footer("\311\317/\317\302 \321\241\324\361\267\326\300\340", "OK \275\370\310\353");
     }
     gui_dashboard_status(first);
     for(i = 0U; i < MENU_GROUP_COUNT; i++) {
@@ -499,12 +505,13 @@ void main_menu(uint8_t selected_item)
 #undef MENU_LABEL
     static const char * const subtitles[] = {
         "\312\326\266\257\277\330\326\306", "\312\344\310\353\323\353\267\242\313\315\312\375\276\335", "\260\264\274\374\323\353\262\246\270\313", "\317\265\315\263\323\353\315\250\265\300", "\316\336\317\337\301\264\302\267",
+        "\310\325\300\372\323\353\320\243\312\261",
         "\271\314\274\376\323\353\304\332\264\346", "\261\276\273\372\327\313\314\254", "\266\250\316\273\323\353\316\300\320\307", "SD / Flash \316\304\274\376",
         "\323\262\274\376\274\354\262\342", "\264\346\264\242\325\357\266\317"
     };
     static const char * const groups[] = {"\322\243\277\330","\311\350\326\303","\271\244\276\337"};
     static const uint8_t icons[] = {UI_ICON_CONTROL,UI_ICON_CHANNEL,UI_ICON_SWITCH,
-        UI_ICON_SETTINGS,UI_ICON_RADIO,UI_ICON_CHIP,UI_ICON_IMU,UI_ICON_GPS,
+        UI_ICON_SETTINGS,UI_ICON_RADIO,UI_ICON_CALENDAR,UI_ICON_CHIP,UI_ICON_IMU,UI_ICON_GPS,
         UI_ICON_FOLDER,UI_ICON_TOOLS,UI_ICON_MEMORY};
     static uint8_t previous=255U;
     uint8_t first, group, start, count, i, entry;
@@ -525,7 +532,7 @@ void main_menu(uint8_t selected_item)
         }
         ui_text(40U,360U,15U,"BACK",UI_MUTED,UI_SURFACE,0U);
         ui_text(40U,382U,15U,"\267\265\273\330\267\326\300\340",UI_MUTED,UI_SURFACE,0U);
-        ui_footer("\327\363\323\322 \321\241\324\361\271\246\304\334", "OK \275\370\310\353  BACK \267\265\273\330");
+        ui_footer("\311\317/\317\302 \321\241\324\361\271\246\304\334", "OK \275\370\310\353  BACK \267\265\273\330");
     }
     for(i=0U;i<count;i++) {
         entry=start+i;
@@ -917,7 +924,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
     }
     if(content_changed || selection_changed) {
         snprintf(count_text, sizeof(count_text), "%u / %u FILES", item_count ? selected_item + 1U : 0U, item_count);
-        ui_footer("\327\363\323\322 \321\241\324\361  OK \264\362\277\252  BACK \311\317\274\266/\315\313\263\366", count_text);
+        ui_footer("\311\317/\317\302 \321\241\324\361  OK \264\362\277\252  BACK \311\317\274\266/\315\313\263\366", count_text);
     }
     memcpy(last_path, safe_path, sizeof(last_path));
     memcpy(last_status, safe_status, sizeof(last_status));
@@ -980,8 +987,8 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
         state_color = editing || dirty ? UI_AMBER : UI_GREEN;
         ui_round_rect(32U, 224U, 128U, 40U, 9U, state_color);
         ui_text(40U, 236U, 14U, state_text, UI_SURFACE, state_color, 0U);
-        ui_footer(editing ? "\327\363\323\322 \265\367\325\373  OK \310\267\310\317  BACK \310\241\317\373" :
-                  "\327\363\323\322 \321\241\324\361  OK \261\340\274\255/\326\264\320\320  BACK \267\265\273\330",
+        ui_footer(editing ? "\311\317/\317\302 \265\367\325\373  OK \310\267\310\317  BACK \310\241\317\373" :
+                  "\311\317/\317\302 \321\241\324\361  OK \261\340\274\255/\326\264\320\320  BACK \267\265\273\330",
                   dirty ? "\320\336\270\304\311\320\316\264\261\243\264\346" : "\262\316\312\375\311\350\326\303");
     }
     if(window_changed || selection_changed) {
@@ -1113,8 +1120,8 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
     if(first_draw || selection_changed || runtime_changed ||
        memcmp(values, last_values, sizeof(values)) != 0 || strcmp(status, last_status) != 0) {
         ui_text(200U, 408U, 72U, status, UI_MUTED, UI_BG, 0U);
-        ui_footer(editing ? "\327\363\323\322 \265\367\325\373  OK/BACK \275\341\312\370\261\340\274\255" :
-                  "\327\363\323\322 \321\241\324\361  OK \261\340\274\255/\326\264\320\320  BACK \267\265\273\330",
+        ui_footer(editing ? "\311\317/\317\302 \265\367\325\373  OK/BACK \275\341\312\370\261\340\274\255" :
+                  "\311\317/\317\302 \321\241\324\361  OK \261\340\274\255/\326\264\320\320  BACK \267\265\273\330",
                   editing ? "\261\340\274\255\326\320" : actual_differs ? "\320\336\270\304\311\320\316\264\323\246\323\303" : "\316\336\317\337\311\350\326\303");
     }
     memcpy(last_values, values, sizeof(last_values));
@@ -1280,7 +1287,7 @@ void channel_monitor_page(void)
         ui_text(40U,410U,26U,"ADC \262\311\321\371 / \311\317\300\255\312\344\310\353",UI_MUTED,UI_SURFACE,0U);
         ui_text(424U,390U,26U,"BAT \261\276\273\372\265\347\263\330",UI_INK,UI_SURFACE,0U);
         ui_text(424U,410U,26U,"ADC \262\311\321\371 / \261\276\273\372\265\347\263\330",UI_MUTED,UI_SURFACE,0U);
-        ui_footer("\327\363\323\322 / OK \307\320\273\273\312\323\315\274", "BACK \267\265\273\330\322\243\277\330\262\313\265\245");
+        ui_footer("\311\317/\317\302 / OK \307\320\273\273\312\323\315\274", "BACK \267\265\273\330\322\243\277\330\262\313\265\245");
     }
     /* Keep the established display-only filter and live frame cadence. */
     for(i = 0U; i < 7U; i++)
@@ -1352,7 +1359,7 @@ void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
         ui_text(480U,368U,35U,"\323\262\274\376\273\330\326\264\262\273\264\372\261\355\273\372\306\367\310\313\326\264\320\320\275\341\271\373",UI_MUTED,UI_SURFACE,0U);
         ui_text(24U,418U,64U,"\315\250\265\300\323\263\311\344: X=-A03  Y=A02  \272\275\317\362=-A06",UI_MUTED,UI_BG,0U);
         ui_text(632U,418U,18U,"\326\273\266\301\274\340\312\323",UI_MUTED,UI_BG,0U);
-        ui_footer("\327\363\323\322 / OK \307\320\273\273\312\323\315\274", "BACK \267\265\273\330\322\243\277\330\262\313\265\245");
+        ui_footer("\311\317/\317\302 / OK \307\320\273\273\312\323\315\274", "BACK \267\265\273\330\322\243\277\330\262\313\265\245");
     }
     for(i = 0U; i < 6U; i++) {
         y = 150U + (uint16_t)i * 38U;
@@ -1718,4 +1725,105 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
     gui_robot_draw_stick(672U,238U,raw[2],raw[3],right_x,right_y,UI_GREEN,
         &old_dot_x[1],&old_dot_y[1],&old_raw_x[1],&old_raw_y[1],draw_text,first_draw);
     LCD_SetFont(&Font16x32); LCD_SetBackColor(UI_BG); LCD_SetTextColor(UI_INK);
+}
+
+void calendar_page(const GuiCalendarState *state)
+{
+    static GuiCalendarState previous;
+    static const char *weekdays[7] = {"\322\273","\266\376","\310\375","\313\304","\316\345","\301\371","\310\325"};
+    static const char *actions[3] = {"\273\330\265\275\261\276\324\302","\311\350\326\303\310\325\306\332\312\261\274\344","GPS \320\243\312\261"};
+    static const char *fields[6] = {"\304\352\267\335","\324\302\267\335","\310\325\306\332","\320\241\312\261","\267\326\326\323","\303\353\326\323"};
+    static const char *messages[] = {"", "\310\325\306\332\312\261\274\344\322\321\261\243\264\346", "\322\321\260\264 GPS \261\261\276\251\312\261\274\344\320\243\327\274",
+        "\324\335\316\336\323\320\320\247 GPS \312\261\274\344\243\254\307\353\265\310\264\375\273\362\312\326\266\257\311\350\326\303", "RTC \320\264\310\353\312\247\260\334\243\254\307\353\326\330\312\324", "\322\321\310\241\317\373\320\336\270\304"};
+    uint8_t first = display_flag != 0U, month, old_month, grid_changed, sidebar_changed;
+    uint8_t weekday, day, days, cell, row, column, today, editing_day, i;
+    uint16_t year, old_year, x, y, background, color, value;
+    char text[64];
+    if(!state) return;
+    year = state->mode == CALENDAR_EDIT ? state->draft.year : state->year;
+    month = state->mode == CALENDAR_EDIT ? state->draft.month : state->month;
+    old_year = previous.mode == CALENDAR_EDIT ? previous.draft.year : previous.year;
+    old_month = previous.mode == CALENDAR_EDIT ? previous.draft.month : previous.month;
+    days = RTC_CalendarDaysInMonth(year,month);
+    if(!days) return;
+    grid_changed = first || year != old_year || month != old_month ||
+        state->mode != previous.mode || state->draft.day != previous.draft.day ||
+        state->now.year != previous.now.year || state->now.month != previous.now.month ||
+        state->now.day != previous.now.day || state->time_valid != previous.time_valid;
+    sidebar_changed = first || state->mode != previous.mode || state->action != previous.action ||
+        state->field != previous.field || memcmp(&state->draft,&previous.draft,sizeof(state->draft)) != 0 ||
+        (state->mode != CALENDAR_EDIT && (memcmp(&state->now,&previous.now,sizeof(state->now)) != 0 ||
+            state->readable != previous.readable || state->time_valid != previous.time_valid ||
+            state->source != previous.source || state->gps_available != previous.gps_available));
+    if(first) {
+        display_flag=0U; GTP_IRQ_Disable();
+        ui_shell("\310\325\300\372\323\353\312\261\326\323","\271\253\300\372 / \261\261\276\251\312\261\274\344 UTC+8","\311\350\326\303 / \310\325\300\372");
+        ui_round_rect(24U,96U,488U,328U,12U,UI_SURFACE);
+        ui_round_rect(536U,96U,240U,328U,12U,UI_SURFACE);
+    }
+    if(grid_changed) {
+        ui_fill(40U,108U,456U,304U,UI_SURFACE);
+        snprintf(text,sizeof(text),"%04u \304\352 %02u \324\302",year,month);
+        ui_text(40U,108U,28U,text,UI_INK,UI_SURFACE,1U);
+        for(i=0U;i<7U;i++)
+            ui_text(60U+64U*i,156U,2U,weekdays[i],i>=5U?UI_AMBER:UI_MUTED,UI_SURFACE,0U);
+        weekday=RTC_CalendarWeekday(year,month,1U);
+        for(day=1U;day<=days;day++) {
+            cell=(uint8_t)(weekday-1U+day-1U); row=cell/7U; column=cell%7U;
+            x=40U+64U*column; y=178U+38U*row;
+            today=state->time_valid && state->readable && state->now.year==year &&
+                state->now.month==month && state->now.day==day;
+            editing_day=state->mode==CALENDAR_EDIT && state->draft.day==day;
+            background=editing_day?UI_AMBER:today?UI_TINT:UI_SURFACE;
+            color=editing_day?UI_SURFACE:today?UI_ACCENT:column>=5U?UI_AMBER:UI_INK;
+            if(today || editing_day) ui_round_rect(x,y,56U,36U,6U,background);
+            snprintf(text,sizeof(text),"%2u",day);
+            ui_text(x+12U,y+2U,2U,text,color,background,1U);
+        }
+    }
+    if(sidebar_changed) {
+        ui_round_rect(536U,96U,240U,328U,12U,UI_SURFACE);
+        if(state->mode==CALENDAR_EDIT) {
+            for(i=0U;i<6U;i++) {
+                y=112U+42U*i;
+                background=state->field==i?UI_TINT:UI_SURFACE;
+                ui_round_rect(544U,y,224U,40U,6U,background);
+                ui_text(552U,y+12U,5U,fields[i],UI_MUTED,background,0U);
+                value=i==0U?state->draft.year:i==1U?state->draft.month:i==2U?state->draft.day:
+                    i==3U?state->draft.hour:i==4U?state->draft.minute:state->draft.second;
+                snprintf(text,sizeof(text),i==0U?"%04u":"%02u",value);
+                ui_text(636U,y+4U,7U,text,state->field==i?UI_ACCENT:UI_INK,background,1U);
+            }
+            background=state->field==6U?UI_ACCENT:UI_TINT;
+            ui_round_rect(544U,374U,224U,38U,7U,background);
+            ui_text(568U,386U,22U,"OK \261\243\264\346\310\325\306\332\312\261\274\344",state->field==6U?UI_SURFACE:UI_INK,background,0U);
+        } else {
+            ui_text(552U,108U,26U,"\265\261\307\260\310\325\306\332\312\261\274\344",UI_MUTED,UI_SURFACE,0U);
+            if(state->readable) snprintf(text,sizeof(text),"%04u-%02u-%02u",state->now.year,state->now.month,state->now.day);
+            else strcpy(text,"--");
+            ui_text(552U,134U,13U,text,UI_INK,UI_SURFACE,1U);
+            if(state->readable) snprintf(text,sizeof(text),"%02u:%02u:%02u",state->now.hour,state->now.minute,state->now.second);
+            else strcpy(text,"--:--:--");
+            ui_text(552U,174U,13U,text,UI_INK,UI_SURFACE,1U);
+            ui_text(552U,218U,26U,!state->time_valid?"\316\264\320\243\312\261\243\254\307\353\317\310\311\350\326\303":state->source==RTC_TIME_GPS?
+                "\320\243\312\261\300\264\324\264: GPS":"\320\243\312\261\300\264\324\264: \312\326\266\257",state->time_valid?UI_GREEN:UI_AMBER,UI_SURFACE,0U);
+            ui_text(552U,244U,26U,"OK \264\362\277\252\262\331\327\367\262\313\265\245",UI_MUTED,UI_SURFACE,0U);
+            for(i=0U;i<CALENDAR_ACTION_COUNT;i++) {
+                y=274U+46U*i;
+                background=state->mode==CALENDAR_ACTIONS && state->action==i?UI_TINT:UI_SURFACE;
+                ui_round_rect(544U,y,224U,40U,7U,background);
+                ui_text(556U,y+12U,24U,actions[i],i==CALENDAR_GPS_SYNC&&!state->gps_available?
+                    UI_MUTED:UI_INK,background,0U);
+            }
+        }
+    }
+    if(first || state->status!=previous.status)
+        ui_text(40U,428U,90U,state->status < sizeof(messages)/sizeof(messages[0])?messages[state->status]:"",
+            state->status==CALENDAR_STATUS_WRITE_FAILED?UI_RED:UI_MUTED,UI_BG,0U);
+    if(first || state->mode!=previous.mode || state->field!=previous.field) {
+        ui_footer(state->mode==CALENDAR_BROWSE?"\311\317/\317\302 \307\320\273\273\324\302\267\335  OK \262\331\327\367":state->mode==CALENDAR_ACTIONS?
+            "\311\317/\317\302 \321\241\324\361  OK \326\264\320\320":"\311\317/\317\302 \265\367\325\373\312\375\326\265  OK \317\302\322\273\317\356/\261\243\264\346",
+            state->mode==CALENDAR_BROWSE?"BACK \267\265\273\330\311\350\326\303":state->mode==CALENDAR_EDIT?"BACK \310\241\317\373\320\336\270\304":"BACK \267\265\273\330\344\257\300\300");
+    }
+    previous=*state;
 }

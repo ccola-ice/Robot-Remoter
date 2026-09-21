@@ -211,6 +211,7 @@ void                     	ILI9806G_DrawRectangle           ( uint16_t usX_Start,
 void                     	ILI9806G_DrawCircle              ( uint16_t usX_Center, uint16_t usY_Center, uint16_t usRadius, uint8_t ucFilled );
 void                     	ILI9806G_DispChar_EN             ( uint16_t usX, uint16_t usY, const char cChar );
 void                     	ILI9806G_DispStringLine_EN      ( uint16_t line, char * pStr );
+void LCD_DispString_EN_Bold(uint16_t x, uint16_t y, const char *text);
 void                     	ILI9806G_DispString_EN      			( uint16_t usX, uint16_t usY, char * pStr );
 void						ILI9806G_DispString_EN_YDir 		(   uint16_t usX,uint16_t usY ,  char * pStr );
 void                     	ILI9806G_DispChar_CH             ( uint16_t usX, uint16_t usY, uint16_t usChar );

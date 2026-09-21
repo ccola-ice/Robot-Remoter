@@ -43,6 +43,15 @@ static void assert_text(const char *text, size_t capacity)
         assert(a >= 0xa1U && a <= 0xf7U && b >= 0xa1U && b <= 0xfeU);
     }
 }
+static void assert_fixed_font_row(const GuiParamRow *row)
+{
+    assert_text(row->label, sizeof(row->label));
+    assert_text(row->value, sizeof(row->value));
+    /* gui_settings_row style 3: one ASCII byte is a 16 px cell;
+     * a valid GB2312 pair is a complete 32 px glyph. */
+    assert(strlen(row->label) <= 14U);
+    assert(strlen(row->value) <= 16U);
+}
 static void reset_menu(void)
 {
     param_load_defaults(&param);
@@ -65,8 +74,7 @@ static void catalog_and_edit_tests(void)
         menu_param_format_item((uint8_t)item, &guard.row);
         assert(menu_param_supported((uint8_t)item));
         assert(guard.before==0x12345678U && guard.after==0x98765432U);
-        assert_text(guard.row.label, sizeof(guard.row.label));
-        assert_text(guard.row.value, sizeof(guard.row.value));
+        assert_fixed_font_row(&guard.row);
         assert(guard.row.label[0] && guard.row.value[0]);
         assert(strstr(guard.row.value, "UNAVAILABLE") == NULL);
         assert(strncmp(guard.row.label, "CH7", 3U) && strncmp(guard.row.label, "CH8", 3U));
@@ -95,6 +103,36 @@ static void catalog_and_edit_tests(void)
     assert(!param_dirty && !param_editing && param_edit.batVoltAdjust==1000U);
     assert_text(param_status,sizeof(param_status));
     puts("parameter catalog: 40 actual fields/actions, Chinese bounded labels, every editable item changes and cancels correctly");
+}
+static void fixed_font_bounds_tests(void)
+{
+    unsigned boundary, channel, item, power, rate, enabled;
+    GuiParamRow row;
+    for(boundary=0U; boundary<2U; boundary++) {
+        reset_menu();
+        param_edit.warnBatVolt=boundary ? 5.0f : 2.5f;
+        param_edit.batVoltAdjust=boundary ? 1500U : 500U;
+        param_edit.NRF_Channel=boundary ? 125U : 0U;
+        for(channel=0U; channel<chNum; channel++) {
+            param_edit.chLower[channel]=boundary ? 4093U : 0U;
+            param_edit.chMiddle[channel]=boundary ? 4094U : 1U;
+            param_edit.chUpper[channel]=boundary ? 4095U : 2U;
+            param_edit.PWMadjustValue[channel]=boundary ? 1000 : -1000;
+            param_edit.chReverse[channel]=(uint8_t)boundary;
+        }
+        assert(param_sanitize(&param_edit)==0U);
+        for(power=0U; power<4U; power++) for(rate=0U; rate<3U; rate++)
+        for(enabled=0U; enabled<2U; enabled++) {
+            param_edit.NRF_Power=nrf_power_register[power];
+            param_edit.NRF_DataRate=(uint8_t)rate;
+            param_edit.NRF_Mode=(uint8_t)enabled;
+            for(item=0U; item<PARAM_ITEM_COUNT; item++) {
+                menu_param_format_item((uint8_t)item,&row);
+                assert_fixed_font_row(&row);
+            }
+        }
+    }
+    puts("fixed 32 px parameter text: all 40 labels/values fit 14/16 cells at legal minima/maxima and every radio mode");
 }
 static void bounds_tests(void)
 {
@@ -146,7 +184,7 @@ static void save_tests(void)
 }
 int main(void)
 {
-    catalog_and_edit_tests(); bounds_tests(); save_tests();
+    catalog_and_edit_tests(); fixed_font_bounds_tests(); bounds_tests(); save_tests();
     puts("parameter menu regression passed");
     return 0;
 }

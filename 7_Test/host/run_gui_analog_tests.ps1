@@ -16,7 +16,7 @@ try {
     }
     [IO.File]::WriteAllText((Join-Path $testDir 'gui_analog_functions.inc'), ($parts -join [Environment]::NewLine))
     $exe = Join-Path $testDir 'gui-analog-test.exe'
-    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-I' $testDir '-I' (Join-Path $repoRoot '1_App') (Join-Path $PSScriptRoot 'gui_analog_test.c') '-o' $exe
+    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-I' $testDir '-I' (Join-Path $repoRoot '1_App') '-I' (Join-Path $repoRoot '5_SystemDrivers') (Join-Path $PSScriptRoot 'gui_analog_test.c') '-o' $exe
     if ($LASTEXITCODE -ne 0) { throw 'GUI analog test compilation failed.' }
     & $exe
     if ($LASTEXITCODE -ne 0) { throw 'GUI analog tests failed.' }

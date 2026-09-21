@@ -9,6 +9,7 @@ try {
     }
     Copy-Item -LiteralPath (Join-Path $repo '1_App/menu.h') -Destination $temp
     [IO.File]::WriteAllText((Join-Path $temp 'stm32f4xx.h'), '#include <stdint.h>')
+    [IO.File]::WriteAllText((Join-Path $temp 'bsp_SysTick.h'), '')
     [IO.File]::WriteAllText((Join-Path $temp 'bsp_gpio_button.h'), @'
 #define BUTTON_OK_GPIO_PORT 0U
 #define BUTTON_BACK_GPIO_PORT 0U

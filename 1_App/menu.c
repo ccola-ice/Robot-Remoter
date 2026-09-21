@@ -10,6 +10,11 @@
 #include "bsp_gpio_digital_channel.h"
 #include "ff.h"
 #include "bsp_SysTick.h"
+#include "bsp_rtc.h"
+#include "nmea_decode_test.h"
+#include "nmea/nmea.h"
+
+extern nmeaTIME beiJingTime;
 
 #include <stdio.h>
 #include <string.h>
@@ -41,6 +46,7 @@ typedef enum
     MENU_PAGE_IMU,
     MENU_PAGE_GPS,
     MENU_PAGE_NRF,
+    MENU_PAGE_CALENDAR,
     MENU_PAGE_FILE_BROWSER,
     MENU_PAGE_PARAMETER_SETTINGS,
     MENU_PAGE_DIAGNOSTICS,
@@ -67,6 +73,9 @@ static const char * const nrf_status_text[] =
     "\xb1\xa3\xb4\xe6\xd0\xa3\xd1\xe9\xca\xa7\xb0\xdc\xa3\xac\xd4\xcb\xd0\xd0\xc9\xe8\xd6\xc3\xd2\xd1\xbb\xd6\xb8\xb4"
 };
 
+static MenuKey repeat_key;
+static uint8_t repeat_pending;
+static GuiCalendarState calendar_state;
 static MenuKey event_queue[MENU_EVENT_QUEUE_SIZE];
 static uint8_t event_read_index;
 static uint8_t event_write_index;
@@ -380,8 +389,8 @@ static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
     switch(item_index)
     {
         case 0U:
-            strcpy(row->label, "\xb9\xcc\xbc\xfe\xb0\xe6\xb1\xbe\xa3\xa8\xd6\xbb\xb6\xc1\xa3\xa9");
-            snprintf(row->value, sizeof(row->value), "%s / %s", FM_VERSION, FM_TIME);
+            strcpy(row->label, "\271\314\274\376\260\346\261\276");
+            snprintf(row->value, sizeof(row->value), "%s", FM_VERSION);
             break;
         case 1U:
             strcpy(row->label, "\xb7\xa2\xc9\xe4\xb5\xcd\xd1\xb9\xcd\xa3\xbf\xd8");
@@ -960,6 +969,107 @@ static uint8_t menu_get_key(MenuKey *key)
     return 1;
 }
 
+static void menu_calendar_refresh(void)
+{
+    memset(&calendar_state.now,0,sizeof(calendar_state.now));
+    calendar_state.readable=RTC_ReadCalendar(&calendar_state.now)==0U;
+    calendar_state.time_valid=calendar_state.readable && RTC_TimeIsValid();
+    calendar_state.source=(uint8_t)RTC_TimeSource();
+    calendar_state.gps_available=gps_time_is_fresh();
+}
+
+static void menu_calendar_load(void)
+{
+    memset(&calendar_state,0,sizeof(calendar_state));
+    menu_calendar_refresh();
+    if(calendar_state.readable) calendar_state.draft=calendar_state.now;
+    else {
+        calendar_state.draft.year=2000U; calendar_state.draft.month=1U;
+        calendar_state.draft.day=1U; calendar_state.draft.weekday=6U;
+    }
+    calendar_state.year=calendar_state.draft.year;
+    calendar_state.month=calendar_state.draft.month;
+}
+
+static void menu_draw_calendar(void)
+{
+    menu_calendar_refresh();
+    calendar_page(&calendar_state);
+}
+
+static void menu_handle_calendar_key(MenuKey key)
+{
+    RtcCalendar date;
+    uint8_t result;
+    int year;
+    if(key==MENU_KEY_BACK) {
+        if(calendar_state.mode==CALENDAR_BROWSE) {
+            current_page=MENU_PAGE_CATEGORY; page_changed=1U;
+        } else {
+            if(calendar_state.mode==CALENDAR_EDIT) calendar_state.status=CALENDAR_STATUS_CANCELED;
+            calendar_state.mode=CALENDAR_BROWSE;
+        }
+    } else if(calendar_state.mode==CALENDAR_BROWSE) {
+        if(key==MENU_KEY_LEFT || key==MENU_KEY_RIGHT)
+            calendar_month_step(&calendar_state,key==MENU_KEY_RIGHT?1:-1);
+        else if(key==MENU_KEY_OK) calendar_state.mode=CALENDAR_ACTIONS;
+    } else if(calendar_state.mode==CALENDAR_ACTIONS) {
+        if(key==MENU_KEY_LEFT)
+            calendar_state.action=calendar_state.action==0U?CALENDAR_ACTION_COUNT-1U:calendar_state.action-1U;
+        else if(key==MENU_KEY_RIGHT)
+            calendar_state.action=(uint8_t)((calendar_state.action+1U)%CALENDAR_ACTION_COUNT);
+        else if(key==MENU_KEY_OK) {
+            menu_calendar_refresh();
+            if(calendar_state.action==CALENDAR_TODAY) {
+                if(calendar_state.readable) {
+                    calendar_state.year=calendar_state.now.year;
+                    calendar_state.month=calendar_state.now.month;
+                }
+                calendar_state.mode=CALENDAR_BROWSE;
+            } else if(calendar_state.action==CALENDAR_SET_TIME) {
+                if(calendar_state.readable) calendar_state.draft=calendar_state.now;
+                calendar_state.field=0U; calendar_state.mode=CALENDAR_EDIT;
+                calendar_state.status=CALENDAR_STATUS_NONE;
+            } else {
+                memset(&date,0,sizeof(date));
+                year=beiJingTime.year+1900;
+                if(gps_time_is_fresh() && year>=2000 && year<=2099 &&
+                   beiJingTime.mon>=1 && beiJingTime.mon<=12 && beiJingTime.day>=1 && beiJingTime.day<=31 &&
+                   beiJingTime.hour>=0 && beiJingTime.hour<24 && beiJingTime.min>=0 && beiJingTime.min<60 &&
+                   beiJingTime.sec>=0 && beiJingTime.sec<60) {
+                    date.year=(uint16_t)year; date.month=(uint8_t)beiJingTime.mon; date.day=(uint8_t)beiJingTime.day;
+                    date.hour=(uint8_t)beiJingTime.hour; date.minute=(uint8_t)beiJingTime.min; date.second=(uint8_t)beiJingTime.sec;
+                    if(RTC_CalendarValidate(&date)) {
+                        result=RTC_SetCalendar(&date,RTC_TIME_GPS);
+                        calendar_state.status=result?CALENDAR_STATUS_WRITE_FAILED:CALENDAR_STATUS_GPS_SAVED;
+                        if(!result) {
+                            calendar_state.year=date.year; calendar_state.month=date.month;
+                            calendar_state.mode=CALENDAR_BROWSE;
+                        }
+                    } else calendar_state.status=CALENDAR_STATUS_GPS_WAIT;
+                } else calendar_state.status=CALENDAR_STATUS_GPS_WAIT;
+            }
+        }
+    } else if(calendar_state.mode==CALENDAR_EDIT) {
+        if(key==MENU_KEY_LEFT || key==MENU_KEY_RIGHT) {
+            calendar_edit_step(&calendar_state,key==MENU_KEY_RIGHT?1:-1);
+            calendar_state.status=CALENDAR_STATUS_NONE;
+        } else if(key==MENU_KEY_OK) {
+            if(calendar_state.field<6U) calendar_state.field++;
+            else {
+                result=RTC_SetCalendar(&calendar_state.draft,RTC_TIME_MANUAL);
+                calendar_state.status=result?CALENDAR_STATUS_WRITE_FAILED:CALENDAR_STATUS_MANUAL_SAVED;
+                if(!result) {
+                    calendar_state.year=calendar_state.draft.year;
+                    calendar_state.month=calendar_state.draft.month;
+                    calendar_state.mode=CALENDAR_BROWSE;
+                }
+            }
+        }
+    }
+    page_dirty=1U;
+}
+
 static void menu_handle_home_key(MenuKey key)
 {
     if(key == MENU_KEY_LEFT)
@@ -1011,6 +1121,10 @@ static void menu_handle_category_key(MenuKey key)
             {
                 menu_nrf_load_settings();
             }
+            else if(current_page == MENU_PAGE_CALENDAR)
+            {
+                menu_calendar_load();
+            }
             else if(current_page == MENU_PAGE_FILE_BROWSER)
             {
                 menu_browser_load_drives();
@@ -1048,6 +1162,12 @@ static void menu_handle_page_key(MenuKey key)
     if(current_page == MENU_PAGE_NRF)
     {
         menu_handle_nrf_key(key);
+        return;
+    }
+
+    if(current_page == MENU_PAGE_CALENDAR)
+    {
+        menu_handle_calendar_key(key);
         return;
     }
 
@@ -1131,6 +1251,10 @@ static void menu_draw_current_page(void)
                               nrf_runtime_power_index, nrf_runtime_data_rate);
             break;
 
+        case MENU_PAGE_CALENDAR:
+            menu_draw_calendar();
+            break;
+
         case MENU_PAGE_FILE_BROWSER:
             file_browser_page(browser_path, browser_entries, browser_item_count,
                               browser_selected_item, browser_first_visible,
@@ -1196,6 +1320,10 @@ static void menu_refresh_dynamic_page(void)
     {
         system_data_read_and_set();
     }
+    else if(current_page == MENU_PAGE_CALENDAR)
+    {
+        menu_draw_calendar();
+    }
     else if(current_page == MENU_PAGE_ROBOT_CONTROL)
     {
         robot_control_page(&robot_telemetry);
@@ -1204,6 +1332,8 @@ static void menu_refresh_dynamic_page(void)
 
 void menu_init(void)
 {
+    repeat_pending = 0U;
+    user_BUTTON_cancel_repeat();
     event_read_index = 0;
     event_write_index = 0;
     selected_item = 0;
@@ -1251,22 +1381,50 @@ void menu_tick_10ms(void)
     }
 }
 
+/* A repeat never queues behind a real press and expires when its key is released. */
+void menu_post_repeat(MenuKey key)
+{
+    if(key != MENU_KEY_LEFT && key != MENU_KEY_RIGHT) return;
+    if(current_page != MENU_PAGE_HOME && current_page != MENU_PAGE_CATEGORY &&
+       current_page != MENU_PAGE_PARAMETER_SETTINGS && current_page != MENU_PAGE_NRF &&
+       current_page != MENU_PAGE_FILE_BROWSER && current_page != MENU_PAGE_CALENDAR) return;
+    if(event_read_index != event_write_index || repeat_pending) return;
+    repeat_key = key;
+    repeat_pending = 1U;
+}
+
+static uint32_t menu_key_context(void)
+{
+    return (uint32_t)current_page | ((uint32_t)param_editing << 8U) |
+        ((uint32_t)nrf_editing << 9U) | ((uint32_t)calendar_state.mode << 10U) |
+        ((uint32_t)calendar_state.field << 12U);
+}
+
+static void menu_dispatch_key(MenuKey key)
+{
+    uint32_t context = menu_key_context();
+    if(current_page == MENU_PAGE_HOME) menu_handle_home_key(key);
+    else {
+        if(current_page == MENU_PAGE_ROBOT_CONTROL) control_link_inhibit();
+        menu_handle_page_key(key);
+    }
+    if(menu_key_context() != context) {
+        repeat_pending = 0U;
+        user_BUTTON_cancel_repeat();
+    }
+}
+
 void menu_process(void)
 {
     MenuKey key;
 
     menu_robot_telemetry_service();
-    while(menu_get_key(&key))
-    {
-        if(current_page == MENU_PAGE_HOME)
-        {
-            menu_handle_home_key(key);
-        }
-        else
-        {
-            if(current_page == MENU_PAGE_ROBOT_CONTROL) control_link_inhibit();
-            menu_handle_page_key(key);
-        }
+    if(event_read_index != event_write_index) repeat_pending = 0U;
+    while(menu_get_key(&key)) menu_dispatch_key(key);
+    if(repeat_pending) {
+        key = repeat_key;
+        repeat_pending = 0U;
+        if(user_BUTTON_repeat_held((uint8_t)key)) menu_dispatch_key(key);
     }
 
     if(page_dirty)

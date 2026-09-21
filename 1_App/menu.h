@@ -19,6 +19,8 @@ uint8_t menu_control_active(void);
 
 /* Called by the button callbacks. The event is queued and handled later. */
 void menu_post_key(MenuKey key);
+/* Direction-only hold event; dropped instead of queued when input is busy. */
+void menu_post_repeat(MenuKey key);
 
 /* Called every 10 ms together with button_ticks(). */
 void menu_tick_10ms(void);

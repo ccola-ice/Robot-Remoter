@@ -1,5 +1,6 @@
 param([string]$Compiler = 'gcc', [string]$PreviewDirectory = '', [string]$PreviewFont = '')
 $ErrorActionPreference = 'Stop'
+if($PreviewFont -and !(Test-Path -LiteralPath $PreviewFont -PathType Leaf)) { throw "Preview font not found: $PreviewFont" }
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('remoter-lcd-page-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($temp) | Out-Null
@@ -25,7 +26,7 @@ try {
     $drawFunctions = Get-Functions $driver @('LCD_Draw_Rect', 'ILI9806G_GramScan', 'ILI9806G_OpenWindow', 'ILI9806G_SetCursor',
         'ILI9806G_FillColor', 'ILI9806G_Clear', 'ILI9806G_SetPointPixel', 'ILI9806G_DrawPoint',
         'ILI9806G_GetPointPixel', 'ILI9806G_DrawLine', 'ILI9806G_DrawRectangle', 'ILI9806G_Fill',
-        'ILI9806G_DrawCircle', 'ILI9806G_DispChar_EN', 'ILI9806G_DispString_EN',
+        'ILI9806G_DrawCircle', 'ILI9806G_DispChar_EN', 'ILI9806G_DispString_EN', 'LCD_DispString_EN_Bold',
         'LCD_SetFont', 'LCD_SetTextColor', 'LCD_SetBackColor')
     $forward = 'void ILI9806G_OpenWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h); static __inline void ILI9806G_FillColor(uint32_t count, uint16_t color);'
     $drawFunctions = $drawFunctions.Replace('ILI9806G_DispString_EN', 'lcd_real_DispString_EN')
@@ -38,7 +39,7 @@ try {
         'gui_robot_stick_value', 'gui_robot_dot_patch', 'gui_robot_draw_stick', 'gui_robot_format_value', 'robot_control_page',
         'gui_file_decode_utf8', 'gui_file_source_is_utf8', 'gui_file_display_text', 'gui_file_size_text',
         'gui_settings_row', 'gui_settings_scroll', 'gui_file_row_icon',
-        'parameter_settings_page', 'nrf_settings_page', 'file_browser_page')
+        'parameter_settings_page', 'nrf_settings_page', 'file_browser_page', 'calendar_page')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_gui.inc'), ($mapping + [Environment]::NewLine + $guiFunctions))
     $diag = [IO.File]::ReadAllText((Join-Path $repo '1_App/diagnostics.c'), $enc)
     $start = $diag.IndexOf('#define DIAG_LINE_CACHE_COUNT')
@@ -57,7 +58,7 @@ void FLASH_SPI_Init(void);
 void FLASH_Read_Data(uint8_t *buffer, unsigned address, unsigned size);
 '@)
     $exe = Join-Path $temp 'lcd-page-test.exe'
-    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-finput-charset=GBK' '-fexec-charset=GBK' '-I' $temp '-I' (Join-Path $repo '1_App') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') '-o' $exe
+    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-finput-charset=GBK' '-fexec-charset=GBK' '-I' $temp '-I' (Join-Path $repo '1_App') '-I' (Join-Path $repo '5_SystemDrivers') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') '-o' $exe
     if($LASTEXITCODE -ne 0) { throw 'LCD page test compilation failed.' }
     if ($PreviewDirectory) {
         [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($PreviewDirectory)) | Out-Null

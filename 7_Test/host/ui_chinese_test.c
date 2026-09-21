@@ -8,7 +8,7 @@ static TestFont Font8x16 = {8U,16U}, Font16x32 = {16U,32U}, Font24x48 = {24U,48U
 static TestFont *current_font = &Font8x16;
 static uint16_t foreground, background;
 static uint16_t frame[480][800];
-static unsigned font_reads, blits, strings, fills;
+static unsigned font_reads, blits, strings, fills, bold_strings;
 static uint8_t flash_error, failure_mode;
 static uint16_t failure_code;
 static struct { uint16_t x,y; char text[101]; } rendered[20];
@@ -36,6 +36,12 @@ static void ILI9806G_DispString_EN(uint16_t x,uint16_t y,char *text)
         for(py=0U;py<current_font->Height;py++) for(px=0U;px<current_font->Width;px++)
             frame[y+py][x+i*current_font->Width+px]=text[i]==' '?background:foreground;
     }
+}
+static void LCD_DispString_EN_Bold(uint16_t x,uint16_t y,const char *text)
+{
+    assert(current_font == &Font16x32);
+    bold_strings++;
+    ILI9806G_DispString_EN(x,y,(char *)text);
 }
 static void LCD_BlitRGB565(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const uint16_t *pixels)
 {
@@ -85,7 +91,7 @@ static void reset_drawing(void)
 {
     memset(frame,0x55,sizeof(frame));
     memset(rendered,0,sizeof(rendered));
-    strings=blits=fills=0U;
+    strings=blits=fills=bold_strings=0U;
 }
 static void check_area(uint16_t x,uint16_t y,unsigned size,uint16_t code)
 {
@@ -187,12 +193,45 @@ static void test_cache_and_failed_glyphs(void)
     assert(ui_chinese_bitmap(failure_code)!=0 && font_reads==reads);
     flash_error=0U;
 }
+static void test_fixed_bold_style(void)
+{
+    unsigned x,y,reads=font_reads; uint8_t ink;
+    reset_drawing();
+    ui_text(40U,48U,5U,"A\xb0\xa1" "B",0x1234U,0xabcdU,3U);
+    assert(current_font==&Font16x32 && bold_strings==2U && blits==8U && !fills);
+    assert(rendered[0].x==40U && strcmp(rendered[0].text,"A")==0);
+    assert(rendered[1].x==88U && strcmp(rendered[1].text,"B ")==0);
+    for(y=0U;y<32U;y++) for(x=0U;x<32U;x++) {
+        ink=source_pixel(0xb0a1U,x,y);
+        if(x) ink|=source_pixel(0xb0a1U,x-1U,y);
+        if(y) ink|=source_pixel(0xb0a1U,x,y-1U);
+        assert(frame[48U+y][56U+x]==(ink?0x1234U:0xabcdU));
+    }
+    assert(frame[47U][56U]==0x5555U && frame[80U][56U]==0x5555U);
+    assert(frame[48U][120U]==0x5555U); /* Glyph/ASCII padding never overflows the field. */
+    strings=bold_strings=blits=0U;
+    ui_text(40U,48U,5U,"Q",0x1234U,0xabcdU,3U);
+    assert(bold_strings==1U && !blits && strcmp(rendered[0].text,"Q    ")==0);
+    for(y=48U;y<80U;y++) for(x=56U;x<120U;x++) assert(frame[y][x]==0xabcdU);
+    reset_drawing();
+    ui_text(784U,448U,2U,"\xb0\xa1",1U,2U,3U);
+    assert(!blits && bold_strings==1U && strcmp(rendered[0].text," ")==0);
+    reset_drawing();
+    ui_text(768U,448U,2U,"\xb0\xa1",1U,2U,3U);
+    assert(blits==8U && !strings);
+    reset_drawing();
+    ui_text(0U,449U,2U,"\xb0\xa1",1U,2U,3U);
+    assert(!blits && !strings);
+    /* Depending on FIFO eviction above, the first bold access may miss once. */
+    assert(font_reads<=reads+1U);
+}
 int main(void)
 {
     test_ascii_and_mixed_width();
     test_font_sizes_and_padding();
     test_gb2312_boundaries();
     test_cache_and_failed_glyphs();
-    puts("Chinese UI: mixed-width clipping, GB2312 boundaries, 16/32/48 px pixels, cache eviction and failed reads passed");
+    test_fixed_bold_style();
+    puts("Chinese UI: GB2312/clipping, 16/32/48 px + fixed 32 px bold pixels, cache/failure handling and opaque replacement passed");
     return 0;
 }

@@ -1627,6 +1627,36 @@ void ILI9806G_DispStringLine_EN (  uint16_t line,  char * pStr )
  * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
  * @retval 无
  */
+/* Fixed 16x32 ASCII, expanded one pixel right/down inside each glyph cell.
+ * Four opaque rows use only 128 B static scratch and the retained-image BLIT path. */
+void LCD_DispString_EN_Bold(uint16_t x, uint16_t y, const char *text)
+{
+    static uint16_t pixels[16U * 4U];
+    const uint8_t *bitmap;
+    uint16_t band, row, column, source_row, bits, above, expanded;
+    uint16_t foreground = CurrentTextColor, background = CurrentBackColor;
+    uint8_t character;
+    if(!text || x >= LCD_X_LENGTH || (uint32_t)y + 32U > LCD_Y_LENGTH) return;
+    while(*text && (uint32_t)x + 16U <= LCD_X_LENGTH) {
+        character = (uint8_t)*text++;
+        if(character < 32U || character > 126U) character = '?';
+        bitmap = &Font16x32.table[(uint16_t)(character - 32U) * 64U];
+        for(band = 0U; band < 32U; band += 4U) {
+            for(row = 0U; row < 4U; row++) {
+                source_row = band + row;
+                bits = (uint16_t)(((uint16_t)bitmap[source_row * 2U] << 8) | bitmap[source_row * 2U + 1U]);
+                above = source_row == 0U ? 0U :
+                    (uint16_t)(((uint16_t)bitmap[(source_row - 1U) * 2U] << 8) | bitmap[(source_row - 1U) * 2U + 1U]);
+                expanded = (uint16_t)(bits | (bits >> 1U) | above);
+                for(column = 0U; column < 16U; column++)
+                    pixels[row * 16U + column] = (expanded & (0x8000U >> column)) ? foreground : background;
+            }
+            LCD_BlitRGB565(x,y + band,16U,4U,pixels);
+        }
+        x += 16U;
+    }
+}
+
 void ILI9806G_DispString_EN ( 	uint16_t usX ,uint16_t usY,  char * pStr )
 {
 	while ( * pStr != '\0' )

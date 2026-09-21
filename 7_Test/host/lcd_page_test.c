@@ -126,15 +126,12 @@ const char *control_link_status(void) { return "DISARMED"; }
 void control_link_get_snapshot(ControlLinkSnapshot *snapshot) { *snapshot = dashboard_snapshot; }
 static char displayBuffer[100];
 static void GTP_IRQ_Disable(void) {}
-typedef struct { uint8_t RTC_Hours, RTC_Minutes, RTC_Seconds; } RTC_TimeTypeDef;
-typedef struct { uint8_t RTC_Date; } RTC_DateTypeDef;
-#define RTC_Format_BIN 0U
 static uint8_t fake_rtc_seconds = 56U;
-static unsigned rtc_time_reads, rtc_date_reads;
-static void RTC_GetTime(unsigned format, RTC_TimeTypeDef *time)
-{ (void)format; time->RTC_Hours = 12U; time->RTC_Minutes = 34U; time->RTC_Seconds = fake_rtc_seconds; rtc_time_reads++; }
-static void RTC_GetDate(unsigned format, RTC_DateTypeDef *date)
-{ (void)format; date->RTC_Date = 21U; rtc_date_reads++; }
+static uint8_t fake_rtc_valid = 1U, fake_rtc_error;
+static RtcCalendar fake_rtc = {2026U,9U,21U,1U,12U,34U,56U};
+static uint8_t RTC_ReadCalendar(RtcCalendar *time)
+{ *time = fake_rtc; time->second = fake_rtc_seconds; return fake_rtc_error; }
+static uint8_t RTC_TimeIsValid(void) { return fake_rtc_valid; }
 /* Filename conversion stays ASCII in this fixture; menu Chinese uses the optional font file. */
 typedef uint16_t WCHAR;
 static WCHAR ff_convert(WCHAR code, unsigned direction) { (void)direction; return code < 128U ? code : 0U; }
@@ -147,6 +144,9 @@ static void ILI9806G_DispString_EN_CH(uint16_t x, uint16_t y, char *text)
 static void ui_text(uint16_t x,uint16_t y,uint8_t columns,const char *text,
                     uint16_t fg,uint16_t bg,uint8_t large)
 {
+    unsigned width = large == 2U ? 24U : large == 1U || large == 3U ? 16U : 8U;
+    unsigned height = large == 2U ? 48U : large == 1U || large == 3U ? 32U : 16U;
+    if(checking_ui_text) { assert(x + width * columns <= 800U); assert(y + height <= 480U); }
     if(x == 44U && y == 126U) snprintf(dashboard_battery_text,sizeof(dashboard_battery_text),"%.*s",columns,text);
     if(x == 280U && y == 126U) snprintf(dashboard_radio_text,sizeof(dashboard_radio_text),"%.*s",columns,text);
     if(x == 576U && y == 184U) snprintf(output_xy_text,sizeof(output_xy_text),"%.*s",columns,text);
@@ -155,7 +155,7 @@ static void ui_text(uint16_t x,uint16_t y,uint8_t columns,const char *text,
 #include "lcd_page_gui.inc"
 
 static const GuiParamRow preview_rows[6] = {
-    {"\xb9\xcc\xbc\xfe\xb0\xe6\xb1\xbe\xa3\xa8\xd6\xbb\xb6\xc1\xa3\xa9", "V1.0.0 / 2024.07.10"},
+    {"\xb9\xcc\xbc\xfe\xb0\xe6\xb1\xbe", "V1.0.0"},
     {"\xb7\xa2\xc9\xe4\xb5\xcd\xd1\xb9\xcd\xa3\xbf\xd8", "3.5 V"},
     {"\xb5\xe7\xb3\xd8\xb5\xe7\xd1\xb9\xd0\xa3\xd7\xbc", "1000"},
     {"\xce\xde\xcf\xdf\xca\xe4\xb3\xf6", "\xbf\xaa\xc6\xf4"},
@@ -709,7 +709,15 @@ static void test_clock_overlay(void)
     gui_clock_overlay();
     assert(bus_writes > 0U && memcmp(expected, panel, 800U * 32U * sizeof(panel[0])) != 0);
     for(i = 800U * 32U; i < 800U * 480U; i++) assert(panel[i] == expected[i]);
-    assert(rtc_time_reads == rtc_date_reads); /* Every time read unlocks RTC shadow registers. */
+    memcpy(expected,panel,sizeof(panel)); bus_writes=0U;
+    fake_rtc.day=22U; fake_rtc.weekday=2U; /* Correcting the date at the same second must redraw. */
+    gui_clock_overlay(); assert(bus_writes>0U && memcmp(expected,panel,sizeof(panel))!=0);
+    fake_rtc.day=21U; fake_rtc.weekday=1U;
+    memcpy(expected,panel,sizeof(panel)); bus_writes=0U; fake_rtc_valid=0U;
+    gui_clock_overlay(); assert(bus_writes>0U && memcmp(expected,panel,sizeof(panel))!=0);
+    bus_writes=0U; fake_rtc_error=1U;
+    gui_clock_overlay(); assert(bus_writes>0U);
+    fake_rtc_error=0U; fake_rtc_valid=1U;
     LCD_PageBuffer_Enable(1U);
     gui_prepare_page(); main_menu(0U);
     assert(clock_force_redraw == 1U);
@@ -749,6 +757,53 @@ static void save_preview(const char *directory, const char *name)
     assert(fclose(file) == 0);
 }
 
+static GuiCalendarState calendar_fixture(unsigned index)
+{
+    GuiCalendarState state = {0};
+    state.now=fake_rtc; state.now.second=fake_rtc_seconds;
+    state.draft=state.now; state.year=2026U; state.month=9U;
+    state.readable=state.time_valid=state.gps_available=1U;
+    state.source=RTC_TIME_MANUAL;
+    switch(index) {
+    case 1U: state.year=2024U; state.month=2U; break;
+    case 2U: state.year=2026U; state.month=3U; break; /* Six rows, starting on Sunday. */
+    case 3U: state.mode=CALENDAR_ACTIONS; state.action=CALENDAR_SET_TIME; break;
+    case 4U: state.mode=CALENDAR_ACTIONS; state.action=CALENDAR_GPS_SYNC; state.gps_available=0U; break;
+    case 5U: state.mode=CALENDAR_EDIT; state.field=0U; break;
+    case 6U: state.mode=CALENDAR_EDIT; state.field=2U; state.draft.year=2024U;
+             state.draft.month=2U; state.draft.day=29U; break;
+    case 7U: state.mode=CALENDAR_EDIT; state.field=6U; break;
+    case 8U: state.time_valid=0U; break;
+    case 9U: state.readable=state.time_valid=0U; memset(&state.now,0,sizeof(state.now)); break;
+    case 10U: state.status=CALENDAR_STATUS_WRITE_FAILED; break;
+    case 11U: state.now.minute=35U; state.status=CALENDAR_STATUS_GPS_SAVED; state.source=RTC_TIME_GPS; break;
+    }
+    return state;
+}
+
+static void test_calendar_pixels(void)
+{
+    unsigned before,after;
+    GuiCalendarState state;
+    checking_ui_text=1U; LCD_PageBuffer_Enable(1U);
+    for(after=0U;after<12U;after++) {
+        state=calendar_fixture(after);
+        gui_prepare_page(); calendar_page(&state); LCD_EndPage();
+        memcpy(expected,panel,sizeof(panel));
+        for(before=0U;before<12U;before++) {
+            state=calendar_fixture(before);
+            gui_prepare_page(); calendar_page(&state); LCD_EndPage();
+            state=calendar_fixture(after); LCD_BeginUpdate();
+            bus_writes=0U; calendar_page(&state); assert(bus_writes==0U); LCD_EndPage();
+            if(memcmp(expected,panel,sizeof(panel))!=0) fprintf(stderr,"Calendar transition %u -> %u mismatch\n",before,after);
+            assert(memcmp(expected,panel,sizeof(panel))==0);
+            bus_writes=0U; LCD_BeginUpdate(); calendar_page(&state); LCD_EndPage();
+            assert(bus_writes==0U);
+        }
+    }
+    checking_ui_text=0U;
+}
+
 #include "lcd_transaction_test.inc"
 
 int main(int argc, char **argv)
@@ -771,16 +826,25 @@ int main(int argc, char **argv)
     test_robot_marker_pixels();
     test_robot_telemetry_pixels();
     test_catalog_pixels(); test_output_pixels(); test_settings_pixels(); test_dashboard_truth(); test_clock_overlay();
+    test_calendar_pixels();
     if(argc > 1) {
         ControlLinkSnapshot snapshot = {0};
         GuiRobotTelemetry telemetry = {0};
+        GuiCalendarState calendar=calendar_fixture(0U);
         param.NRF_Mode = 1U; param.batVoltAdjust = 1000.0f;
         dashboard_snapshot.sampled = dashboard_snapshot.input_fresh = dashboard_snapshot.ack_seen = 1U;
         ADC1_Value[6] = 2385U;
         gui_prepare_page(); menu_group_page(0U); LCD_EndPage();
         save_preview(argv[1], "category-home.bmp");
-        gui_prepare_page(); main_menu(5U); LCD_EndPage();
+        gui_prepare_page(); main_menu(6U); LCD_EndPage();
         save_preview(argv[1], "function-icons.bmp");
+        gui_prepare_page(); main_menu(5U); LCD_EndPage();
+        save_preview(argv[1], "settings-menu.bmp");
+        gui_prepare_page(); calendar_page(&calendar); LCD_EndPage();
+        save_preview(argv[1], "calendar.bmp");
+        calendar=calendar_fixture(5U);
+        gui_prepare_page(); calendar_page(&calendar); LCD_EndPage();
+        save_preview(argv[1], "calendar-edit.bmp");
         ADC1_Value[0] = 2047U; ADC1_Value[1] = 3071U; ADC1_Value[2] = 4095U;
         ADC1_Value[3] = 1023U; ADC1_Value[4] = 2047U; ADC1_Value[5] = 1535U;
         gui_prepare_page(); channel_monitor_page(); LCD_EndPage();
@@ -804,7 +868,7 @@ int main(int argc, char **argv)
         gui_prepare_page(); file_browser_page("0:/", preview_files, 7U, 2U, 0U, 1U, "Select a folder to open"); LCD_EndPage();
         save_preview(argv[1], "file-browser.bmp");
     }
-    puts("LCD page tests passed: 80 page transitions, 16 output and 48 settings state transitions, bounds, marker trails, stable settings, diagnostics keys, framebuffer fallback and RGB565 clipping.");
+    puts("LCD page tests passed: 80 page transitions, 16 output, 48 settings and 144 calendar transitions, clock corrections, bounds, stable pages, diagnostics, framebuffer fallback and clipping.");
     if(preview_font_file) fclose(preview_font_file);
     return 0;
 }

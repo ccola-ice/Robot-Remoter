@@ -28,5 +28,6 @@ with tempfile.TemporaryDirectory(prefix='remoter-param-menu-') as directory:
     exe = tmp / 'param-menu-test.exe'
     subprocess.run([compiler, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
         '-I', str(tmp), '-I', str(root / '1_App'), '-I', str(root / '5_ModuleDrivers'),
+        '-I', str(root / '5_SystemDrivers'),
         str(host / 'param_menu_test.c'), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

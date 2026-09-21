@@ -22,7 +22,7 @@
 
 enum { UI_ICON_CONTROL, UI_ICON_CHANNEL, UI_ICON_SWITCH, UI_ICON_SETTINGS,
        UI_ICON_RADIO, UI_ICON_CHIP, UI_ICON_IMU, UI_ICON_GPS, UI_ICON_FOLDER,
-       UI_ICON_TOOLS, UI_ICON_MEMORY };
+       UI_ICON_TOOLS, UI_ICON_MEMORY, UI_ICON_CALENDAR };
 
 static __inline void ui_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
 {
@@ -74,8 +74,8 @@ static __inline uint8_t ui_chinese_bit(const uint8_t *bitmap, uint16_t x, uint16
     return (bitmap[y * 4U + x / 8U] & (uint8_t)(0x80U >> (x & 7U))) != 0U;
 }
 
-static void ui_chinese_glyph(uint16_t x, uint16_t y, uint16_t size,
-    uint16_t code, uint16_t fg, uint16_t bg)
+static void ui_chinese_glyph_styled(uint16_t x, uint16_t y, uint16_t size,
+    uint16_t code, uint16_t fg, uint16_t bg, uint8_t bold)
 {
     /* Four opaque rows at a time keep scratch RAM at 384 B, off the stack. */
     static uint16_t pixels[48U * 4U];
@@ -95,6 +95,9 @@ static void ui_chinese_glyph(uint16_t x, uint16_t y, uint16_t size,
                         ink |= ui_chinese_bit(bitmap,source_x + 1U,source_y);
                         ink |= ui_chinese_bit(bitmap,source_x,source_y + 1U);
                         ink |= ui_chinese_bit(bitmap,source_x + 1U,source_y + 1U);
+                    } else if(bold && size == 32U) {
+                        if(source_x != 0U) ink |= ui_chinese_bit(bitmap,source_x - 1U,source_y);
+                        if(source_y != 0U) ink |= ui_chinese_bit(bitmap,source_x,source_y - 1U);
                     }
                 } else {
                     /* An outlined crossed box is a font-independent missing glyph. */
@@ -109,12 +112,18 @@ static void ui_chinese_glyph(uint16_t x, uint16_t y, uint16_t size,
     }
 }
 
+static __inline void ui_chinese_glyph(uint16_t x, uint16_t y, uint16_t size,
+    uint16_t code, uint16_t fg, uint16_t bg)
+{
+    ui_chinese_glyph_styled(x,y,size,code,fg,bg,0U);
+}
+
 static __inline void ui_text(uint16_t x, uint16_t y, uint8_t columns,
     const char *text, uint16_t fg, uint16_t bg, uint8_t large)
 {
     char field[101];
     const uint8_t *source = (const uint8_t *)text;
-    uint16_t width = large == 2U ? 24U : large == 1U ? 16U : 8U;
+    uint16_t width = large == 2U ? 24U : (large == 1U || large == 3U) ? 16U : 8U;
     uint16_t height = width * 2U;
     uint16_t code;
     uint8_t count, i = 0U, start, has_chinese = 0U, first, second;
@@ -148,24 +157,26 @@ static __inline void ui_text(uint16_t x, uint16_t y, uint8_t columns,
         }
     }
     field[columns] = '\0';
-    LCD_SetFont(large == 2U ? &Font24x48 : large == 1U ? &Font16x32 : &Font8x16);
+    LCD_SetFont(large == 2U ? &Font24x48 : (large == 1U || large == 3U) ? &Font16x32 : &Font8x16);
     LCD_SetBackColor(bg); LCD_SetTextColor(fg);
     if(!has_chinese) {
         /* Preserve the established ASCII fast path and semantic test hook. */
-        ILI9806G_DispString_EN(x, y, field);
+        if(large == 3U) LCD_DispString_EN_Bold(x,y,field);
+        else ILI9806G_DispString_EN(x, y, field);
         return;
     }
     i = 0U;
     while(i < columns) {
         if((uint8_t)field[i] >= 0x80U) {
             code = (uint16_t)(((uint16_t)(uint8_t)field[i] << 8) | (uint8_t)field[i + 1U]);
-            ui_chinese_glyph(x + (uint16_t)i * width,y,height,code,fg,bg);
+            ui_chinese_glyph_styled(x + (uint16_t)i * width,y,height,code,fg,bg,large == 3U);
             i += 2U;
         } else {
             start = i;
             while(i < columns && (uint8_t)field[i] < 0x80U) i++;
             saved = field[i]; field[i] = '\0';
-            ILI9806G_DispString_EN(x + (uint16_t)start * width,y,&field[start]);
+            if(large == 3U) LCD_DispString_EN_Bold(x + (uint16_t)start * width,y,&field[start]);
+            else ILI9806G_DispString_EN(x + (uint16_t)start * width,y,&field[start]);
             field[i] = saved;
         }
     }
@@ -330,6 +341,11 @@ static __inline void ui_icon(uint16_t x, uint16_t y, uint16_t size,
         ILI9806G_DrawCircle(cx,y+18U*s,12U*s,0U);
         ILI9806G_DrawCircle(cx,y+18U*s,4U*s,0U);
         UI_L(14U,25U,24U,43U); UI_L(34U,25U,24U,43U); break;
+    case UI_ICON_CALENDAR:
+        UI_R(5U,10U,38U,32U); UI_L(5U,20U,43U,20U);
+        UI_L(15U,5U,15U,15U); UI_L(33U,5U,33U,15U);
+        for(i=0U;i<6U;i++) ui_fill(x+(12U+11U*(i%3U))*s,y+(25U+10U*(i/3U))*s,4U*s,4U*s,fg);
+        break;
     case UI_ICON_FOLDER:
         UI_L(4U,13U,19U,13U); UI_L(19U,13U,25U,19U); UI_L(25U,19U,43U,19U);
         UI_L(4U,13U,4U,39U); UI_L(4U,39U,43U,39U); UI_L(43U,19U,43U,39U); UI_L(4U,23U,43U,23U); break;

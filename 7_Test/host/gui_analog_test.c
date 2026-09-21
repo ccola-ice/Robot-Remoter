@@ -110,6 +110,10 @@ static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
     assert(x + strlen(text)*font_width <= LCD_X_LENGTH);
     assert(y + font_height <= LCD_Y_LENGTH);
 }
+static void LCD_DispString_EN_Bold(uint16_t x, uint16_t y, const char *text)
+{
+    ILI9806G_DispString_EN(x, y, (char *)text);
+}
 #define ui_text ui_real_text
 #include "gui_theme.h"
 #undef ui_text

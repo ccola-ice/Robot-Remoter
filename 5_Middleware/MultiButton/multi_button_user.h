@@ -9,6 +9,10 @@ extern "C" {
 
 void user_BUTTON_init(void);
 void user_BUTTON_resume(void);
+/* Cancel held navigation when a page/editor context changes. */
+void user_BUTTON_cancel_repeat(void);
+/* Check again when consuming a deferred repeat; a raw release wins immediately. */
+uint8_t user_BUTTON_repeat_held(uint8_t key);
 
 uint8_t read_button_ok_gpio(uint8_t button_id);
 uint8_t read_button_back_gpio(uint8_t button_id);

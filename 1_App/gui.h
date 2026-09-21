@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "boot_status.h"
+#include "calendar_ui.h"
 
 #define GUI_FILE_NAME_LENGTH 128U
 #define GUI_PARAM_VISIBLE_ROWS 6U
@@ -55,6 +56,7 @@ typedef struct ControlLinkSnapshot ControlLinkSnapshot;
 void gui_prepare_page(void);
 
 void gui_clock_overlay(void);
+void calendar_page(const GuiCalendarState *state);
 
 void gui_boot_begin(void);
 
