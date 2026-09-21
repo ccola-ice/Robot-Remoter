@@ -9,9 +9,9 @@
 
 typedef struct {
     uint16_t sequence;
-    int16_t x, y, heading; /* +/-1000, +/-1000, +/-1800 tenths of a degree */
-    uint16_t limit;       /* 0..1000 of the receiver's configured wheel cap */
-    uint16_t digital;     /* low six bits: DCH1..6 active-low inputs */
+    int16_t x, y, heading; /* 前两项范围为 ±1000；第三项为 ±1800，单位为 0.1 度。 */
+    uint16_t limit;       /* 相对接收端配置的轮速上限，取值 0..1000，表示千分比。 */
+    uint16_t digital;     /* 低六位对应 DCH1..6，输入为低电平有效。 */
     uint8_t armed;
 } RobotControlCommand;
 
@@ -37,7 +37,7 @@ static __inline uint16_t robot_packet_crc(const uint8_t *p, uint8_t count)
 static __inline void robot_packet_encode(uint8_t *p, const RobotControlCommand *c)
 {
     memset(p, 0, ROBOT_PACKET_SIZE);
-    /* Legacy mode and speed cap remain zero; these are not legacy commands. */
+    /* 旧协议的模式和速度上限字段保持为零；本帧不作为旧协议控制命令。 */
     p[10] = 'R'; p[11] = 'C'; p[12] = 1U;
     p[13] = c->armed ? ROBOT_FLAG_ARMED : 0U;
     robot_write16(p + 14, c->sequence);

@@ -63,8 +63,8 @@ int diag_key(void)
     uint8_t key, down;
     int event = -1;
     diag_present();
-    /* Called every 10 ms. A held key produces one event after 3 stable samples;
-     * returning the event never waits for the user to release the key. */
+    /* 每 10 ms 调用一次，按键状态连续稳定采样 3 次后产生一次按下事件；
+     * 返回事件时不等待用户松开按键。 */
     for(key = 0U; key < 4U; key++) {
         down = key_down(key);
         if(down == diag_key_levels[key]) diag_key_counts[key] = 0U;
@@ -127,9 +127,9 @@ void diag_screen(const char *title)
     memset(diag_line_cache, 0, sizeof(diag_line_cache));
     diag_transition_pending = 1U;
     LCD_SetBackColor(WHITE);
-    /* Header and content are composed together, including unused margins. */
+    /* 标题、内容和空白边缘一起合成后提交。 */
     diag_ui_fill(4U, 0U, 792U, 64U, DIAG_UI_BLUE);
-    /* Native 32-pixel glyphs match the established submenu header weight. */
+    /* 使用原生 32 像素字形，使字重与现有子菜单标题一致。 */
     diag_ui_text(20U, 4U, 32U, DIAG_UI_WHITE, DIAG_UI_BLUE, title);
 }
 
@@ -148,8 +148,8 @@ void diag_line(uint16_t y, const char *text)
         if(!diag_line_cache[index].valid) slot = index;
     }
 
-    /* Native glyphs retain their strokes. Each glyph paints its own background,
-       so only erase the old line's unused tail after drawing. */
+    /* 原生字形保留完整笔画，每个字形同时绘制自身背景，
+       因此绘制后只需清除旧行末尾不再使用的区域。 */
     while(*scan != 0U) {
         if(*scan > 0x80U && scan[1] != 0U) { width += 32U; scan += 2; }
         else { width += 16U; scan++; }
@@ -199,7 +199,7 @@ static HwResult lcd_test(void)
             for(y = 0; y < 480U; y += 40U) ILI9806G_DrawLine(0, y, 799U, y);
         }
         diag_present();
-        /* Let the operator inspect every pixel before putting the prompt on it. */
+        /* 先让操作者检查整个画面，再覆盖显示操作提示。 */
         Delay_ms(1200U);
         if(!confirm("颜色均匀、网格对齐，且无缺口或错位？")) return HW_FAIL;
     }
@@ -300,7 +300,7 @@ static HwResult battery_test(void)
         Delay_ms(10U);
     }
     for(i = 0U; i < 32U; i++) { sum += ADC1_Value[6]; Delay_ms(10U); }
-    /* R74=R77=4.7k, ADC nominal 3.3V. Include the existing user correction. */
+    /* R74=R77=4.7 kΩ，ADC 标称参考电压为 3.3 V，计算时包含用户校准系数。 */
     measured = (sum / 32U) * 6600UL / 4095UL;
     measured = measured * param.batVoltAdjust / 1000UL;
     sprintf(text, "ADC %lu mV | 万用表 %lu mV | 误差限 +/-150 mV",
@@ -382,7 +382,7 @@ static void diagnostics_menu_draw_row(const char * const *names,
     diag_ui_frame(4U, y, 792U, 40U,
                   item == selected ? DIAG_UI_BLUE : DIAG_UI_BLACK);
     sprintf(line, "%2u  %s", item + 1U, names[item]);
-    /* Keep native glyph resolution: downscaling made the strokes too thin. */
+    /* 保持字形原生分辨率，避免缩小字模导致笔画过细。 */
     diag_ui_text(28U, y + 4U, 32U, DIAG_UI_BLACK, DIAG_UI_GREY, line);
     diag_ui_text(640U, y + 4U, 32U, diagnostics_state_color(states[item]),
                  DIAG_UI_GREY,
@@ -453,7 +453,7 @@ void diagnostics_menu(void)
         "模拟量行程", "电池电压对比", "LED/蜂鸣器", "UART4 线缆回环",
         "NRF 发送+ACK（需另一台）", "NRF 接收（需另一台）",
         "MCU 内存抽检"};
-    static uint8_t states[TEST_COUNT]; /* 0=untested; else HwResult+1, this power cycle. */
+    static uint8_t states[TEST_COUNT]; /* 仅记录本次上电结果：0=未测试，其余值为 HwResult+1。 */
     uint8_t selected = 0U, first_visible = 0U;
     uint8_t old_selected, old_first_visible;
     int key;
@@ -511,7 +511,7 @@ void diagnostics_menu(void)
                 case 8: result = hardware_memory_test(); break;
                 default: break;
             }
-            /* Cancellation never hides a recorded failure from an earlier attempt. */
+            /* 取消测试不能覆盖此前已经记录的失败结果。 */
             if(result != HW_CANCELLED) states[selected] = (uint8_t)result + 1U;
             printf("[DIAG] %s: %s\r\n", names[selected], hardware_result_name(result));
             diag_screen(names[selected]);

@@ -2,8 +2,8 @@
 #define GUI_ROBOT_FILTER_H
 #include <stdint.h>
 
-/* Display filtering only. Median-of-three rejects a single ADC spike, then
- * smooth small changes while following deliberate travel within two frames. */
+/* 仅用于显示滤波。三点中值滤波抑制单次 ADC 尖峰，再平滑小幅变化；
+ * 对明显的操纵变化，在两帧内跟随。 */
 typedef struct {
     uint16_t history[3], stable;
     int32_t value_q8;

@@ -1,8 +1,8 @@
 #ifndef GUI_THEME_H
 #define GUI_THEME_H
 
-/* Small code-drawn UI primitives. Include after the LCD/font declarations.
- * No reference-project assets, heap allocation or extra framebuffer. */
+/* 使用代码绘制的轻量界面组件，在 LCD 和字体声明之后包含本文件。
+ * 不使用参考项目素材、堆内存或额外帧缓冲。 */
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,8 +30,8 @@ static __inline void ui_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uin
     ILI9806G_Fill(x, y, x + w, y + h, color);
 }
 
-/* The existing GB2312 32x32 font lives in SPI Flash. Keep the UI independent
- * of its GPIO headers; the driver owns this error latch. */
+/* 现有 GB2312 32×32 字库存放在 SPI Flash 中；界面无需包含其 GPIO 头文件。
+ * 此错误标志由 Flash 驱动维护。 */
 uint8_t FLASH_GetIoError(void);
 
 static __inline uint8_t ui_gb2312_pair(uint8_t first, uint8_t second)
@@ -39,8 +39,8 @@ static __inline uint8_t ui_gb2312_pair(uint8_t first, uint8_t second)
     return first >= 0xa1U && first <= 0xf7U && second >= 0xa1U && second <= 0xfeU;
 }
 
-/* GUI-thread-only FIFO cache: 8192 bitmap bytes plus 128 bytes of keys.
- * Failed/erased reads never become valid entries or reuse old glyph pixels. */
+/* 仅供 GUI 线程使用的 FIFO 缓存：字模占 8192 字节，字符索引占 128 字节。
+ * 读取失败或读到已擦除数据时，不建立有效缓存，也不复用旧字模像素。 */
 static const uint8_t *ui_chinese_bitmap(uint16_t code)
 {
     static uint8_t bitmaps[64][128];
@@ -61,8 +61,8 @@ static const uint8_t *ui_chinese_bitmap(uint16_t code)
         if(bitmap[i] != 0U) any_ink = 1U;
         if(bitmap[i] != 0xffU) any_clear = 1U;
     }
-    /* A1A1 is the intentional full-width space. Blank/erased other glyphs
-     * produce a visible replacement instead of silently hiding a label. */
+    /* A1A1 表示全角空格，允许空白字模；其他空白或已擦除的字模
+     * 显示可见的替代标记，避免标签无提示地消失。 */
     if(!any_clear || (!any_ink && code != 0xa1a1U)) return 0;
     codes[next] = code;
     next = (uint8_t)((next + 1U) % 64U);
@@ -77,7 +77,7 @@ static __inline uint8_t ui_chinese_bit(const uint8_t *bitmap, uint16_t x, uint16
 static void ui_chinese_glyph_styled(uint16_t x, uint16_t y, uint16_t size,
     uint16_t code, uint16_t fg, uint16_t bg, uint8_t bold)
 {
-    /* Four opaque rows at a time keep scratch RAM at 384 B, off the stack. */
+    /* 每次绘制四行不透明像素，静态工作缓冲仅占 384 字节，不占用栈。 */
     static uint16_t pixels[48U * 4U];
     const uint8_t *bitmap;
     uint16_t row, band, column, source_x, source_y, low = size / 8U;
@@ -93,7 +93,7 @@ static void ui_chinese_glyph_styled(uint16_t x, uint16_t y, uint16_t size,
                     source_x = (uint16_t)(column * 32U / size);
                     ink = ui_chinese_bit(bitmap,source_x,source_y);
                     if(size == 16U) {
-                        /* OR all 2x2 source pixels: thin strokes survive. */
+                        /* 对源字模每组 2×2 像素做或运算，保留细笔画。 */
                         ink |= ui_chinese_bit(bitmap,source_x + 1U,source_y);
                         ink |= ui_chinese_bit(bitmap,source_x,source_y + 1U);
                         ink |= ui_chinese_bit(bitmap,source_x + 1U,source_y + 1U);
@@ -102,7 +102,7 @@ static void ui_chinese_glyph_styled(uint16_t x, uint16_t y, uint16_t size,
                         if(source_y != 0U) ink |= ui_chinese_bit(bitmap,source_x,source_y - 1U);
                     }
                 } else {
-                    /* An outlined crossed box is a font-independent missing glyph. */
+                    /* 用带斜线的空心方框标记缺字，不依赖其他字模。 */
                     ink = column >= low && column <= high && band + row >= low && band + row <= high &&
                         (column == low || column == high || band + row == low || band + row == high ||
                          column == band + row);
@@ -136,8 +136,8 @@ static __inline void ui_text(uint16_t x, uint16_t y, uint8_t columns,
     if(columns > 100U) columns = 100U;
     if(!columns) return;
     memset(field, ' ', columns);
-    /* The project strings use GB2312/CP936 bytes, not UTF-8. One ASCII cell
-     * is half a Chinese glyph. Never retain half a double-byte character. */
+    /* 项目显示字符串采用 GB2312/CP936 字节编码，不使用 UTF-8。
+     * 一个 ASCII 字格为半个汉字宽；截断时始终保留完整的双字节字符。 */
     while(source && *source && i < columns) {
         first = *source;
         if(first < 0x80U) {
@@ -162,7 +162,7 @@ static __inline void ui_text(uint16_t x, uint16_t y, uint8_t columns,
     LCD_SetFont(large == 2U ? &Font24x48 : (large == 1U || large == 3U) ? &Font16x32 : &Font8x16);
     LCD_SetBackColor(bg); LCD_SetTextColor(fg);
     if(!has_chinese) {
-        /* Preserve the established ASCII fast path and semantic test hook. */
+        /* 保留原有 ASCII 快速绘制路径和语义测试入口。 */
         if(large == 3U) LCD_DispString_EN_Bold(x,y,field);
         else ILI9806G_DispString_EN(x, y, field);
         return;
@@ -194,7 +194,7 @@ static __inline void ui_round_rect(uint16_t x, uint16_t y, uint16_t w,
     if(radius > h / 2U) radius = h / 2U;
     if(!radius) { ui_fill(x,y,w,h,color); return; }
     ui_fill(x, y + radius, w, h - radius * 2U, color);
-    /* Scan lines avoid overlapping circle blits at rounded corners. */
+    /* 使用扫描线绘制圆角，避免圆形区域重复覆盖。 */
     for(row = 0U; row < radius; row++) {
         dy = (int32_t)radius - row - 1;
         inset = 0U;
@@ -223,7 +223,7 @@ static __inline uint16_t ui_round_inset(uint16_t row, uint16_t h, uint16_t radiu
     return inset;
 }
 
-/* Focus changes touch the frame only; the already composed icon/text stays. */
+/* 焦点切换时只更新边框，保留已绘制的图标和文字。 */
 static __inline void ui_round_outline(uint16_t x, uint16_t y, uint16_t w,
     uint16_t h, uint16_t radius, uint16_t thickness, uint16_t color)
 {
@@ -269,7 +269,7 @@ static __inline void ui_footer(const char *left, const char *right)
     ui_text(524U,456U,32U,right,UI_ACCENT,UI_SURFACE,0U);
 }
 
-/* Symmetric meter: only the changed span is touched during live updates. */
+/* 以中线为零点的双向条，实时更新时只绘制发生变化的区段。 */
 static __inline void ui_bipolar_bar(uint16_t x, uint16_t y, uint16_t w,
     uint16_t h, int16_t value, int16_t *previous, uint8_t first)
 {
@@ -299,7 +299,7 @@ static __inline void ui_bipolar_bar(uint16_t x, uint16_t y, uint16_t w,
     }
 }
 
-/* Original line icons use a fixed 48 px drawing cell, scaled by size / 48. */
+/* 自绘线条图标使用固定 48 像素字格，按 size / 48 比例缩放。 */
 static __inline void ui_icon(uint16_t x, uint16_t y, uint16_t size,
     uint8_t id, uint16_t fg, uint16_t bg)
 {

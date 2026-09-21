@@ -14,7 +14,7 @@ typedef struct {
     uint8_t month;
     uint8_t mode;
     uint8_t action;
-    uint8_t field; /* year, month, day, hour, minute, second, save */
+    uint8_t field; /* 年、月、日、时、分、秒、保存 */
     uint8_t status;
     uint8_t readable;
     uint8_t time_valid;
@@ -22,7 +22,7 @@ typedef struct {
     uint8_t gps_available;
 } GuiCalendarState;
 
-/* Pure draft editing: touching a field never writes the RTC. */
+/* 仅修改草稿：调整任何字段都不会写入 RTC。 */
 static __inline void calendar_edit_step(GuiCalendarState *state, int8_t direction)
 {
     RtcCalendar *date = &state->draft;

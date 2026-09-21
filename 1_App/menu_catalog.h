@@ -2,7 +2,7 @@
 #define MENU_CATALOG_H
 #include <stdint.h>
 
-/* One ordering for navigation and labels. Groups contain 3, 3 and 6 entries. */
+/* 导航和标签共用同一排列顺序，三个分类分别包含 3、3、6 个入口。 */
 #define MENU_ENTRY_LIST(X) \
     X(ROBOT_CONTROL, "\273\372\306\367\310\313\277\330\326\306", "Hold DCH1 to enable / release to stop") \
     X(MONITOR, "\315\250\265\300\274\340\312\323", "Raw inputs / calibrated values / TX frame") \

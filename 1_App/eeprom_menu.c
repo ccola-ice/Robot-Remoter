@@ -46,8 +46,8 @@ static void eeprom_draw_shell(void)
     }
     diag_ui_fill(4U, 344U, 792U, 40U, DIAG_UI_GREY);
 
-    /* The table and status panels replace the old page directly.  Erase only
-       their narrow gutters so entering EEPROM never needs a blank frame. */
+    /* 表格和状态面板直接覆盖旧页面，只清除面板之间的窄间隔，
+       使进入 EEPROM 页面时无需先显示整屏空白。 */
     diag_ui_fill(0U, 64U, 800U, 8U, DIAG_UI_WHITE);
     diag_ui_fill(0U, 72U, 4U, 408U, DIAG_UI_WHITE);
     diag_ui_fill(796U, 72U, 4U, 408U, DIAG_UI_WHITE);

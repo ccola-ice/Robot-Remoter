@@ -8,7 +8,7 @@ HwResult hardware_eeprom_write_test(void);
 HwResult hardware_sd_write_test(void);
 HwResult hardware_uart_loopback_test(void);
 HwResult hardware_radio_test(uint8_t receive);
-/* Both AT24C08 and AT24C256 are fitted: only address 0x50 is accessed. */
+/* 板上同时装有 AT24C08 和 AT24C256；这里只访问地址 0x50。 */
 #define HW_EEPROM_TEST_BYTE 0xffU
 const char *hardware_result_name(HwResult result);
 #endif

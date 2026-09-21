@@ -2,7 +2,7 @@
 #define CHANNEL_INPUT_H
 #include <stdint.h>
 
-/* Same calibrated input for the control path and its monitor. No UI filter. */
+/* 控制链路与通道监视共用同一份校准后输入，不应用界面显示滤波。 */
 static __inline int16_t channel_input_normalize(uint16_t raw, uint16_t lower,
     uint16_t middle, uint16_t upper, int32_t trim, uint8_t reverse)
 {

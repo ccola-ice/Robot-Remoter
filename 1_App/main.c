@@ -70,16 +70,16 @@ extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 
 extern volatile  param_Config param;;
 
-FATFS fs_sdcard;                   	/* SD�� FatFs������ */
-FATFS fs_flash;                    	/* SPI Flash FatFs������ */
-extern FIL fnew_sdcard;				/* �ļ����� */
-extern FRESULT res;                	/* �ļ�������� */
-extern unsigned int fnum;			/* �ļ��ɹ���д���� */
+FATFS fs_sdcard;                   	/* SD 卡 FatFs 文件系统对象 */
+FATFS fs_flash;                    	/* SPI Flash FatFs 文件系统对象 */
+extern FIL fnew_sdcard;				/* 文件对象 */
+extern FRESULT res;                	/* 文件操作结果 */
+extern unsigned int fnum;			/* 文件成功读写的字节数 */
 
-float pitch,roll,yaw; 		//dmp����ŷ����
-short aacx,aacy,aacz;		//���ٶȴ�����ԭʼ����
-short gyrox,gyroy,gyroz;	//������ԭʼ����
-short temp;					//�¶�
+float pitch,roll,yaw; 		// DMP 解算得到的欧拉角
+short aacx,aacy,aacz;		// 加速度传感器原始数据
+short gyrox,gyroy,gyroz;	// 陀螺仪原始数据
+short temp;					// 温度
 uint8_t imu_data_valid;
 static unsigned long imu_last_sample_ms;
 static uint8_t imu_dmp_ready;
@@ -92,7 +92,7 @@ static BootReport boot_report;
 static uint32_t boot_last_cycles, boot_total_ms, boot_cycle_remainder;
 static uint32_t boot_item_started_ms;
 
-/* DWT runs before the application's TIM6/GTP tick is started. */
+/* 应用的 TIM6/GTP 节拍尚未启动时，先使用 DWT 计时。 */
 static uint32_t boot_now_ms(void)
 {
     uint32_t now = DWT->CYCCNT;
@@ -160,7 +160,7 @@ static uint8_t boot_rtc_tick(void)
     uint16_t i;
     uint32_t before;
     before = RTC_GetSubSecond();
-    (void)RTC->DR; /* Unlock the shadow registers after SSR. */
+    (void)RTC->DR; /* 读取 SSR 后再读取 DR，解除影子寄存器锁定。 */
     for(i = 0U; i < 100U; i++) {
         Delay_ms(1U);
         if(RTC_GetSubSecond() != before) {
@@ -189,7 +189,7 @@ static uint8_t boot_gps_check(void)
 
 static uint8_t boot_timers_check(void)
 {
-    /* TIM4 is an external encoder counter: a stationary encoder is not a fault. */
+    /* TIM4 用于外部编码器计数，编码器静止不应判为故障。 */
     TIM_TypeDef *timers[4] = {TIM2, TIM3, TIM5, TIM6};
     uint32_t first[4];
     uint8_t seen = 0U, i;
@@ -230,8 +230,8 @@ void setup(void)
     boot_report_reset(&boot_report);
     boot_last_cycles = boot_total_ms = boot_cycle_remainder = 0UL;
 
-    /* Preserve the board's GPIO/FSMC initialization order. These configuration
-     * calls alone do not resolve any hardware check as PASS. */
+    /* 保持板上 GPIO/FSMC 的初始化顺序。仅调用这些配置函数
+     * 不能把相应硬件检查判定为通过。 */
     EXPAND_USART_Config();
     LED_GPIO_Config();
     digital_channel_init();
@@ -240,8 +240,8 @@ void setup(void)
     NRF_SPI_Init();
     SRAM_FSMC_Config();
 
-    /* The display must be configured before it can show the checklist.
-     * Sending display commands is not claimed as a visual hardware test. */
+    /* 必须先配置显示屏，才能显示检查列表。
+     * 发送显示命令本身不能证明屏幕的实际显示效果正常。 */
     ILI9806G_Init();
     ILI9806G_GramScan(LCD_SCAN_MODE);
     gui_boot_begin();
@@ -257,7 +257,7 @@ void setup(void)
 
     user_BUTTON_init();
 
-    /* Keep the memory test before f_mount and all application memory use. */
+    /* 在 f_mount 和应用使用存储器之前完成存储器测试。 */
     boot_start(BOOT_SRAM);
     ok = sram_read_write_test();
     LCD_PageBuffer_Enable(ok);
@@ -443,8 +443,8 @@ static void boot_show_result(void)
                boot_state_name(boot_report.items[item].state), boot_item_names[item],
                boot_report.items[item].detail);
 
-    /* Faults remain on screen until a new, debounced physical OK press.
-     * A held key at power-on does not dismiss the result. */
+    /* 故障结果保持显示，直到检测到一次新的、经过消抖的实体 OK 按下事件。
+     * 上电时已按住的按键不能关闭结果页。 */
     if(boot_report_outcome(&boot_report) == BOOT_FAILED ||
        boot_report_outcome(&boot_report) == BOOT_INCOMPLETE) {
         while(1) {
@@ -457,13 +457,13 @@ static void boot_show_result(void)
         }
         printf("[BOOT] Faults acknowledged; entering menu with recorded failures\r\n");
     } else {
-        /* Readability hold AFTER progress has finished, not simulated work. */
+        /* 检查进度完成后短暂停留，便于阅读；此延时不计入检查进度。 */
         Delay_ms(1200U);
     }
 }
 
-/* Atomically consume a coalescing event before doing the work. A new IRQ
- * during processing remains pending for the next loop. */
+/* 执行任务前，以原子操作取出并清除合并后的待处理事件；
+ * 处理过程中到来的新中断仍保留为待处理状态，留给下一轮循环。 */
 static uint8_t take_tick(volatile uint8_t *pending)
 {
     uint32_t mask = __get_PRIMASK();
@@ -501,7 +501,7 @@ int main(void)
         }
         menu_process();
         GTP_Service();
-        /* Drain completed GPS input promptly, independently of UI cadence. */
+        /* 及时处理已接收完整的 GPS 输入，不受 UI 刷新节奏限制。 */
         nmea_decode_test();
         if(take_tick(&finish_1hz) && imu_dmp_ready) {
             temp = MPU_Get_Temperature();

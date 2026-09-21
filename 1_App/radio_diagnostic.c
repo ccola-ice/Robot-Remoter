@@ -5,8 +5,8 @@
 #include <string.h>
 #include <stdio.h>
 
-/* Diagnostic transactions preserve CE during status reads. Legacy ReadReg lowers
- * CE and must not be used while waiting for a receive packet. All SPI waits bound. */
+/* 诊断操作读取状态时保持 CE 不变。旧版 ReadReg 会拉低 CE，
+ * 等待接收数据包时不得调用。所有 SPI 等待都必须设置超时。 */
 static uint8_t io_error;
 static uint8_t transfer(uint8_t byte)
 {
@@ -54,7 +54,7 @@ static void packet_fill(uint8_t *packet, uint8_t sequence)
 HwResult hardware_radio_test(uint8_t receive)
 {
     static const uint8_t regs[] = {CONFIG, EN_AA, EN_RXADDR, SETUP_AW, SETUP_RETR,
-        RF_CH, RF_SETUP, RX_PW_P0, 0x1cU}; /* DYNPD: fixed 32-byte diagnostic packets */
+        RF_CH, RF_SETUP, RX_PW_P0, 0x1cU}; /* DYNPD：诊断数据包固定为 32 字节。 */
     uint8_t old[sizeof(regs)], tx[5], rx[5], packet[32], received[32];
     uint8_t address[5] = {0xd7U, 0x43U, 0x44U, 0x47U, 0x31U};
     uint8_t i, count = 0U, status, fifo, old_ce, retry = 0U;
@@ -66,7 +66,7 @@ HwResult hardware_radio_test(uint8_t receive)
     NRF_CE_LOW();
     Delay_us(150U);
     status = reg_read(FIFO_STATUS);
-    /* Do not discard normal traffic to make room for the diagnostic. */
+    /* 不得丢弃正常通信数据来给诊断腾出空间。 */
     if(io_error || status == 0xffU) goto no_change;
     i = reg_read(SETUP_AW);
     if(io_error || i < 1U || i > 3U) goto no_change;
@@ -76,21 +76,21 @@ HwResult hardware_radio_test(uint8_t receive)
     transaction(TX_ADDR, tx, 5U, 0U);
     transaction(RX_ADDR_P0, rx, 5U, 0U);
     if(io_error) goto no_change;
-    reg_write(CONFIG, 0x0cU); /* Power down before reconfiguration. */
+    reg_write(CONFIG, 0x0cU); /* 重新配置前，先让无线模块进入掉电模式。 */
     reg_write(EN_AA, 1U); reg_write(EN_RXADDR, 1U); reg_write(SETUP_AW, 3U);
-    /* Four-millisecond retransmit spacing is tolerant of a busy peer UI. */
+    /* 重发间隔设为 4 毫秒，为对端处理界面任务留出时间。 */
     reg_write(SETUP_RETR, 0xffU); reg_write(RF_CH, 40U); reg_write(RF_SETUP, 0x06U);
     reg_write(RX_PW_P0, 32U); reg_write(0x1cU, 0U);
     transaction(NRF_WRITE_REG | TX_ADDR, address, 5U, 1U);
     transaction(NRF_WRITE_REG | RX_ADDR_P0, address, 5U, 1U);
-    /* Empty FIFOs were verified above, so stale IRQ flags are safe to clear. */
+    /* 前面已确认 FIFO 为空，因此可以安全清除残留的 IRQ 标志。 */
     reg_write(STATUS, 0x70U);
     transaction(FLUSH_TX, packet, 0U, 1U);
     transaction(FLUSH_RX, packet, 0U, 1U);
     packet_fill(packet, 0U);
     reg_write(CONFIG, receive ? 0x0fU : 0x0eU);
     Delay_ms(2U);
-    /* Check the settings that make an ACK meaningful; reject all-ones absent devices. */
+    /* 检查确保 ACK 有效的相关设置；寄存器全为 1 时按设备未连接处理。 */
     if(io_error || reg_read(CONFIG) != (receive ? 0x0fU : 0x0eU) ||
        reg_read(EN_AA) != 1U || reg_read(RF_CH) != 40U || reg_read(RF_SETUP) != 0x06U)
         goto cleanup;
@@ -131,7 +131,7 @@ HwResult hardware_radio_test(uint8_t receive)
     }
 cleanup:
     NRF_CE_LOW();
-    Delay_ms(2U); /* Allow the last RX auto-ACK to finish before power down. */
+    Delay_ms(2U); /* 进入掉电模式前，等待最后一次 RX 自动 ACK 发送完成。 */
     reg_write(CONFIG, 0x0cU);
     transaction(FLUSH_TX, packet, 0U, 1U);
     transaction(FLUSH_RX, packet, 0U, 1U);

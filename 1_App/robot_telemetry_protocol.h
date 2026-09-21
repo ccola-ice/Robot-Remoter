@@ -1,10 +1,10 @@
 #ifndef ROBOT_TELEMETRY_PROTOCOL_H
 #define ROBOT_TELEMETRY_PROTOCOL_H
 
-/* RT v1 codec only. Receiver publishing, NRF transport and GUI aggregation
- * are intentionally not connected. RC v1 control frames remain unchanged.
- * Wire integers are big endian; no packed structs or floating point on wire.
- * See docs/通信协议设计.md for session, freshness and validity rules. */
+/* 仅实现 RT v1 编解码，尚未接入接收端发布、NRF 传输和 GUI 数据汇总。
+ * 保持 RC v1 控制帧不变。
+ * 线上整数采用大端字节序，不直接传输紧凑结构体或浮点数。
+ * 会话、时效和有效性规则见 docs/通信协议设计.md。 */
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -68,13 +68,13 @@ typedef struct {
 
 typedef struct {
     int32_t latitude_e7, longitude_e7, altitude_mm;
-    uint8_t fix, satellites; /* fix: 0=none, 2=2D, 3=3D */
+    uint8_t fix, satellites; /* 定位类型：0=未定位，2=二维定位，3=三维定位。 */
 } RobotTelemetryGnss;
 
 typedef struct {
     uint8_t type, valid, flags;
     uint16_t sequence, accepted_control_sequence;
-    uint32_t session; /* Nonzero monotonically increasing boot epoch. */
+    uint32_t session; /* 非零、单调递增的启动纪元编号。 */
     union {
         RobotTelemetryStatus status;
         RobotTelemetryMotion motion;
@@ -123,8 +123,8 @@ static __inline uint16_t robot_telemetry_crc(const uint8_t *p, size_t length)
     return crc;
 }
 
-/* Half-range serial arithmetic: equality and the ambiguous half turn are old.
- * A session change must be accepted before resetting per-type sequence state. */
+/* 使用半范围序号运算：序号相等或相差半个计数范围时，均视为旧帧。
+ * 必须先接受会话切换，再重置各帧类型的序号状态。 */
 static __inline uint8_t robot_telemetry_sequence_newer(uint16_t next, uint16_t previous)
 {
     uint16_t delta = (uint16_t)(next - previous);
@@ -135,8 +135,8 @@ static __inline uint8_t robot_telemetry_session_newer(uint32_t next, uint32_t pr
     uint32_t delta = next - previous;
     return next != 0U && delta != 0U && delta < 0x80000000UL;
 }
-/* Caller must separately know that a sample was received. Elapsed intervals
- * must be less than one complete uint32_t clock wrap. */
+/* 调用方必须另行确认已收到过样本；计算的经过时间必须小于
+ * uint32_t 时钟完成一次回绕的时间。 */
 static __inline uint8_t robot_telemetry_is_fresh(uint32_t now, uint32_t received,
                                                uint32_t timeout_ms)
 {
@@ -208,8 +208,8 @@ static __inline uint8_t robot_telemetry_valid(const RobotTelemetryFrame *f)
     return 1U;
 }
 
-/* Both directions require exactly 32 bytes and leave the destination intact
- * on every failure, including null arguments and unsupported frame types. */
+/* 编码和解码均要求恰好 32 字节。任何失败都不修改目标缓冲区，
+ * 包括参数为空指针或帧类型不受支持的情况。 */
 static __inline uint8_t robot_telemetry_encode(uint8_t *out, size_t length,
                                              const RobotTelemetryFrame *f)
 {

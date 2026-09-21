@@ -35,7 +35,7 @@ extern short gyrox,gyroy,gyroz;		//陀螺仪原始数据
 extern short temp;					//温度
 extern uint8_t imu_data_valid;
 
-/* ARM scatter-loading symbols: their addresses are the linker-calculated sizes. */
+/* ARM 分散加载符号：符号地址表示链接器计算出的段大小。 */
 extern uint8_t Image$$ER_IROM1$$Length;
 extern uint8_t Image$$RW_IRAM1$$Length;
 extern uint8_t Image$$RW_IRAM1$$ZI$$Length;
@@ -52,13 +52,13 @@ static uint16_t boot_progress_width;
 
 void gui_prepare_page(void)
 {
-	/* Compose the full page off-screen; menu_process presents it after the clock. */
+	/* 先在离屏缓冲中合成整页，menu_process 绘完时钟后统一提交。 */
 	LCD_BeginPage(WHITE);
 	display_flag = 1;
 	clock_force_redraw = 1U;
 }
 
-/* Restore layout boundaries when page content is drawn, including home pagination. */
+/* 绘制页面内容时恢复布局边界，同时覆盖首页分页区域。 */
 static const char *gui_control_status_text(const char *status)
 {
     if(strcmp(status, "BOOT LOCK") == 0) return "\327\324\274\354\316\264\267\305\320\320";
@@ -104,7 +104,7 @@ void gui_clock_overlay(void)
         snprintf(text,sizeof(text),"TX %lu.%02luV",(unsigned long)(mv/1000UL),
             (unsigned long)((mv%1000UL)/10UL));
     } else strcpy(text,"TX --.--V");
-    /* All status fields share the original 16px baseline; the date/time is one field. */
+    /* 所有状态字段沿用 16 像素文字基线；日期和时间合并为一个字段。 */
     ui_fill(384U,0U,416U,32U,UI_INK);
     ui_text(384U,8U,10U,text,WHITE,UI_INK,0U);
     ui_text(472U,8U,8U,!param.NRF_Mode ? "RF OFF" :
@@ -124,8 +124,8 @@ static uint16_t gui_boot_color(BootState state)
     return GREY;
 }
 
-/* In-ROM 16px glyphs: not tested (U+672A U+6D4B U+8BD5).
- * Diagnostics remain readable if the external Chinese-font Flash fails. */
+/* ROM 内置 16 像素字形：未测试（U+672A U+6D4B U+8BD5）。
+ * 外置中文字库 Flash 故障时，诊断结果仍能正常显示。 */
 static void gui_boot_not_tested_label(uint16_t x, uint16_t y)
 {
     static const uint16_t glyphs[3][16] = {
@@ -177,7 +177,7 @@ void gui_boot_begin(void)
     ILI9806G_DrawRectangle(280U, 92U, 240U, 88U, 0U);
     LCD_SetTextColor(WHITE);
     ILI9806G_DispString_EN(284U, 284U, "Starting hardware checks... 0%");
-    /* Decorative intro only. The progress value stays zero until checks finish. */
+    /* 此处仅显示开场动画，尚无检查完成时进度保持为零。 */
     for(frame = 0U; frame < 12U; frame++) {
         for(dot = 0U; dot < 6U; dot++) {
             LCD_SetTextColor(dot == frame % 6U ? BLUE2 : GREY);
@@ -217,7 +217,7 @@ void gui_boot_update(const BootReport *report, uint8_t item)
     sprintf(text, "%-90.90s", report->items[item].state == BOOT_RUNNING ?
             boot_item_names[item] : report->items[item].detail);
     ILI9806G_DispString_EN(20U, 411U, text);
-    /* Hardware completion alone drives the progress bar. */
+    /* 进度条仅按实际完成的硬件检查更新。 */
 }
 
 void gui_boot_finish(const BootReport *report)
@@ -413,7 +413,7 @@ void system_basic_information(void)
     }
 }
 
-/* Read-only dashboard: RF ACK is explicitly separate from robot telemetry. */
+/* 只读状态面板：明确区分 RF 硬件回执和机器人遥测数据。 */
 static void gui_dashboard_status(uint8_t first)
 {
     static uint32_t last_ms;
@@ -799,7 +799,7 @@ static void gui_file_display_text(char *destination, uint16_t destination_size,
 		else if((first_byte >= 0xa1U) && (first_byte <= 0xf7U) &&
 				(second_byte >= 0xa1U) && (second_byte <= 0xfeU))
 		{
-			/* The external 32x32 font contains the GB2312 subset of CP936. */
+			/* 外置 32×32 字库只包含 CP936 中的 GB2312 字符子集。 */
 			destination[destination_index] = (char)first_byte;
 			destination[destination_index + 1U] = (char)second_byte;
 			source_advance = 2U;
@@ -808,7 +808,7 @@ static void gui_file_display_text(char *destination, uint16_t destination_size,
 		}
 		else
 		{
-			/* Skip a complete unsupported GBK pair and show one replacement. */
+			/* 完整跳过不支持的 GBK 双字节字符，并显示一个替代字符。 */
 			destination[destination_index] = '?';
 			if((first_byte >= 0x81U) && (first_byte <= 0xfeU) &&
 			   (second_byte >= 0x40U) && (second_byte <= 0xfeU) &&
@@ -1259,7 +1259,7 @@ void system_data_read_and_set(void)
 
 void channel_monitor_page(void)
 {
-    /* Battery and the joystick button are intentionally outside the axis table. */
+    /* 电池和摇杆按键单独显示，不放入摇杆轴值表。 */
     static const uint8_t order[8] = {0U,1U,2U,3U,4U,5U,7U,8U};
     static const char * const labels[8] = {
         "A01 \320\375\305\245", "A02 \327\363\322\241\270\313 Y", "A03 \327\363\322\241\270\313 X", "A04 \320\375\305\245",
@@ -1290,7 +1290,7 @@ void channel_monitor_page(void)
         ui_text(424U,410U,26U,"ADC \262\311\321\371 / \261\276\273\372\265\347\263\330",UI_MUTED,UI_SURFACE,0U);
         ui_footer("\311\317/\317\302 / OK \307\320\273\273\312\323\315\274", "BACK \267\265\273\330\322\243\277\330\262\313\265\245");
     }
-    /* Keep the established display-only filter and live frame cadence. */
+    /* 沿用仅作用于显示的滤波和实时画面刷新节奏。 */
     for(i = 0U; i < 7U; i++)
         values[i] = gui_analog_filter_update(&filters[i],ADC1_Value[i],first);
     for(i = 0U; i < 3U; i++)
@@ -1305,7 +1305,7 @@ void channel_monitor_page(void)
             ui_text(x + 264U,y,4U,displayBuffer,UI_ACCENT,UI_SURFACE,1U);
             previous_value[channel] = values[channel];
         }
-        /* The raw center means ADC midpoint, not a calibrated control value. */
+        /* 原始值的中心线表示 ADC 中点，不代表校准后的控制值。 */
         normalized = (int16_t)((int32_t)values[channel] * 2000L / 4095L - 1000L);
         ui_bipolar_bar(x,y + 36U,328U,8U,normalized,&previous_bar[i],first);
     }
@@ -1322,8 +1322,8 @@ void channel_monitor_page(void)
     LCD_SetFont(&Font16x32); LCD_SetBackColor(UI_BG); LCD_SetTextColor(UI_INK);
 }
 
-/* Input values come from the same sample and normalization as the control task.
- * TX fields show the last packet queued to the radio, never a GUI reconstruction. */
+/* 输入值与控制任务共用同一次采样及归一化结果。
+ * TX 字段显示最近提交给无线模块的数据包，不由 GUI 重新拼装。 */
 void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
 {
     static const char * const names[6] = {"A01", "A02 Y", "A03 X", "A04", "A05", "A06 YAW"};
@@ -1507,9 +1507,9 @@ void imu6050_information(void)
     last_valid = valid;
 }
 
-/* CHANNEL MONITOR mapping (zero-based ADC1_Value indices):
- * left X=CH03, left Y=CH02; right X=CH06, right Y=CH05.
- * Both horizontal axes require display/control direction correction. */
+/* 通道监视映射（ADC1_Value 下标从零开始）：
+ * 左摇杆 X=CH03、Y=CH02；右摇杆 X=CH06、Y=CH05。
+ * 两个横轴均需修正显示方向和控制方向。 */
 #define ROBOT_LEFT_X_ADC_INDEX  2U
 #define ROBOT_LEFT_Y_ADC_INDEX  1U
 #define ROBOT_RIGHT_X_ADC_INDEX 5U
@@ -1540,9 +1540,9 @@ static int16_t gui_robot_stick_value(uint16_t raw, uint8_t channel)
     return (int16_t)value;
 }
 
-/* Padded, single-line text never crosses its card or wraps into another row. */
-/* Commit final pixels directly: old/new overlapping marker pixels never go
- * through a blank intermediate frame. The static circle is outside this patch. */
+/* 单行文字补齐空格，限制在当前卡片内，避免换行覆盖其他行。 */
+/* 直接提交最终像素：新旧标记的重叠区域不会先被清空，
+ * 避免出现空白中间帧；静态圆环位于此次更新区域之外。 */
 static void gui_robot_dot_patch(uint16_t center_x, uint16_t center_y,
     uint16_t patch_x, uint16_t patch_y, uint16_t dot_x, uint16_t dot_y,
     uint16_t color)
@@ -1588,7 +1588,7 @@ static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
         ILI9806G_DrawLine(center_x - 56U,center_y,center_x + 56U,center_y);
         ILI9806G_DrawLine(center_x,center_y - 56U,center_x,center_y + 56U);
         ILI9806G_DrawCircle(center_x,center_y,56U,0U);
-        /* The corner ticks give both sticks the same instrument scale. */
+        /* 角部刻度使两个摇杆使用一致的仪表标尺。 */
         LCD_SetTextColor(color);
         ILI9806G_DrawLine(center_x - 62U,center_y,center_x - 57U,center_y);
         ILI9806G_DrawLine(center_x + 57U,center_y,center_x + 62U,center_y);
@@ -1648,7 +1648,7 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
         ui_round_rect(24U,360U,752U,76U,10U,UI_SURFACE);
         ui_footer("\276\315\320\367\272\363\260\264\327\241 DCH1 \312\271\304\334\324\313\266\257", "BACK \263\267\317\372\312\271\304\334\262\242\267\265\273\330");
     }
-    /* Preserve the existing wall-clock gate and display-only joystick filter. */
+    /* 保留按实际经过时间控制刷新的机制，以及仅用于显示的摇杆滤波。 */
     draw_text = first_draw || (uint32_t)(now - last_numeric_ms) >= 250U;
     if(draw_text) last_numeric_ms = now;
     telemetry_changed = !snapshot_valid || previous.link_online != telemetry->link_online ||

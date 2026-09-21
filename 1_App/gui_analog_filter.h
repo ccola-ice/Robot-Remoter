@@ -3,10 +3,10 @@
 
 #include <stdint.h>
 
-/* Display only: menu updates arrive every 20 ms. Keep fractional ADC bits
- * so the low-pass filter converges in both directions without integer bias. */
+/* 仅用于显示，菜单每 20 ms 更新一次。保留 ADC 数值的小数部分，
+ * 使低通滤波在两个变化方向上均能收敛，避免整数截断造成偏差。 */
 #define GUI_ANALOG_HYSTERESIS 8
-#define GUI_NUMERIC_REFRESH_FRAMES 10U /* Remote telemetry only, 200 ms. */
+#define GUI_NUMERIC_REFRESH_FRAMES 10U /* 仅用于远端遥测显示，周期为 200 ms。 */
 
 typedef struct
 {
@@ -27,8 +27,8 @@ static uint16_t gui_analog_filter_update(GuiAnalogFilter *filter,
         return raw;
     }
     delta = (int32_t)raw * 256L - filter->value_q8;
-    /* A deliberate movement must be visible on this frame, not settle over
-     * several frames. Keep low-pass smoothing only inside the noise band. */
+    /* 明显的操纵变化必须在当前帧显示，不等待多帧逐步收敛。
+     * 仅对噪声幅度范围内的小变化进行低通平滑。 */
     if(delta >= 8192L || delta <= -8192L)
         filter->value_q8 = (int32_t)raw * 256L;
     else

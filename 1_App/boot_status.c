@@ -47,7 +47,7 @@ uint8_t boot_report_record(BootReport *report, BootItem item,
         return 0U;
     result = &report->items[item];
     if(result->state != BOOT_PENDING && result->state != BOOT_RUNNING)
-        return 0U; /* A later stage cannot erase a recorded failure. */
+        return 0U; /* 后续阶段不得覆盖已经记录的失败结果。 */
     result->state = state;
     result->elapsed_ms = ms;
     if(detail != 0) {

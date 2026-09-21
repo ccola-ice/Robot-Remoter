@@ -3,8 +3,8 @@
 #include <stddef.h>
 #include <string.h>
 
-/* Only the value prefix is persistent. Runtime string pointers are excluded.
- * Schema 1 retains the existing STM32 little-endian, 32-bit int/float layout. */
+/* 只持久化结构体前部的参数值，不保存运行时字符串指针。
+ * 格式版本 1 保留现有 STM32 小端序及 32 位 int/float 的存储布局。 */
 #define PARAM_PAYLOAD_SIZE offsetof(param_Config, version)
 #define PARAM_FLASH_LEGACY_ADDR 0UL
 #define PARAM_FLASH_OVERLAP_ADDR (2560UL * 4096UL)
@@ -71,7 +71,7 @@ unsigned char set_default_param(void)
 	return 0;
 }
 
-/* Negated range comparisons reject NaN as well as both infinities. */
+/* 对范围比较取反，可同时拒绝 NaN、正无穷和负无穷。 */
 uint8_t param_sanitize(volatile param_Config *config)
 {
     uint8_t i, changed = 0U;
@@ -146,8 +146,8 @@ static uint8_t param_read_slot(uint32_t address, param_record *record)
     return param_sanitize(&candidate) == 0U ? 1U : 0U;
 }
 
-/* Return the newest committed slot, or 2 when neither is valid. Modular
- * comparison also handles sequence rollover after 0xffffffff. */
+/* 返回最新已提交记录所在的槽位；两个槽位均无效时返回 2。
+ * 模运算比较也能处理序号超过 0xffffffff 后的回绕。 */
 static uint8_t param_find_latest(param_record *latest)
 {
     param_record other;
@@ -172,8 +172,8 @@ static uint8_t param_read_legacy(uint32_t address, param_Config *candidate)
         candidate->NRF_Channel = 40U;
         candidate->NRF_DataRate = 2U;
     }
-    /* Legacy records have no checksum. Keep usable settings, but do not
-     * automatically transmit when any stored value needed repair. */
+    /* 旧格式记录没有校验和。保留可用设置，但只要存储值需要修复，
+     * 就不得自动开启无线发射。 */
     if(param_sanitize(candidate) != 0U) candidate->NRF_Mode = OFF;
     return 1U;
 }
@@ -192,9 +192,9 @@ unsigned char write_default_param(void)
         param.version_time = FM_TIME;
         return 0U;
     }
-    /* Read-only migration sources. Never erase the historic sector zero or
-     * overlapping FatFs sector. The first new record is written to slot B,
-     * preserving the raw slot A until a committed replacement exists. */
+    /* 迁移源只读，不得擦除旧版的 0 号扇区或与 FatFs 重叠的扇区。
+     * 第一条新格式记录写入槽位 B，直到替代记录成功提交前，
+     * 始终保留槽位 A 中的原始数据。 */
     if(param_read_legacy(SPI_FLASH_PARAM_SLOT_A_ADDR, &candidate) != 0U ||
        param_read_legacy(PARAM_FLASH_OVERLAP_ADDR, &candidate) != 0U ||
        param_read_legacy(PARAM_FLASH_LEGACY_ADDR, &candidate) != 0U) {
@@ -204,8 +204,8 @@ unsigned char write_default_param(void)
     return write_param();
 }
 
-/* Write and verify an inactive sector before programming the commit word.
- * An interrupted erase/program leaves the previous committed slot intact. */
+/* 先写入并校验非活动扇区，最后再写入提交标记。
+ * 擦除或编程中断时，上一条已提交记录所在的槽位仍保持完整。 */
 uint8_t write_param(void)
 {
     param_record record, verify;

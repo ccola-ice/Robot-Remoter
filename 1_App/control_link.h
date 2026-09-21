@@ -16,6 +16,6 @@ void control_link_init(uint8_t boot_permitted);
 void control_link_service(uint8_t control_page);
 void control_link_inhibit(void);
 const char *control_link_status(void);
-/* Main-loop observer only: never polls/consumes the radio or ADC DMA flags. */
+/* 仅供主循环读取状态，不得轮询或清除无线模块及 ADC DMA 的事件标志。 */
 void control_link_get_snapshot(ControlLinkSnapshot *snapshot);
 #endif

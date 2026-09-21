@@ -371,8 +371,8 @@ static void menu_param_adjust_window(void)
 
 static uint8_t menu_param_supported(uint8_t item)
 {
-    /* The menu contains only consumed fields. Historic/unused fields stay in
-     * the persistent structure for record compatibility, not in this catalog. */
+    /* 菜单仅列出实际使用的字段；历史字段和未使用字段继续保留在
+     * 持久化结构中以兼容已有记录，不再列入菜单。 */
     return item < PARAM_ITEM_COUNT;
 }
 
@@ -476,11 +476,11 @@ static void menu_param_adjust_float(void *packed_field, int8_t direction,
     volatile uint8_t *field_bytes = (volatile uint8_t *)packed_field;
 
     /*
-     * param_Config is the byte-packed SPI Flash image.  Its float members are
-     * not 4-byte aligned, so dereferencing a float pointer to either member
-     * makes ARMCC emit VLDR/VSTR on an unaligned address and can HardFault.
-     * Volatile byte copies keep the packed access explicitly byte-addressable
-     * while the FPU arithmetic uses an aligned local float.
+     * param_Config 按字节紧凑排列，并直接作为 SPI Flash 存储镜像。
+     * 其中 float 成员并非四字节对齐，若直接通过 float 指针访问，
+     * ARMCC 可能在未对齐地址上生成 VLDR/VSTR，进而触发 HardFault。
+     * 使用 volatile 字节拷贝，确保对紧凑结构的访问始终以字节进行，
+     * 再通过已对齐的局部 float 变量执行 FPU 运算。
      */
     for(byte_index = 0U; byte_index < sizeof(value); byte_index++)
     {
@@ -545,8 +545,8 @@ static void menu_param_adjust(int8_t direction)
             field = (uint8_t)((param_selected_item - PARAM_CHANNEL_START) % PARAM_CHANNEL_FIELDS);
             if(field < 3U)
             {
-                /* Preserve the same strict ordering required by param_sanitize.
-                 * Reaching an endpoint must not reset a calibration on Save. */
+                /* 保持 param_sanitize 要求的严格大小关系。
+                 * 编辑到端点时，也不能导致保存时将校准值重置。 */
                 if(param_edit.chLower[channel] >= param_edit.chMiddle[channel] ||
                    param_edit.chMiddle[channel] >= param_edit.chUpper[channel] ||
                    param_edit.chUpper[channel] > 4095U) {
@@ -745,7 +745,7 @@ static uint8_t menu_browser_load_directory(void)
     FATFS *volume_fs = NULL;
     DWORD free_clusters = 0UL;
     DWORD free_kb = 0UL;
-    /* CP936 may need two bytes for each FatFs LFN character. */
+    /* 采用 CP936 时，每个 FatFs 长文件名字符可能需要两个字节。 */
     static char long_name[_MAX_LFN * 2U + 1U];
     const char *source_name;
     uint8_t long_name_renderable;
@@ -1110,7 +1110,7 @@ static void menu_handle_category_key(MenuKey key)
                 user_BUTTON_resume();
                 LCD_SetBackColor(WHITE);
                 LCD_SetTextColor(BLACK);
-                /* Service screens consume raw keys; discard any pre-entry queued events. */
+                /* 服务页面直接读取按键，返回时丢弃进入页面前排队的旧事件。 */
                 event_read_index = event_write_index;
                 current_page = MENU_PAGE_CATEGORY;
                 page_dirty = 1U;
@@ -1381,7 +1381,7 @@ void menu_tick_10ms(void)
     }
 }
 
-/* A repeat never queues behind a real press and expires when its key is released. */
+/* 长按连发不排在实体按下事件之后；松开对应按键后立即失效。 */
 void menu_post_repeat(MenuKey key)
 {
     if(key != MENU_KEY_LEFT && key != MENU_KEY_RIGHT) return;

@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Every entry is resolved once. NOT_TESTED is completion, never a pass. */
+/* 每个项目只记录一次最终结果。NOT_TESTED 表示流程结束，不代表测试通过。 */
 typedef enum {
     BOOT_CLOCK, BOOT_LCD, BOOT_SRAM, BOOT_FLASH, BOOT_EEPROM,
     BOOT_RTC, BOOT_ADC1, BOOT_ADC3, BOOT_MPU, BOOT_MPU_SAMPLE,
@@ -45,7 +45,7 @@ uint8_t boot_report_record(BootReport *report, BootItem item,
                            BootState state, const char *detail, uint32_t ms);
 uint8_t boot_report_percent(const BootReport *report);
 BootOutcome boot_report_outcome(const BootReport *report);
-/* A checksum-valid complete NMEA sentence proves reception, not a GPS fix. */
+/* 收到校验正确的完整 NMEA 语句只能证明接收正常，不能证明 GPS 已定位。 */
 uint8_t boot_nmea_valid(const uint8_t *data, uint16_t size);
 
 #endif

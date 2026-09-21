@@ -75,8 +75,8 @@ void control_link_service(uint8_t control_page)
     uint8_t packet[ROBOT_PACKET_SIZE];
     RobotControlCommand command;
     get_tick_count(&tick); now = (uint32_t)tick;
-    /* Record loss BEFORE polling a newly recovered ACK. A late success may
-     * restore the link but must not preserve the previous armed session. */
+    /* 必须先记录链路失效，再轮询新恢复的 ACK。延迟到达的成功结果可以
+     * 恢复链路，但不得保留上一次的运动使能状态。 */
     if(ack_seen && (uint32_t)(now - last_ack) >= 150U)
         control_link_inhibit();
     if(radio_generation != NRF_GetConfigGeneration()) {
@@ -120,7 +120,7 @@ void control_link_service(uint8_t control_page)
     for(channel = 0U; channel < DIGITAL_CHANNEL_COUNT; channel++)
         if(digital_channel_get_stable(channel) == 0U)
             command.digital |= (uint16_t)(1U << channel);
-    /* Release acts on the physical input immediately; pressing is debounced. */
+    /* 松开按键时立即按物理输入撤销使能；按下按键时仍需消抖确认。 */
     pressed = ((command.digital & 1U) != 0U &&
                GPIO_ReadInputDataBit(DCH1_GPIO_PORT, DCH1_GPIO_PIN) == Bit_RESET);
     if(!pressed) command.digital &= (uint16_t)~1U;
@@ -145,7 +145,7 @@ void control_link_service(uint8_t control_page)
         robot_packet_encode(packet, &command);
         busy = NRF_TxStart(packet);
         if(busy) {
-            /* Decode the encoded packet: disarmed wire values are all zero. */
+            /* 解码已经编码的数据包：未使能时，线上传输的控制值全部为零。 */
             (void)robot_packet_decode(packet, &monitor.transmitted);
             monitor.sent = 1U;
             monitor_tx_ms = now;

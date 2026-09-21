@@ -7,8 +7,8 @@ typedef struct {
     uint8_t neutral_tracking, ready, armed;
 } ControlSafety;
 
-/* Faults, leaving the control page and missing ACKs all require re-arming.
- * Holding the enable button across boot/reconnect never arms the vehicle. */
+/* 发生故障、离开控制页面或缺少 ACK 后，都必须重新执行使能流程。
+ * 上电或重新连接期间一直按住使能键，不会使车辆进入运动使能状态。 */
 static __inline uint8_t control_safety_step(ControlSafety *s, uint32_t now,
                                           uint8_t healthy, uint8_t pressed,
                                           uint8_t neutral)

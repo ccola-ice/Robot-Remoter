@@ -13,22 +13,22 @@ typedef enum
 
 typedef struct GuiRobotTelemetry GuiRobotTelemetry;
 
-/* Initialize the menu after the LCD is ready. */
+/* LCD 就绪后初始化菜单。 */
 void menu_init(void);
 uint8_t menu_control_active(void);
 
-/* Called by the button callbacks. The event is queued and handled later. */
+/* 由按键回调调用，仅将事件入队，稍后统一处理。 */
 void menu_post_key(MenuKey key);
-/* Direction-only hold event; dropped instead of queued when input is busy. */
+/* 仅用于方向键长按；输入繁忙时丢弃连发事件，避免排队积压。 */
 void menu_post_repeat(MenuKey key);
 
-/* Called every 10 ms together with button_ticks(). */
+/* 与 button_ticks() 一起每 10 ms 调用一次。 */
 void menu_tick_10ms(void);
 
-/* Non-blocking menu state machine. Call it repeatedly from the main loop. */
+/* 非阻塞菜单状态机，由主循环持续调用。 */
 void menu_process(void);
 
-/* Future NRF packet decoding can publish one complete robot telemetry frame here. */
+/* 后续 NRF 数据包解码可通过此接口发布一帧完整的机器人遥测数据。 */
 void menu_robot_telemetry_update(const GuiRobotTelemetry *telemetry);
 
 #endif
