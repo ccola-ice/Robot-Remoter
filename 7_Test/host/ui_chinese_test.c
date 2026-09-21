@@ -85,6 +85,10 @@ static int test_get_glyph(uint8_t *bitmap,uint16_t code)
     return 0;
 }
 #define GetGBKCode(buffer,code) test_get_glyph(buffer,code)
+static uint8_t LCD_DrawFontGlyph(uint16_t x,uint16_t y,uint16_t code,uint16_t size,
+    uint8_t bold,uint16_t fg,uint16_t bg)
+{ (void)x; (void)y; (void)code; (void)size; (void)bold; (void)fg; (void)bg; return 0U; }
+
 #include "gui_theme.h"
 
 static void reset_drawing(void)

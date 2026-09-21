@@ -100,12 +100,15 @@ static void ILI9806G_Write_Data(uint16_t data)
     }
 }
 static uint16_t ILI9806G_Read_PixelData(void) { return 0U; }
+#define ZOOMMAXBUFF 16384U
+static uint8_t zoomBuff[ZOOMMAXBUFF],zoomTempBuff[1024],ucBuffer[128];
 
 #include "lcd_page_driver.inc"
 
 static uint8_t checking_ui_text;
 static char dashboard_battery_text[32], dashboard_radio_text[32];
 static char output_xy_text[32];
+static char clock_line_text[64];
 static void ILI9806G_DispString_EN(uint16_t x, uint16_t y, char *text)
 {
     if(checking_ui_text) {
@@ -132,11 +135,9 @@ static RtcCalendar fake_rtc = {2026U,9U,21U,1U,12U,34U,56U};
 static uint8_t RTC_ReadCalendar(RtcCalendar *time)
 { *time = fake_rtc; time->second = fake_rtc_seconds; return fake_rtc_error; }
 static uint8_t RTC_TimeIsValid(void) { return fake_rtc_valid; }
-/* Filename conversion stays ASCII in this fixture; menu Chinese uses the optional font file. */
+/* Production CP936 conversion and production mixed-text rendering. */
 typedef uint16_t WCHAR;
-static WCHAR ff_convert(WCHAR code, unsigned direction) { (void)direction; return code < 128U ? code : 0U; }
-static void ILI9806G_DispString_EN_CH(uint16_t x, uint16_t y, char *text)
-{ ILI9806G_DispString_EN(x, y, text); }
+WCHAR ff_convert(WCHAR code, unsigned direction);
 
 #define ui_text ui_render_text
 #include "gui_theme.h"
@@ -147,6 +148,10 @@ static void ui_text(uint16_t x,uint16_t y,uint8_t columns,const char *text,
     unsigned width = large == 2U ? 24U : large == 1U || large == 3U ? 16U : 8U;
     unsigned height = large == 2U ? 48U : large == 1U || large == 3U ? 32U : 16U;
     if(checking_ui_text) { assert(x + width * columns <= 800U); assert(y + height <= 480U); }
+    if(x == 536U && y == 8U) {
+        assert(large == 0U && columns == 31U && strlen(text) <= columns);
+        strcpy(clock_line_text,text);
+    }
     if(x == 44U && y == 126U) snprintf(dashboard_battery_text,sizeof(dashboard_battery_text),"%.*s",columns,text);
     if(x == 280U && y == 126U) snprintf(dashboard_radio_text,sizeof(dashboard_radio_text),"%.*s",columns,text);
     if(x == 576U && y == 184U) snprintf(output_xy_text,sizeof(output_xy_text),"%.*s",columns,text);
@@ -187,19 +192,6 @@ static void Delay_ms(unsigned ms)
         assert(memcmp(panel, expected, sizeof(panel)) == 0);
         if(delay_calls == 4U) key_levels[MENU_KEY_OK] = 0U;
         if(delay_calls == 10U) key_levels[MENU_KEY_BACK] = 1U;
-    }
-}
-/* Glyph shapes are mocked here; production layout/fills and LCD bus are real. */
-static void ILI9806G_DisplayStringEx(uint16_t x, uint16_t y, uint16_t w,
-                                    uint16_t h, uint8_t *text, uint16_t mode)
-{
-    (void)mode;
-    while(*text) {
-        uint16_t width = *text > 0x80U && text[1] ? w : w / 2U;
-        ILI9806G_Fill(x, y, x + width - 1U, y + h - 1U, CurrentBackColor);
-        ILI9806G_Fill(x + 1U, y + 1U, x + width - 2U, y + h - 2U, CurrentTextColor);
-        text += width == w ? 2U : 1U;
-        x += width;
     }
 }
 static uint8_t confirm(const char *text) { (void)text; assert(0); return 0U; }
@@ -701,6 +693,8 @@ static void test_clock_overlay(void)
     fake_rtc_seconds = 56U;
     gui_prepare_page(); menu_group_page(0U); gui_clock_overlay(); LCD_EndPage();
     assert(clock_force_redraw == 0U);
+    assert(strstr(clock_line_text,"2026-09-21 12:34:56") == clock_line_text);
+    assert(strstr(clock_line_text,"\326\334\322\273"));
     memcpy(expected, panel, sizeof(panel));
     bus_writes = 0U;
     gui_clock_overlay();
@@ -715,6 +709,7 @@ static void test_clock_overlay(void)
     fake_rtc.day=21U; fake_rtc.weekday=1U;
     memcpy(expected,panel,sizeof(panel)); bus_writes=0U; fake_rtc_valid=0U;
     gui_clock_overlay(); assert(bus_writes>0U && memcmp(expected,panel,sizeof(panel))!=0);
+    assert(strstr(clock_line_text,"\316\264\320\243\312\261"));
     bus_writes=0U; fake_rtc_error=1U;
     gui_clock_overlay(); assert(bus_writes>0U);
     fake_rtc_error=0U; fake_rtc_valid=1U;
@@ -733,13 +728,11 @@ static void bmp_u16(FILE *file, unsigned value)
 { fputc(value & 255U, file); fputc((value >> 8) & 255U, file); }
 static void bmp_u32(FILE *file, uint32_t value)
 { bmp_u16(file, value); bmp_u16(file, value >> 16); }
-static void save_preview(const char *directory, const char *name)
+static void save_preview_image(const char *directory, const char *name)
 {
     char path[1024];
     FILE *file;
     unsigned x, y;
-    clock_force_redraw = 1U;
-    gui_clock_overlay();
     snprintf(path, sizeof(path), "%s/%s", directory, name);
     file = fopen(path, "wb"); assert(file);
     fputs("BM", file); bmp_u32(file, 54U + 800U * 480U * 3U);
@@ -755,6 +748,12 @@ static void save_preview(const char *directory, const char *name)
             fputc(((pixel >> 11) & 31U) * 255U / 31U, file);
         }
     assert(fclose(file) == 0);
+}
+
+static void save_preview(const char *directory,const char *name)
+{
+    clock_force_redraw=1U; gui_clock_overlay();
+    save_preview_image(directory,name);
 }
 
 static GuiCalendarState calendar_fixture(unsigned index)
@@ -804,6 +803,23 @@ static void test_calendar_pixels(void)
     checking_ui_text=0U;
 }
 
+static void test_chinese_file_rendering(void)
+{
+    GuiFileEntry entry={"\262\342\312\324.txt",128U,0U,0U,0U};
+    char converted[64];
+    /* UTF-8 file names and CP936 names must produce identical Chinese pixels. */
+    gui_file_display_text(converted,sizeof(converted),"\xe6\xb5\x8b\xe8\xaf\x95.txt",512U);
+    assert(strcmp(converted,entry.name)==0);
+    LCD_PageBuffer_Enable(1U);
+    gui_prepare_page();
+    file_browser_page("0:/",&entry,1U,0U,0U,70U,"");
+    LCD_EndPage(); memcpy(expected,panel,sizeof(panel));
+    strcpy(entry.name,"\xe6\xb5\x8b\xe8\xaf\x95.txt");
+    gui_prepare_page();
+    file_browser_page("0:/",&entry,1U,0U,0U,71U,"");
+    LCD_EndPage(); assert(memcmp(expected,panel,sizeof(panel))==0);
+}
+
 #include "lcd_transaction_test.inc"
 
 int main(int argc, char **argv)
@@ -827,6 +843,7 @@ int main(int argc, char **argv)
     test_robot_telemetry_pixels();
     test_catalog_pixels(); test_output_pixels(); test_settings_pixels(); test_dashboard_truth(); test_clock_overlay();
     test_calendar_pixels();
+    test_chinese_file_rendering();
     if(argc > 1) {
         ControlLinkSnapshot snapshot = {0};
         GuiRobotTelemetry telemetry = {0};
@@ -867,6 +884,13 @@ int main(int argc, char **argv)
         save_preview(argv[1], "wireless-settings.bmp");
         gui_prepare_page(); file_browser_page("0:/", preview_files, 7U, 2U, 0U, 1U, "Select a folder to open"); LCD_EndPage();
         save_preview(argv[1], "file-browser.bmp");
+        {
+#include "lcd_diag_names.inc"
+            uint8_t states[TEST_COUNT]={0};
+            diagnostics_menu_draw(names,states,0U,0U); diag_present();
+            /* Service screens have their own header and don't use the live status strip. */
+            save_preview_image(argv[1],"hardware-tests.bmp");
+        }
     }
     puts("LCD page tests passed: 80 page transitions, 16 output, 48 settings and 144 calendar transitions, clock corrections, bounds, stable pages, diagnostics, framebuffer fallback and clipping.");
     if(preview_font_file) fclose(preview_font_file);

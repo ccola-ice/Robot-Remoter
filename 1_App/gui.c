@@ -76,29 +76,27 @@ static const char *gui_control_status_text(const char *status)
 
 void gui_clock_overlay(void)
 {
-    static char last_date[32], last_time[32];
+    static char last_clock[64];
     static const char *weekdays[7] = {"\322\273","\266\376","\310\375","\313\304","\316\345","\301\371","\310\325"};
     RtcCalendar now;
     ControlLinkSnapshot link;
     uint32_t mv;
-    uint8_t readable;
-    char text[24], date_text[32], time_text[32];
+    uint8_t readable, valid;
+    char text[24], clock_text[64];
     memset(&now,0,sizeof(now));
     readable = RTC_ReadCalendar(&now) == 0U;
+    valid = readable && RTC_TimeIsValid();
     if(readable) {
-        snprintf(date_text,sizeof(date_text),"%04u-%02u-%02u \326\334%s",now.year,now.month,now.day,
-            now.weekday >= 1U && now.weekday <= 7U ? weekdays[now.weekday-1U] : "?");
-        snprintf(time_text,sizeof(time_text),"%02u:%02u:%02u%s",now.hour,now.minute,now.second,
-            RTC_TimeIsValid() ? "" : " \316\264\320\243\312\261");
-    } else {
-        strcpy(date_text,"\310\325\306\332\266\301\310\241\312\247\260\334");
-        strcpy(time_text,"--:--:--");
-    }
+        snprintf(clock_text,sizeof(clock_text),"%04u-%02u-%02u %02u:%02u:%02u \326\334%s%s",
+            now.year,now.month,now.day,now.hour,now.minute,now.second,
+            now.weekday >= 1U && now.weekday <= 7U ? weekdays[now.weekday-1U] : "?",
+            valid ? "" : " \316\264\320\243\312\261");
+    } else strcpy(clock_text,"\310\325\306\332\266\301\310\241\312\247\260\334 --:--:--");
     if(!clock_force_redraw && clock_last_seconds == now.second &&
-       strcmp(last_date,date_text) == 0 && strcmp(last_time,time_text) == 0) return;
+       strcmp(last_clock,clock_text) == 0) return;
     clock_force_redraw = 0U;
     clock_last_seconds = now.second;
-    strcpy(last_date,date_text); strcpy(last_time,time_text);
+    strcpy(last_clock,clock_text);
     memset(&link,0,sizeof(link));
     control_link_get_snapshot(&link);
     if(link.sampled && link.input_fresh && link.sample_age_ms <= 100UL && ADC1_Value[6] <= 4095U) {
@@ -106,12 +104,12 @@ void gui_clock_overlay(void)
         snprintf(text,sizeof(text),"TX %lu.%02luV",(unsigned long)(mv/1000UL),
             (unsigned long)((mv%1000UL)/10UL));
     } else strcpy(text,"TX --.--V");
-    ui_fill(480U,0U,320U,32U,UI_INK);
-    ui_text(480U,8U,10U,text,WHITE,UI_INK,0U);
-    ui_text(568U,8U,8U,!param.NRF_Mode ? "RF OFF" :
+    /* All status fields share the original 16px baseline; the date/time is one field. */
+    ui_fill(384U,0U,416U,32U,UI_INK);
+    ui_text(384U,8U,10U,text,WHITE,UI_INK,0U);
+    ui_text(472U,8U,8U,!param.NRF_Mode ? "RF OFF" :
         link.ack_seen && link.ack_age_ms < 150UL ? "RF ACK" : "RF WAIT",WHITE,UI_INK,0U);
-    ui_text(640U,0U,17U,date_text,WHITE,UI_INK,0U);
-    ui_text(640U,16U,17U,time_text,readable && RTC_TimeIsValid() ? WHITE : UI_AMBER,UI_INK,0U);
+    ui_text(536U,8U,31U,clock_text,valid ? WHITE : UI_RGB(255U,200U,100U),UI_INK,0U);
     LCD_SetFont(&Font16x32); LCD_SetBackColor(WHITE); LCD_SetTextColor(BLACK);
 }
 
@@ -135,13 +133,16 @@ static void gui_boot_not_tested_label(uint16_t x, uint16_t y)
     {0x0004U, 0x27c4U, 0x1444U, 0x1454U, 0x8554U, 0x4554U, 0x4554U, 0x1554U, 0x1554U, 0x2554U, 0xe554U, 0x2104U, 0x2284U, 0x2244U, 0x2414U, 0x0808U},
     {0x0028U, 0x2024U, 0x1024U, 0x1020U, 0x07feU, 0x0020U, 0xf020U, 0x17e0U, 0x1120U, 0x1110U, 0x1110U, 0x1510U, 0x19caU, 0x170aU, 0x0206U, 0x0002U}
     };
+    static const uint16_t codes[3] = {0xceb4U,0xb2e2U,0xcad4U};
     uint8_t glyph, row, column;
     LCD_SetTextColor(YELLOW);
-    for(glyph = 0U; glyph < 3U; glyph++)
+    for(glyph = 0U; glyph < 3U; glyph++) {
+        if(LCD_DrawFontGlyph(x + glyph * 16U,y,codes[glyph],16U,0U,YELLOW,BLACK)) continue;
         for(row = 0U; row < 16U; row++)
             for(column = 0U; column < 16U; column++)
                 if(glyphs[glyph][row] & (0x8000U >> column))
                     ILI9806G_SetPointPixel(x + glyph * 16U + column, y + row);
+    }
 }
 
 static void gui_boot_row(const BootReport *report, uint8_t item)

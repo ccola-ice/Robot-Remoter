@@ -1416,3 +1416,6 @@ int GetGBKCode_from_EXFlash( uint8_t * pBuffer, uint16_t c)
 
 
 
+
+/* Native-size Remoter UI font data and lookup; generated under bundled font licenses. */
+#include "ui_font_data.inc"

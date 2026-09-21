@@ -11,13 +11,13 @@
 #define UI_BG      UI_RGB(240U,244U,248U)
 #define UI_SURFACE UI_RGB(255U,255U,255U)
 #define UI_INK     UI_RGB(28U,44U,64U)
-#define UI_MUTED   UI_RGB(100U,117U,137U)
+#define UI_MUTED   UI_RGB(80U,97U,119U)
 #define UI_LINE    UI_RGB(215U,225U,234U)
-#define UI_ACCENT  UI_RGB(34U,132U,230U)
+#define UI_ACCENT  UI_RGB(24U,111U,200U)
 #define UI_TINT    UI_RGB(226U,240U,254U)
-#define UI_GREEN   UI_RGB(19U,150U,116U)
+#define UI_GREEN   UI_RGB(13U,126U,98U)
 #define UI_RED     UI_RGB(205U,61U,78U)
-#define UI_AMBER   UI_RGB(188U,118U,18U)
+#define UI_AMBER   UI_RGB(158U,95U,12U)
 #define UI_TRACK   UI_RGB(224U,232U,240U)
 
 enum { UI_ICON_CONTROL, UI_ICON_CHANNEL, UI_ICON_SWITCH, UI_ICON_SETTINGS,
@@ -79,10 +79,12 @@ static void ui_chinese_glyph_styled(uint16_t x, uint16_t y, uint16_t size,
 {
     /* Four opaque rows at a time keep scratch RAM at 384 B, off the stack. */
     static uint16_t pixels[48U * 4U];
-    const uint8_t *bitmap = ui_chinese_bitmap(code);
+    const uint8_t *bitmap;
     uint16_t row, band, column, source_x, source_y, low = size / 8U;
     uint16_t high = size - low - 1U;
     uint8_t ink;
+    if(LCD_DrawFontGlyph(x,y,code,size,bold,fg,bg)) return;
+    bitmap = ui_chinese_bitmap(code);
     for(band = 0U; band < size; band += 4U) {
         for(row = 0U; row < 4U; row++) {
             source_y = (uint16_t)((band + row) * 32U / size);
@@ -254,7 +256,7 @@ static __inline void ui_shell(const char *title, const char *subtitle, const cha
     ui_fill(0U,0U,800U,480U,UI_BG);
     ui_fill(0U,0U,800U,32U,UI_INK);
     ui_text(20U,8U,20U,"\xBB\xFA\xC6\xF7\xC8\xCB\xD2\xA3\xBF\xD8\xC6\xF7",UI_SURFACE,UI_INK,0U);
-    ui_text(208U,8U,32U,section,UI_SURFACE,UI_INK,0U);
+    ui_text(208U,8U,20U,section,UI_SURFACE,UI_INK,0U);
     ui_text(24U,48U,27U,title,UI_INK,UI_BG,1U);
     ui_text(464U,60U,39U,subtitle,UI_MUTED,UI_BG,0U);
 }

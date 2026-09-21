@@ -211,6 +211,9 @@ void                     	ILI9806G_DrawRectangle           ( uint16_t usX_Start,
 void                     	ILI9806G_DrawCircle              ( uint16_t usX_Center, uint16_t usY_Center, uint16_t usRadius, uint8_t ucFilled );
 void                     	ILI9806G_DispChar_EN             ( uint16_t usX, uint16_t usY, const char cChar );
 void                     	ILI9806G_DispStringLine_EN      ( uint16_t line, char * pStr );
+/* Returns 1 for a built-in glyph (also when clipped), 0 for legacy fallback. */
+uint8_t LCD_DrawFontGlyph(uint16_t x, uint16_t y, uint16_t code, uint16_t size,
+                         uint8_t bold, uint16_t foreground, uint16_t background);
 void LCD_DispString_EN_Bold(uint16_t x, uint16_t y, const char *text);
 void                     	ILI9806G_DispString_EN      			( uint16_t usX, uint16_t usY, char * pStr );
 void						ILI9806G_DispString_EN_YDir 		(   uint16_t usX,uint16_t usY ,  char * pStr );

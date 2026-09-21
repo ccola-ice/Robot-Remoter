@@ -2,6 +2,7 @@
 #include "bsp_fsmc_sram.h"
 #include "bsp_SysTick.h"
 #include "fonts.h"
+#include "ui_font_data.h"
 
 //根据液晶扫描方向而变化的XY像素宽度
 //调用ILI9806G_GramScan函数设置方向时会自动更改
@@ -1539,14 +1540,58 @@ void ILI9806G_DrawCircle ( uint16_t usX_Center, uint16_t usY_Center, uint16_t us
  * @note 可使用LCD_SetBackColor、LCD_SetTextColor、LCD_SetColors函数设置颜色
  * @retval 无
  */
+/* Native antialiased glyphs retain the existing fixed cell dimensions.
+ * One four-row opaque band uses 384 bytes of static scratch, shared by sizes. */
+uint8_t LCD_DrawFontGlyph(uint16_t x, uint16_t y, uint16_t code, uint16_t size,
+                         uint8_t bold, uint16_t foreground, uint16_t background)
+{
+    static uint16_t pixels[48U * 4U];
+    const uint8_t *bitmap;
+    uint16_t palette[4], width, stride, band, row, column, level;
+    uint16_t red, green, blue;
+    if(size != 16U && size != 20U && size != 32U && size != 48U) return 0U;
+    bitmap = UI_FontBitmap(code,size,bold);
+    if(!bitmap) return 0U;
+    width = code < 128U ? size / 2U : size;
+    /* A supported clipped glyph is consumed, so a legacy caller never redraws it. */
+    if((uint32_t)x + width > LCD_X_LENGTH || (uint32_t)y + size > LCD_Y_LENGTH)
+        return 1U;
+    stride = (width + 3U) / 4U;
+    for(level = 0U; level < 4U; level++) {
+        red = (uint16_t)((((foreground >> 11) & 31U) * level +
+                         ((background >> 11) & 31U) * (3U - level) + 1U) / 3U);
+        green = (uint16_t)((((foreground >> 5) & 63U) * level +
+                           ((background >> 5) & 63U) * (3U - level) + 1U) / 3U);
+        blue = (uint16_t)(((foreground & 31U) * level +
+                          (background & 31U) * (3U - level) + 1U) / 3U);
+        palette[level] = (uint16_t)((red << 11) | (green << 5) | blue);
+    }
+    for(band = 0U; band < size; band += 4U) {
+        for(row = 0U; row < 4U; row++) {
+            for(column = 0U; column < width; column++) {
+                level = (bitmap[(band + row) * stride + column / 4U] >>
+                         (6U - (column & 3U) * 2U)) & 3U;
+                pixels[row * width + column] = palette[level];
+            }
+        }
+        LCD_BlitRGB565(x,y + band,width,4U,pixels);
+    }
+    return 1U;
+}
+
 void ILI9806G_DispChar_EN ( uint16_t usX, uint16_t usY, const char cChar )
 {
 	uint8_t  byteCount, bitCount,fontLength;	
 	uint16_t ucRelativePositon;
 	uint8_t *Pfont;
+    uint8_t character = (uint8_t)cChar;
+    if(character < 32U || character > 126U) character = '?';
+    if(LCD_Currentfonts->Width * 2U == LCD_Currentfonts->Height &&
+       LCD_DrawFontGlyph(usX,usY,character,LCD_Currentfonts->Height,0U,
+                         CurrentTextColor,CurrentBackColor)) return;
 	
 	//对ascii码表偏移（字模表不包含ASCII表的前32个非图形符号）
-	ucRelativePositon = cChar - ' ';
+	ucRelativePositon = character - ' ';
 	
 	//每个字模的字节数
 	fontLength = (LCD_Currentfonts->Width*LCD_Currentfonts->Height)/8;
@@ -1640,6 +1685,10 @@ void LCD_DispString_EN_Bold(uint16_t x, uint16_t y, const char *text)
     while(*text && (uint32_t)x + 16U <= LCD_X_LENGTH) {
         character = (uint8_t)*text++;
         if(character < 32U || character > 126U) character = '?';
+        if(LCD_DrawFontGlyph(x,y,character,32U,1U,foreground,background)) {
+            x += 16U;
+            continue;
+        }
         bitmap = &Font16x32.table[(uint16_t)(character - 32U) * 64U];
         for(band = 0U; band < 32U; band += 4U) {
             for(row = 0U; row < 4U; row++) {
@@ -1727,6 +1776,9 @@ void ILI9806G_DispChar_CH ( uint16_t usX, uint16_t usY, uint16_t usChar )
 {
 	uint8_t rowCount, bitCount;
 	uint32_t usTemp; 
+    if(WIDTH_CH_CHAR == HEIGHT_CH_CHAR &&
+       LCD_DrawFontGlyph(usX,usY,usChar,HEIGHT_CH_CHAR,0U,
+                         CurrentTextColor,CurrentBackColor)) return;
 	
 	//	占用空间太大，改成全局变量 
 	//	uint8_t ucBuffer [ WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8 ];	
@@ -1822,7 +1874,7 @@ void ILI9806G_DispStringLine_EN_CH (  uint16_t line, char * pStr )
 	
 	while( * pStr != '\0' )
 	{
-		if ( * pStr <= 126 )	           	//英文字符
+		if ( (uint8_t)*pStr <= 126U )	           	//英文字符
 		{
 			if ( ( usX - ILI9806G_DispWindow_X_Star + LCD_Currentfonts->Width ) > LCD_X_LENGTH )
 			{
@@ -1887,7 +1939,7 @@ void ILI9806G_DispString_EN_CH ( 	uint16_t usX , uint16_t usY, char * pStr )
 	
 	while( * pStr != '\0' )
 	{
-		if ( * pStr <= 126 )	           	//英文字符
+		if ( (uint8_t)*pStr <= 126U )	           	//英文字符
 		{
 			if ( ( usX - ILI9806G_DispWindow_X_Star + LCD_Currentfonts->Width ) > LCD_X_LENGTH )
 			{
@@ -1965,7 +2017,7 @@ void ILI9806G_DispString_EN_CH_YDir (  uint16_t usX,uint16_t usY , char * pStr )
 			}
 			
 		//显示	
-		if ( * pStr <= 126 )	           	//英文字符
+		if ( (uint8_t)*pStr <= 126U )	           	//英文字符
 		{			
 			ILI9806G_DispChar_EN ( usX, usY, * pStr);
 			
@@ -2154,7 +2206,7 @@ void ILI9806G_DisplayStringEx(uint16_t x, 		//字符显示位置x
 
 {
 	uint16_t Charwidth = Font_width; //默认为Font_width，英文宽度为中文宽度的一半
-	uint8_t *psr;
+	uint8_t *psr = 0;
 	uint8_t Ascii;	//英文
 	uint16_t usCh;  //中文
 	
@@ -2181,6 +2233,14 @@ void ILI9806G_DisplayStringEx(uint16_t x, 		//字符显示位置x
 			Charwidth = Font_width;
 			usCh = * ( uint16_t * ) ptr;				
 			usCh = ( usCh << 8 ) + ( usCh >> 8 );
+            if(Font_width == Font_Height && DrawModel <= 1U &&
+               LCD_DrawFontGlyph(x,y,usCh,Font_Height,0U,
+                    DrawModel ? CurrentBackColor : CurrentTextColor,
+                    DrawModel ? CurrentTextColor : CurrentBackColor)) {
+                x+=Charwidth;
+                ptr += 2;
+                continue;
+            }
 			GetGBKCode ( ucBuffer, usCh );	//取字模数据
 			//缩放字模数据，源字模为32*32
 			ILI9806G_zoomChar(WIDTH_CH_CHAR,HEIGHT_CH_CHAR,Charwidth,Font_Height,(uint8_t *)&ucBuffer,psr,1); 
@@ -2193,6 +2253,14 @@ void ILI9806G_DisplayStringEx(uint16_t x, 		//字符显示位置x
 		{
 				Charwidth = Font_width / 2;
 				Ascii = *ptr - 32;
+                if(Font_width == Font_Height && DrawModel <= 1U &&
+                   LCD_DrawFontGlyph(x,y,*ptr,Font_Height,0U,
+                        DrawModel ? CurrentBackColor : CurrentTextColor,
+                        DrawModel ? CurrentTextColor : CurrentBackColor)) {
+                    x+=Charwidth;
+                    ptr++;
+                    continue;
+                }
 				//使用16*32字体缩放字模数据
 				ILI9806G_zoomChar(16,32,Charwidth,Font_Height,(uint8_t *)&Font16x32.table[Ascii * Font16x32.Height*Font16x32.Width/8],psr,0);
 			  //显示单个字符
@@ -2222,7 +2290,7 @@ void ILI9806G_DisplayStringEx_YDir(uint16_t x, 		//字符显示位置x
 																		 uint16_t DrawModel)  //是否反色显示
 {
 	uint16_t Charwidth = Font_width; //默认为Font_width，英文宽度为中文宽度的一半
-	uint8_t *psr;
+	uint8_t *psr = 0;
 	uint8_t Ascii;	//英文
 	uint16_t usCh;  //中文
 	uint8_t ucBuffer [ WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8 ];	
@@ -2247,6 +2315,14 @@ void ILI9806G_DisplayStringEx_YDir(uint16_t x, 		//字符显示位置x
 			Charwidth = Font_width;
 			usCh = * ( uint16_t * ) ptr;				
 			usCh = ( usCh << 8 ) + ( usCh >> 8 );
+            if(Font_width == Font_Height && DrawModel <= 1U &&
+               LCD_DrawFontGlyph(x,y,usCh,Font_Height,0U,
+                    DrawModel ? CurrentBackColor : CurrentTextColor,
+                    DrawModel ? CurrentTextColor : CurrentBackColor)) {
+                y+=Font_Height;
+                ptr += 2;
+                continue;
+            }
 			GetGBKCode ( ucBuffer, usCh );	//取字模数据
 			//缩放字模数据，源字模为16*16
 			ILI9806G_zoomChar(WIDTH_CH_CHAR,HEIGHT_CH_CHAR,Charwidth,Font_Height,(uint8_t *)&ucBuffer,psr,1); 
@@ -2259,6 +2335,14 @@ void ILI9806G_DisplayStringEx_YDir(uint16_t x, 		//字符显示位置x
 		{
 				Charwidth = Font_width / 2;
 				Ascii = *ptr - 32;
+                if(Font_width == Font_Height && DrawModel <= 1U &&
+                   LCD_DrawFontGlyph(x,y,*ptr,Font_Height,0U,
+                        DrawModel ? CurrentBackColor : CurrentTextColor,
+                        DrawModel ? CurrentTextColor : CurrentBackColor)) {
+                    y+=Font_Height;
+                    ptr++;
+                    continue;
+                }
 				//使用16*24字体缩放字模数据
 				ILI9806G_zoomChar(16,24,Charwidth,Font_Height,(uint8_t *)&Font16x32.table[Ascii * Font16x32.Height*Font16x32.Width/8],psr,0);
 			  //显示单个字符

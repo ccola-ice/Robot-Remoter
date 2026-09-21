@@ -8,11 +8,13 @@ function Get-Functions([string]$source, [string[]]$names) {
     $bodies = @()
     $prototypes = @()
     foreach($name in $names) {
-        $pattern = '(?ms)^(?:static )?(?:__inline )?(?:void\s+|uint8_t\s+|uint16_t\s+|int16_t\s+|sFONT\s*\*\s*|const char\s*\*\s*)' + $name + '\s*\([^;]*?\)\s*\{.*?^\}'
+        $pattern = '(?ms)^(?:static )?(?:__inline )?(?:void\s+|uint8_t\s+|uint16_t\s+|int16_t\s+|sFONT\s*\*\s*|const char\s*\*\s*)' + $name + '\s*\([^;]*?\)\s*(?://[^\r\n]*\r?\n\s*)?\{.*?^\}'
         $matches = [regex]::Matches($source, $pattern)
         if($matches.Count -ne 1) { throw "Expected one function: $name" }
         $body = $matches[0].Value
-        $prototypes += $body.Substring(0, $body.IndexOf('{')).Trim() + ';'
+        $signature = [regex]::Replace($body.Substring(0, $body.IndexOf('{')), '(?m)//[^\r\n]*', '')
+        $signature = [regex]::Replace($signature, '(?s)/\*.*?\*/', '')
+        $prototypes += $signature.Trim() + ';'
         $bodies += $body
     }
     ($prototypes + $bodies) -join [Environment]::NewLine
@@ -26,10 +28,11 @@ try {
     $drawFunctions = Get-Functions $driver @('LCD_Draw_Rect', 'ILI9806G_GramScan', 'ILI9806G_OpenWindow', 'ILI9806G_SetCursor',
         'ILI9806G_FillColor', 'ILI9806G_Clear', 'ILI9806G_SetPointPixel', 'ILI9806G_DrawPoint',
         'ILI9806G_GetPointPixel', 'ILI9806G_DrawLine', 'ILI9806G_DrawRectangle', 'ILI9806G_Fill',
-        'ILI9806G_DrawCircle', 'ILI9806G_DispChar_EN', 'ILI9806G_DispString_EN', 'LCD_DispString_EN_Bold',
+        'ILI9806G_DrawCircle', 'LCD_DrawFontGlyph', 'ILI9806G_DispChar_EN', 'ILI9806G_DispString_EN', 'LCD_DispString_EN_Bold',
+        'ILI9806G_DispChar_CH', 'ILI9806G_DispString_EN_CH', 'ILI9806G_zoomChar', 'ILI9806G_DrawChar_Ex', 'ILI9806G_DisplayStringEx',
         'LCD_SetFont', 'LCD_SetTextColor', 'LCD_SetBackColor')
     $forward = 'void ILI9806G_OpenWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h); static __inline void ILI9806G_FillColor(uint32_t count, uint16_t color);'
-    $drawFunctions = $drawFunctions.Replace('ILI9806G_DispString_EN', 'lcd_real_DispString_EN')
+    $drawFunctions = [regex]::Replace($drawFunctions, '\bILI9806G_DispString_EN\b', 'lcd_real_DispString_EN')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_driver.inc'), ($forward + [Environment]::NewLine + $block + $drawFunctions))
     $gui = [IO.File]::ReadAllText((Join-Path $repo '1_App/gui.c'), $enc)
     $mapping = ([regex]::Matches($gui, '(?m)^#define ROBOT_\w+[^\r\n]*') | ForEach-Object { $_.Value }) -join [Environment]::NewLine
@@ -53,12 +56,14 @@ try {
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_diag_names.inc'), $names, $enc)
     [IO.File]::WriteAllText((Join-Path $temp 'stm32f4xx.h'), '#include <stdint.h>')
     [IO.File]::WriteAllText((Join-Path $temp 'bsp_usart_debug.h'), '')
+    [IO.File]::WriteAllText((Join-Path $temp 'ff.h'), "#include <stdint.h>`n#define _USE_LFN 1`n#define _CODE_PAGE 936`ntypedef uint16_t WCHAR;`ntypedef unsigned UINT;`n")
+    Copy-Item -LiteralPath (Join-Path $repo '3_Protocol/FatFs/cc936.c') -Destination (Join-Path $temp 'cc936.c')
     [IO.File]::WriteAllText((Join-Path $temp 'bsp_spi_flash.h'), @'
 void FLASH_SPI_Init(void);
 void FLASH_Read_Data(uint8_t *buffer, unsigned address, unsigned size);
 '@)
     $exe = Join-Path $temp 'lcd-page-test.exe'
-    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-finput-charset=GBK' '-fexec-charset=GBK' '-I' $temp '-I' (Join-Path $repo '1_App') '-I' (Join-Path $repo '5_SystemDrivers') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') '-o' $exe
+    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-finput-charset=GBK' '-fexec-charset=GBK' '-I' $temp '-I' (Join-Path $repo '1_App') '-I' (Join-Path $repo '5_SystemDrivers') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') (Join-Path $temp 'cc936.c') '-o' $exe
     if($LASTEXITCODE -ne 0) { throw 'LCD page test compilation failed.' }
     if ($PreviewDirectory) {
         [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($PreviewDirectory)) | Out-Null

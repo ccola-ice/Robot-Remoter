@@ -15,6 +15,10 @@ static void LCD_BlitRGB565(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const uin
     for(row=0U;row<h;row++) for(column=0U;column<w;column++) frame[y+row][x+column]=pixels[row*w+column];
     blits++;
 }
+static uint8_t LCD_DrawFontGlyph(uint16_t x,uint16_t y,uint16_t code,uint16_t size,
+    uint8_t bold,uint16_t fg,uint16_t bg)
+{ (void)x; (void)y; (void)code; (void)size; (void)bold; (void)fg; (void)bg; return 0U; }
+
 #include "ui_bold_impl.inc"
 
 static uint8_t bit(unsigned character,unsigned x,unsigned y)

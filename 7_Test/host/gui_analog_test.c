@@ -115,6 +115,10 @@ static void LCD_DispString_EN_Bold(uint16_t x, uint16_t y, const char *text)
     ILI9806G_DispString_EN(x, y, (char *)text);
 }
 #define ui_text ui_real_text
+static uint8_t LCD_DrawFontGlyph(uint16_t x,uint16_t y,uint16_t code,uint16_t size,
+    uint8_t bold,uint16_t fg,uint16_t bg)
+{ (void)x; (void)y; (void)code; (void)size; (void)bold; (void)fg; (void)bg; return 0U; }
+
 #include "gui_theme.h"
 #undef ui_text
 static void ui_text(uint16_t x, uint16_t y, uint8_t columns,

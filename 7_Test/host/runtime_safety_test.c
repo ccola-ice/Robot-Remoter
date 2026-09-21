@@ -118,6 +118,10 @@ uint8_t FLASH_GetIoError(void) { return 0U; }
 static void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels)
 { assert(pixels && x+w<=800U && y+h<=480U); }
 #define ui_text ui_real_text
+static uint8_t LCD_DrawFontGlyph(uint16_t x,uint16_t y,uint16_t code,uint16_t size,
+    uint8_t bold,uint16_t fg,uint16_t bg)
+{ (void)x; (void)y; (void)code; (void)size; (void)bold; (void)fg; (void)bg; return 0U; }
+
 #include "gui_theme.h"
 #undef ui_text
 static void ui_text(uint16_t x, uint16_t y, uint8_t columns,
