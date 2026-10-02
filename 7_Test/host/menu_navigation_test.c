@@ -29,6 +29,7 @@ static void menu_handle_calendar_key(MenuKey key)
 /* These page-specific editors are outside this navigation extraction. */
 static void menu_handle_nrf_key(MenuKey key) { (void)key; assert(0); }
 static void menu_handle_browser_key(MenuKey key) { (void)key; assert(0); }
+static void menu_handle_file_viewer_key(MenuKey key) { (void)key; assert(0); }
 static void menu_handle_param_key(MenuKey key) { (void)key; assert(0); }
 static void diagnostics_menu(void) { diagnostics++; menu_post_key(MENU_KEY_OK); }
 static void eeprom_menu(void) { eeproms++; menu_post_key(MENU_KEY_RIGHT); }

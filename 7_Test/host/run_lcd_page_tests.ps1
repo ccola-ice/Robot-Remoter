@@ -21,6 +21,17 @@ function Get-Functions([string]$source, [string[]]$names) {
 }
 try {
     $enc = [Text.Encoding]::GetEncoding(28591)
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $gbk = [Text.Encoding]::GetEncoding(936, [Text.EncoderFallback]::ExceptionFallback, [Text.DecoderFallback]::ExceptionFallback)
+    foreach($headerDirectory in @('1_App', '5_SystemDrivers')) {
+        Get-ChildItem -LiteralPath (Join-Path $repo $headerDirectory) -Filter '*.h' -File | ForEach-Object {
+            $headerBytes = [IO.File]::ReadAllBytes($_.FullName)
+            try { $headerText = $utf8.GetString($headerBytes) }
+            catch { $headerText = $gbk.GetString($headerBytes) }
+            $headerText = $headerText.TrimStart([char]0xfeff)
+            [IO.File]::WriteAllText((Join-Path $temp $_.Name), $headerText, $gbk)
+        }
+    }
     $driver = [IO.File]::ReadAllText((Join-Path $repo '5_ModuleDrivers/bsp_fsmc_lcd.c'), $enc)
     $start = $driver.IndexOf('/* Page transitions reserve')
     $end = $driver.IndexOf('///**', $start)
@@ -33,7 +44,7 @@ try {
         'LCD_SetFont', 'LCD_SetTextColor', 'LCD_SetBackColor')
     $forward = 'void ILI9806G_OpenWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h); static __inline void ILI9806G_FillColor(uint32_t count, uint16_t color);'
     $drawFunctions = [regex]::Replace($drawFunctions, '\bILI9806G_DispString_EN\b', 'lcd_real_DispString_EN')
-    [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_driver.inc'), ($forward + [Environment]::NewLine + $block + $drawFunctions))
+    [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_driver.inc'), ($forward + [Environment]::NewLine + $block + $drawFunctions), $enc)
     $gui = [IO.File]::ReadAllText((Join-Path $repo '1_App/gui.c'), $enc)
     $mapping = ([regex]::Matches($gui, '(?m)^#define ROBOT_\w+[^\r\n]*') | ForEach-Object { $_.Value }) -join [Environment]::NewLine
     $guiFunctions = Get-Functions $gui @('gui_prepare_page', 'gui_clock_overlay',
@@ -42,8 +53,9 @@ try {
         'gui_robot_stick_value', 'gui_robot_dot_patch', 'gui_robot_draw_stick', 'gui_robot_format_value', 'robot_control_page',
         'gui_file_decode_utf8', 'gui_file_source_is_utf8', 'gui_file_display_text', 'gui_file_size_text',
         'gui_settings_row', 'gui_settings_scroll', 'gui_file_row_icon',
-        'parameter_settings_page', 'nrf_settings_page', 'file_browser_page', 'calendar_page')
-    [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_gui.inc'), ($mapping + [Environment]::NewLine + $guiFunctions))
+        'parameter_settings_page', 'nrf_settings_page', 'file_browser_page', 'file_browser_position',
+        'gui_file_text_line', 'file_preview_page', 'calendar_page')
+    [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_gui.inc'), ($mapping + [Environment]::NewLine + $guiFunctions), $enc)
     $diag = [IO.File]::ReadAllText((Join-Path $repo '1_App/diagnostics.c'), $enc)
     $start = $diag.IndexOf('#define DIAG_LINE_CACHE_COUNT')
     $end = $diag.IndexOf('static uint8_t confirm(', $start)

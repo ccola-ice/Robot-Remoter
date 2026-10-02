@@ -475,15 +475,46 @@ static uint8_t take_tick(volatile uint8_t *pending)
     return ready;
 }
 
-int main(void)
+/* 文件解码和目录扫描也调用此服务，避免长操作饿死按键、通信和传感器任务。
+ * 此处不绘制页面、不进入菜单，也不访问文件系统，防止重入。 */
+static void app_background_service(void)
 {
     unsigned long now;
+    control_link_service(menu_control_active());
+    if(take_tick(&finish_button_10ms)) {
+        button_ticks();
+        digital_channel_update_10ms();
+        menu_tick_10ms();
+    }
+    GTP_Service();
+    /* 及时处理已接收完整的 GPS 输入，不受 UI 刷新节奏限制。 */
+    nmea_decode_test();
+    if(take_tick(&finish_1hz) && imu_dmp_ready) {
+        temp = MPU_Get_Temperature();
+        MPU_Get_Accelerometer(&aacx,&aacy,&aacz);
+        MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);
+    }
+    if(take_tick(&finish_100hz)) {
+        get_tick_count(&now);
+        if(imu_dmp_ready && mpu_dmp_get_data(&pitch,&roll,&yaw) == 0U) {
+            imu_data_valid = 1U;
+            imu_last_sample_ms = now;
+        } else if(!imu_dmp_ready || (uint32_t)(now - imu_last_sample_ms) >= 1000U) {
+            imu_data_valid = 0U;
+        }
+    }
+    if(take_tick(&finish_10hz)) RTC_TimeAndDate_Show();
+}
+
+int main(void)
+{
     setup();
     boot_show_result();
     LCD_SetFont(&Font16x32);
     LCD_SetColors(GREEN,BLACK);
     ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
     menu_init();
+    menu_set_background_service(app_background_service);
     control_link_init(
         boot_report.items[BOOT_CLOCK].state == BOOT_PASS &&
         boot_report.items[BOOT_INTERNAL_MEMORY].state == BOOT_PASS &&
@@ -493,31 +524,7 @@ int main(void)
         boot_report.items[BOOT_TIMERS].state == BOOT_PASS);
     menu_process();
     while(1) {
-        control_link_service(menu_control_active());
-        if(take_tick(&finish_button_10ms)) {
-            button_ticks();
-            digital_channel_update_10ms();
-            menu_tick_10ms();
-        }
-        menu_process();
-        GTP_Service();
-        /* 及时处理已接收完整的 GPS 输入，不受 UI 刷新节奏限制。 */
-        nmea_decode_test();
-        if(take_tick(&finish_1hz) && imu_dmp_ready) {
-            temp = MPU_Get_Temperature();
-            MPU_Get_Accelerometer(&aacx,&aacy,&aacz);
-            MPU_Get_Gyroscope(&gyrox,&gyroy,&gyroz);
-        }
-        if(take_tick(&finish_100hz)) {
-            get_tick_count(&now);
-            if(imu_dmp_ready && mpu_dmp_get_data(&pitch,&roll,&yaw) == 0U) {
-                imu_data_valid = 1U;
-                imu_last_sample_ms = now;
-            } else if(!imu_dmp_ready || (uint32_t)(now - imu_last_sample_ms) >= 1000U) {
-                imu_data_valid = 0U;
-            }
-        }
-        if(take_tick(&finish_10hz)) RTC_TimeAndDate_Show();
+        app_background_service();
         menu_process();
     }
 }

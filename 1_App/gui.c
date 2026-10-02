@@ -905,7 +905,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
         LCD_SetFont(&Font16x32);
         LCD_SetTextColor(foreground);
         LCD_SetBackColor(background);
-        ILI9806G_DispString_EN_CH(80U, y + 4U, safe_name);
+        ui_text(80U, y + 4U, 32U, safe_name, foreground, background, 1U);
         if(entries[index].is_directory) strcpy(size_text, "\316\304\274\376\274\320");
         else gui_file_size_text(entries[index].size, size_text);
         ui_text(620U, y + 12U, 16U, size_text, UI_MUTED, background, 0U);
@@ -914,7 +914,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
     if(content_changed && !item_count) {
         ui_round_rect(16U, 144U, 768U, 260U, 14U, UI_SURFACE);
         ui_icon(376U, 204U, 48U, UI_ICON_FOLDER, UI_MUTED, UI_SURFACE);
-        ui_text(312U, 276U, 24U, "This directory is empty", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(312U, 276U, 24U, "\xc4\xbf\xc2\xbc\xce\xaa\xbf\xd5\xbb\xf2\xce\xb4\xb6\xc1\xc8\xa1", UI_MUTED, UI_SURFACE, 0U);
     }
     if(first_draw || strcmp(safe_status, last_status) != 0) {
         ui_fill(24U, 408U, 752U, 32U, UI_BG);
@@ -933,6 +933,63 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
     last_first_visible = first_visible;
     last_count = item_count;
     last_revision = revision;
+}
+
+void file_browser_position(uint32_t selected, uint32_t total, uint8_t retry)
+{
+    char position[40];
+    snprintf(position, sizeof(position), "%lu / %lu", (unsigned long)selected, (unsigned long)total);
+    ui_footer("\xc9\xcf/\xcf\xc2 \xd1\xa1\xd4\xf1  OK \xb4\xf2\xbf\xaa/\xd6\xd8\xca\xd4  BACK \xc9\xcf\xbc\xb6/\xcd\xcb\xb3\xf6", position);
+    if(retry) ui_text(24U, 380U, 80U, "OK \xd6\xd8\xd0\xc2\xb6\xc1\xc8\xa1 SD \xbf\xa8", UI_MUTED, UI_BG, 0U);
+}
+
+/* 文本按完整 GB2312 字符绘制，使用原生 20 像素字模和外置中文字库。 */
+static void gui_file_text_line(uint16_t x, uint16_t y, const char *text)
+{
+    const uint8_t *p = (const uint8_t *)text;
+    uint16_t code, end = 776U;
+    while(p && *p && x + 10U <= end) {
+        if(*p >= 0x80U && p[1]) {
+            code = (uint16_t)((uint16_t)p[0] << 8) | p[1];
+            if(x + 20U > end) break;
+            ui_chinese_glyph_styled(x, y, 20U, code, UI_INK, UI_SURFACE, 0U);
+            x += 20U; p += 2;
+        } else {
+            code = (*p >= 32U && *p <= 126U) ? *p : '?';
+            LCD_DrawFontGlyph(x, y, code, 20U, 0U, UI_INK, UI_SURFACE);
+            x += 10U; p++;
+        }
+    }
+}
+
+void file_preview_page(const char *name, const char *kind, const char *lines,
+                       uint16_t stride, uint8_t line_count, const char *status,
+                       const char *position, uint8_t clear_content, uint8_t text_mode)
+{
+    char safe_name[96];
+    uint8_t row;
+    if(display_flag) {
+        display_flag = 0U;
+        GTP_IRQ_Disable();
+        ui_shell("\xce\xc4\xbc\xfe\xd4\xa4\xc0\xc0", kind, "\xb9\xa4\xbe\xdf");
+        ui_round_rect(16U, 96U, 768U, 36U, 8U, UI_TINT);
+        gui_file_display_text(safe_name, sizeof(safe_name), name, 736U);
+        LCD_SetFont(&Font16x32);
+        LCD_SetTextColor(UI_ACCENT);
+        LCD_SetBackColor(UI_TINT);
+        ui_text(32U, 98U, 46U, safe_name, UI_ACCENT, UI_TINT, 1U);
+        clear_content = 1U;
+    }
+    ui_text(464U, 60U, 39U, kind, UI_MUTED, UI_BG, 0U);
+    if(clear_content) ui_fill(24U, 136U, 752U, 280U, UI_SURFACE);
+    if(lines && stride) {
+        if(line_count > 14U) line_count = 14U;
+        for(row = 0U; row < line_count; row++)
+            gui_file_text_line(30U, (uint16_t)(136U + row * 20U), lines + row * stride);
+    }
+    ui_fill(24U, 420U, 752U, 24U, UI_BG);
+    ui_text(24U, 424U, 94U, status, UI_MUTED, UI_BG, 0U);
+    ui_footer(text_mode ? "\xc9\xcf/\xcf\xc2 \xb7\xad\xd2\xb3  OK \xb1\xe0\xc2\xeb  BACK \xb7\xb5\xbb\xd8" : "OK \xd6\xd8\xd0\xc2\xb4\xf2\xbf\xaa  BACK \xb7\xb5\xbb\xd8", position);
 }
 
 void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,

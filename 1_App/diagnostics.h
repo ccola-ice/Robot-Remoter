@@ -25,6 +25,8 @@ void diag_ui_text(uint16_t x, uint16_t y, uint16_t size,
                   uint8_t foreground, uint8_t background, const char *text);
 void diag_ui_ascii(uint16_t x, uint16_t y, uint8_t foreground,
                    uint8_t background, const char *text);
-int diag_key(void); /* 以 10 ms 周期轮询并消抖；有按下事件时返回 MenuKey，否则返回 -1。 */
+/* 每 10 ms 轮询并消抖，返回 MenuKey 或 -1；上下长按 500 ms 后连发，
+ * 间隔 120 ms，持续 1500 ms 后加速至 60 ms；OK/BACK 不连发。 */
+int diag_key(void);
 void diag_release(void);
 #endif

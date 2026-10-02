@@ -15,6 +15,8 @@ typedef struct GuiRobotTelemetry GuiRobotTelemetry;
 
 /* LCD 就绪后初始化菜单。 */
 void menu_init(void);
+/* 文件读取期间执行后台任务；回调不得重新进入菜单或文件系统。 */
+void menu_set_background_service(void (*service)(void));
 uint8_t menu_control_active(void);
 
 /* 由按键回调调用，仅将事件入队，稍后统一处理。 */

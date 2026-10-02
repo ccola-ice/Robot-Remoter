@@ -84,6 +84,11 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
                        uint8_t first_visible, uint16_t revision,
                        const char *status_text);
 
+void file_browser_position(uint32_t selected, uint32_t total, uint8_t retry);
+void file_preview_page(const char *name, const char *kind, const char *lines,
+                       uint16_t stride, uint8_t line_count, const char *status,
+                       const char *position, uint8_t clear_content, uint8_t text_mode);
+
 void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
                              uint8_t selected_row, uint8_t first_visible,
                              uint8_t total_items, uint8_t editing,

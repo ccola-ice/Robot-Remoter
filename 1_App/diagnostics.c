@@ -26,6 +26,11 @@ typedef struct {
 static DiagLineCache diag_line_cache[DIAG_LINE_CACHE_COUNT];
 static uint8_t diag_transition_pending;
 static uint8_t diag_key_levels[4], diag_key_counts[4];
+typedef struct {
+    uint32_t pressed_ms, repeated_ms;
+    uint8_t active, started;
+} DiagNavigationRepeat;
+static DiagNavigationRepeat diag_repeat[2];
 
 static void diag_present(void)
 {
@@ -45,6 +50,15 @@ static uint8_t key_down(uint8_t key)
     }
 }
 
+/* 页面切换时记录当前电平，已按住的按键须先松开，才能触发新页面。 */
+static void diag_reset_keys(void)
+{
+    uint8_t key;
+    for(key = 0U; key < 4U; key++) diag_key_levels[key] = key_down(key);
+    memset(diag_key_counts, 0, sizeof(diag_key_counts));
+    memset(diag_repeat, 0, sizeof(diag_repeat));
+}
+
 void diag_release(void)
 {
     uint8_t stable = 0U;
@@ -54,27 +68,52 @@ void diag_release(void)
         else stable++;
         Delay_ms(10U);
     }
-    memset(diag_key_levels, 0, sizeof(diag_key_levels));
-    memset(diag_key_counts, 0, sizeof(diag_key_counts));
+    diag_reset_keys();
 }
 
 int diag_key(void)
 {
-    uint8_t key, down;
+    uint8_t key, down[4];
+    unsigned long ticks;
+    uint32_t now, elapsed, interval;
     int event = -1;
     diag_present();
-    /* 每 10 ms 调用一次，按键状态连续稳定采样 3 次后产生一次按下事件；
-     * 返回事件时不等待用户松开按键。 */
+    get_tick_count(&ticks);
+    now = (uint32_t)ticks;
+    /* 每 10 ms 调用一次，连续稳定采样 3 次后产生按下事件。 */
     for(key = 0U; key < 4U; key++) {
-        down = key_down(key);
-        if(down == diag_key_levels[key]) diag_key_counts[key] = 0U;
+        down[key] = key_down(key);
+        if(down[key] == diag_key_levels[key]) diag_key_counts[key] = 0U;
         else if(++diag_key_counts[key] >= 3U) {
             diag_key_counts[key] = 0U;
-            diag_key_levels[key] = down;
-            if(down != 0U && event < 0) event = key;
+            diag_key_levels[key] = down[key];
+            if(key < 2U) {
+                diag_repeat[key].active = down[key];
+                diag_repeat[key].started = 0U;
+                diag_repeat[key].pressed_ms = now;
+                diag_repeat[key].repeated_ms = now;
+            }
+            if(down[key] != 0U) event = key;
         }
     }
-    return event;
+    /* 新按下的 OK/BACK 优先于方向键，确认与返回始终不连发。 */
+    if(event >= 0) return event;
+    for(key = 0U; key < 2U; key++) {
+        DiagNavigationRepeat *repeat = &diag_repeat[key];
+        /* 原始电平一旦松开就停止连发，无须等待释放消抖完成。 */
+        if(!down[key] || !diag_key_levels[key] || diag_key_counts[key] ||
+           !repeat->active) continue;
+        elapsed = (uint32_t)(now - repeat->pressed_ms);
+        if(elapsed < 500U) continue;
+        interval = elapsed >= 1500U ? 60U : 120U;
+        if(repeat->started && (uint32_t)(now - repeat->repeated_ms) < interval)
+            continue;
+        repeat->started = 1U;
+        repeat->repeated_ms = now;
+        /* 绘制或外设操作较慢时只返回一次，不补发积压的方向事件。 */
+        return key;
+    }
+    return -1;
 }
 
 static uint16_t diag_lcd_color(uint8_t color)
@@ -123,6 +162,7 @@ void diag_ui_ascii(uint16_t x, uint16_t y, uint8_t foreground,
 
 void diag_screen(const char *title)
 {
+    diag_reset_keys();
     LCD_BeginPage(WHITE);
     memset(diag_line_cache, 0, sizeof(diag_line_cache));
     diag_transition_pending = 1U;

@@ -15,6 +15,8 @@ unsigned char fpath[100];                  /* 保存当前扫描路径 */
 //FLASH文件系统测试
 void fatfs_flash_test(void)
 {
+	/* 只写入正文，避免将缓冲区末尾的零填充保存到文本文件。 */
+	const UINT text_length = (UINT)strlen((const char *)fatfs_write_buff);
     /***************************************Flash文件系统移植测试*******************************************/
 	printf("\n\r===========================FLASH文件系统移植测试开始=============================\n\r");
 
@@ -54,8 +56,12 @@ void fatfs_flash_test(void)
 	
 	res = f_open(&fnew_flash, "1:中文文件.txt", FA_CREATE_ALWAYS|FA_READ|FA_WRITE);
 	printf("\r\nf_open res=%d",res);
-	res = f_write(&fnew_flash, fatfs_write_buff, sizeof(fatfs_write_buff) ,&bw);
-	printf("\r\nf_write:in chinese file res=%d len=%d bw=%d",res,sizeof(fatfs_write_buff),bw);
+	res = f_write(&fnew_flash, fatfs_write_buff, text_length ,&bw);
+	printf("\r\nf_write:in chinese file res=%d len=%u bw=%u",res,text_length,bw);
+	if(res==FR_OK && bw!=text_length)
+	{
+		printf("\r\n文件写入不完整：实际 %u / 预期 %u 字节\r\n",bw,text_length);
+	}
 	res = f_close(&fnew_flash);
 	printf("\r\nf_close res=%d",res);
 	

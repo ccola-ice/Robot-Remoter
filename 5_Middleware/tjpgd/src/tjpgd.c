@@ -19,6 +19,7 @@
 /----------------------------------------------------------------------------*/
 
 #include "tjpgd.h"
+#include <stdint.h>
 
 
 /*-----------------------------------------------*/
@@ -362,8 +363,22 @@ INT huffext (			/* >=0: decoded data, <0: error code */
 /* Apply Inverse-DCT in Arai Algorithm (see also aa_idct.png)            */
 /*-----------------------------------------------------------------------*/
 
+/* 损坏熵流可能产生远超图像范围的系数；只接受原 32 位算法可安全计算的乘积。 */
+static int jd_checked_multiply(LONG a, LONG b, LONG *value)
+{
+	int64_t product = (int64_t)a * b;
+	if (product < (-2147483647LL - 1LL) || product > 2147483647LL) return 0;
+	*value = (LONG)product;
+	return 1;
+}
+
+#define IDCT_MULTIPLY(target, value, factor) do { \
+	if (!jd_checked_multiply((value), (factor), &product)) return JDR_FMT1; \
+	(target) = product >> 12; \
+} while (0)
+
 static
-void block_idct (
+JRESULT block_idct (
 	LONG* src,	/* Input block data (de-quantized and pre-scaled for Arai Algorithm) */
 	BYTE* dst	/* Pointer to the destination to store the block as byte array */
 )
@@ -371,7 +386,13 @@ void block_idct (
 	const LONG M13 = (LONG)(1.41421*4096), M2 = (LONG)(1.08239*4096), M4 = (LONG)(2.61313*4096), M5 = (LONG)(1.84776*4096);
 	LONG v0, v1, v2, v3, v4, v5, v6, v7;
 	LONG t10, t11, t12, t13;
+	LONG product, scaled;
 	UINT i;
+
+	/* 反量化乘积先检查 32 位范围，再右移 8 位，因此输入绝对值不超过此界限。
+	 * 每次乘法检查后，列变换输出绝对值小于 7000 万，行变换加减小于 6 亿。 */
+	for (i = 0; i < 64; i++)
+		if (src[i] < -8388608L || src[i] > 8388607L) return JDR_FMT1;
 
 	/* Process columns */
 	for (i = 0; i < 8; i++) {
@@ -382,7 +403,7 @@ void block_idct (
 
 		t10 = v0 + v2;		/* Process the even elements */
 		t12 = v0 - v2;
-		t11 = (v1 - v3) * M13 >> 12;
+		IDCT_MULTIPLY(t11, v1 - v3, M13);
 		v3 += v1;
 		t11 -= v3;
 		v0 = t10 + v3;
@@ -399,11 +420,13 @@ void block_idct (
 		t11 = v5 + v4;
 		t12 = v6 - v7;
 		v7 += v6;
-		v5 = (t11 - v7) * M13 >> 12;
+		IDCT_MULTIPLY(v5, t11 - v7, M13);
 		v7 += t11;
-		t13 = (t10 + t12) * M5 >> 12;
-		v4 = t13 - (t10 * M2 >> 12);
-		v6 = t13 - (t12 * M4 >> 12) - v7;
+		IDCT_MULTIPLY(t13, t10 + t12, M5);
+		IDCT_MULTIPLY(scaled, t10, M2);
+		v4 = t13 - scaled;
+		IDCT_MULTIPLY(scaled, t12, M4);
+		v6 = t13 - scaled - v7;
 		v5 -= v6;
 		v4 -= v5;
 
@@ -429,7 +452,7 @@ void block_idct (
 
 		t10 = v0 + v2;				/* Process the even elements */
 		t12 = v0 - v2;
-		t11 = (v1 - v3) * M13 >> 12;
+		IDCT_MULTIPLY(t11, v1 - v3, M13);
 		v3 += v1;
 		t11 -= v3;
 		v0 = t10 + v3;
@@ -446,11 +469,13 @@ void block_idct (
 		t11 = v5 + v4;
 		t12 = v6 - v7;
 		v7 += v6;
-		v5 = (t11 - v7) * M13 >> 12;
+		IDCT_MULTIPLY(v5, t11 - v7, M13);
 		v7 += t11;
-		t13 = (t10 + t12) * M5 >> 12;
-		v4 = t13 - (t10 * M2 >> 12);
-		v6 = t13 - (t12 * M4 >> 12) - v7;
+		IDCT_MULTIPLY(t13, t10 + t12, M5);
+		IDCT_MULTIPLY(scaled, t10, M2);
+		v4 = t13 - scaled;
+		IDCT_MULTIPLY(scaled, t12, M4);
+		v6 = t13 - scaled - v7;
 		v5 -= v6;
 		v4 -= v5;
 
@@ -466,7 +491,10 @@ void block_idct (
 
 		src += 8;	/* Next row */
 	}
+	return JDR_OK;
 }
+
+#undef IDCT_MULTIPLY
 
 
 
@@ -481,6 +509,7 @@ JRESULT mcu_load (
 )
 {
 	LONG *tmp = (LONG*)jd->workbuf;	/* Block working buffer for de-quantize and IDCT */
+	LONG product;
 	UINT blk, nby, nbc, i, z, id, cmp;
 	INT b, d, e;
 	BYTE *bp;
@@ -510,10 +539,12 @@ JRESULT mcu_load (
 			b = 1 << (b - 1);					/* MSB position */
 			if (!(e & b)) e -= (b << 1) - 1;	/* Restore sign if needed */
 			d += e;								/* Get current value */
+			if (d < -32768 || d > 32767) return JDR_FMT1;
 			jd->dcv[cmp] = (SHORT)d;			/* Save current DC value for next block */
 		}
 		dqf = jd->qttbl[jd->qtid[cmp]];			/* De-quantizer table ID for this component */
-		tmp[0] = d * dqf[0] >> 8;				/* De-quantize, apply scale factor of Arai algorithm and descale 8 bits */
+		if (!jd_checked_multiply(d, dqf[0], &product)) return JDR_FMT1;
+		tmp[0] = product >> 8;				/* De-quantize, apply scale factor of Arai algorithm and descale 8 bits */
 
 		/* Extract following 63 AC elements from input stream */
 		for (i = 1; i < 64; i++) tmp[i] = 0;	/* Clear rest of elements */
@@ -536,14 +567,15 @@ JRESULT mcu_load (
 				b = 1 << (b - 1);				/* MSB position */
 				if (!(d & b)) d -= (b << 1) - 1;/* Restore negative value if needed */
 				z = ZIG(i);						/* Zigzag-order to raster-order converted index */
-				tmp[z] = d * dqf[z] >> 8;		/* De-quantize, apply scale factor of Arai algorithm and descale 8 bits */
+				if (!jd_checked_multiply(d, dqf[z], &product)) return JDR_FMT1;
+				tmp[z] = product >> 8;		/* De-quantize, apply scale factor of Arai algorithm and descale 8 bits */
 			}
 		} while (++i < 64);		/* Next AC element */
 
 		if (JD_USE_SCALE && jd->scale == 3)
 			*bp = (*tmp / 256) + 128;	/* If scale ratio is 1/8, IDCT can be ommited and only DC element is used */
-		else
-			block_idct(tmp, bp);		/* Apply IDCT and store the block to the MCU buffer */
+		else if (block_idct(tmp, bp) != JDR_OK)
+			return JDR_FMT1;		/* 系数超出原算法安全范围时停止解码。 */
 
 		bp += 64;				/* Next block */
 	}

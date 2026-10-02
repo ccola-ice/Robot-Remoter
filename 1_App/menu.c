@@ -9,6 +9,11 @@
 #include "platform_nrf.h"
 #include "bsp_gpio_digital_channel.h"
 #include "ff.h"
+#include "file_browser.h"
+#include "file_image.h"
+#include "file_text.h"
+
+extern FATFS fs_sdcard;
 #include "bsp_SysTick.h"
 #include "bsp_rtc.h"
 #include "nmea_decode_test.h"
@@ -25,9 +30,6 @@ extern nmeaTIME beiJingTime;
 #define CLOCK_REFRESH_TICKS   20U
 #define NRF_MENU_ITEM_COUNT   6U
 #define NRF_SETTING_COUNT     4U
-#define BROWSER_MAX_ENTRIES   64U
-#define BROWSER_VISIBLE_ROWS  6U
-#define BROWSER_PATH_LENGTH   256U
 #define PARAM_VISIBLE_ROWS    GUI_PARAM_VISIBLE_ROWS
 #define PARAM_GLOBAL_COUNT    7U
 #define PARAM_CALIBRATION_CHANNELS 6U
@@ -48,6 +50,7 @@ typedef enum
     MENU_PAGE_NRF,
     MENU_PAGE_CALENDAR,
     MENU_PAGE_FILE_BROWSER,
+    MENU_PAGE_FILE_VIEWER,
     MENU_PAGE_PARAMETER_SETTINGS,
     MENU_PAGE_DIAGNOSTICS,
     MENU_PAGE_EEPROM,
@@ -102,14 +105,14 @@ static uint8_t nrf_runtime_enabled;
 static uint8_t nrf_runtime_channel;
 static uint8_t nrf_runtime_power_index;
 static uint8_t nrf_runtime_data_rate;
-static GuiFileEntry browser_entries[BROWSER_MAX_ENTRIES];
-static char browser_path[BROWSER_PATH_LENGTH];
-static char browser_status[80];
-static uint8_t browser_item_count;
-static uint8_t browser_selected_item;
-static uint8_t browser_first_visible;
-static uint8_t browser_virtual_root;
-static uint16_t browser_revision;
+enum { FILE_VIEW_UNSUPPORTED, FILE_VIEW_IMAGE, FILE_VIEW_TEXT };
+static void (*file_background_service)(void);
+static uint8_t file_operation_cancelled;
+static char file_view_path[FILE_BROWSER_PATH_LENGTH];
+static char file_view_name[GUI_FILE_NAME_LENGTH];
+static char file_view_status[128];
+static uint8_t file_view_kind, file_image_pending;
+static file_text_result_t file_text_result;
 static param_Config param_edit;
 static param_Config param_edit_backup;
 static GuiParamRow param_rows[PARAM_VISIBLE_ROWS];
@@ -716,244 +719,247 @@ static void menu_handle_param_key(MenuKey key)
     }
 }
 
-static void menu_browser_set_status(const char *text)
+static uint8_t menu_get_key(MenuKey *key);
+
+void menu_set_background_service(void (*service)(void))
 {
-    strncpy(browser_status, text, sizeof(browser_status) - 1U);
-    browser_status[sizeof(browser_status) - 1U] = '\0';
+    file_background_service = service;
+}
+
+/* 文件操作期间只服务后台和取消键，不递归进入菜单或文件系统。 */
+static uint8_t menu_file_service(void *context)
+{
+    MenuKey key;
+    (void)context;
+    if(file_background_service) file_background_service();
+    while(menu_get_key(&key)) {
+        if(key == MENU_KEY_BACK) file_operation_cancelled = 1U;
+    }
+    repeat_pending = 0U;
+    return file_operation_cancelled == 0U;
+}
+
+static void menu_file_begin(void)
+{
+    file_operation_cancelled = 0U;
+    repeat_pending = 0U;
 }
 
 static void menu_browser_load_drives(void)
 {
-    memset(browser_entries, 0, sizeof(browser_entries));
-    strcpy(browser_path, "Available volumes");
-    strcpy(browser_entries[0].name, "SD Card [0:]");
-    browser_entries[0].is_directory = 1U;
-    browser_item_count = 1U;
-    browser_selected_item = 0U;
-    browser_first_visible = 0U;
-    browser_virtual_root = 1U;
-    browser_revision++;
-    menu_browser_set_status("Press OK to browse the SD card");
+    file_text_close();
+    /* 即使启动时未插卡，也注册文件系统；实际介质初始化在打开目录时完成。 */
+    f_mount(&fs_sdcard, "0:", 0U);
+    menu_file_begin();
+    file_browser_init(menu_file_service, NULL);
+    file_text_set_service(menu_file_service, NULL);
 }
 
-static uint8_t menu_browser_load_directory(void)
+static uint8_t menu_file_extension_is(const char *path, const char *extension)
 {
-    DIR directory;
-    FILINFO file_info;
-    FRESULT result;
-    FRESULT space_result;
-    FATFS *volume_fs = NULL;
-    DWORD free_clusters = 0UL;
-    DWORD free_kb = 0UL;
-    /* 采用 CP936 时，每个 FatFs 长文件名字符可能需要两个字节。 */
-    static char long_name[_MAX_LFN * 2U + 1U];
-    const char *source_name;
-    uint8_t long_name_renderable;
-
-    browser_item_count = 0U;
-    result = f_opendir(&directory, browser_path);
-    if(result != FR_OK)
-    {
-        sprintf(browser_status, "Open failed - FatFs error %u", (uint16_t)result);
-        browser_selected_item = 0U;
-        browser_first_visible = 0U;
-        browser_virtual_root = 0U;
-        browser_revision++;
-        return 0U;
-    }
-
-    while(browser_item_count < BROWSER_MAX_ENTRIES)
-    {
-        memset(&file_info, 0, sizeof(file_info));
-        long_name[0] = '\0';
-        file_info.lfname = long_name;
-        file_info.lfsize = sizeof(long_name);
-        result = f_readdir(&directory, &file_info);
-        if((result != FR_OK) || (file_info.fname[0] == '\0'))
-        {
-            break;
-        }
-
-        long_name_renderable = gui_file_name_can_render(long_name);
-        source_name = file_info.fname;
-        if((long_name[0] != '\0') &&
-           (long_name_renderable != 0U))
-        {
-            source_name = long_name;
-        }
-        else if(long_name[0] != '\0')
-        {
-            printf("[FILE] LFN is outside the installed GB2312 font; "
-                   "using SFN for display/open\r\n");
-        }
-        if((strcmp(source_name, ".") == 0) || (strcmp(source_name, "..") == 0))
-        {
-            continue;
-        }
-
-        strncpy(browser_entries[browser_item_count].name, source_name,
-                GUI_FILE_NAME_LENGTH - 1U);
-        browser_entries[browser_item_count].name[GUI_FILE_NAME_LENGTH - 1U] = '\0';
-        browser_entries[browser_item_count].size = file_info.fsize;
-        browser_entries[browser_item_count].date = file_info.fdate;
-        browser_entries[browser_item_count].time = file_info.ftime;
-        browser_entries[browser_item_count].is_directory =
-            ((file_info.fattrib & AM_DIR) != 0U) ? 1U : 0U;
-        browser_item_count++;
-    }
-
-    f_closedir(&directory);
-    space_result = f_getfree(browser_path, &free_clusters, &volume_fs);
-    if((space_result == FR_OK) && (volume_fs != NULL))
-    {
-        free_kb = free_clusters * volume_fs->csize * volume_fs->ssize / 1024UL;
-        printf("[FILE] volume=%c: free_clusters=%lu free_kb=%lu\r\n",
-               browser_path[0], (unsigned long)free_clusters,
-               (unsigned long)free_kb);
-    }
-    else
-    {
-        printf("[FILE] f_getfree(%c:) failed: %u\r\n",
-               browser_path[0], (uint16_t)space_result);
-    }
-    browser_selected_item = 0U;
-    browser_first_visible = 0U;
-    browser_virtual_root = 0U;
-    browser_revision++;
-    if(result != FR_OK)
-    {
-        sprintf(browser_status, "Read failed - FatFs error %u", (uint16_t)result);
-    }
-    else if(browser_item_count >= BROWSER_MAX_ENTRIES)
-    {
-        menu_browser_set_status("Showing the first 64 entries");
-    }
-    else
-    {
-        sprintf(browser_status, "%u item(s)", (uint16_t)browser_item_count);
-    }
+    const char *dot = strrchr(path, '.');
+    uint8_t a, b;
+    if(!dot) return 0U;
+    do {
+        a = (uint8_t)*dot++; b = (uint8_t)*extension++;
+        if(a >= 'A' && a <= 'Z') a += 'a' - 'A';
+        if(a != b) return 0U;
+    } while(a);
     return 1U;
 }
 
-static void menu_browser_adjust_window(void)
+static uint8_t menu_file_kind(const char *path)
 {
-    if(browser_selected_item < browser_first_visible)
-    {
-        browser_first_visible = browser_selected_item;
-    }
-    else if(browser_selected_item >=
-            (uint8_t)(browser_first_visible + BROWSER_VISIBLE_ROWS))
-    {
-        browser_first_visible =
-            (uint8_t)(browser_selected_item - BROWSER_VISIBLE_ROWS + 1U);
-    }
+    static const char * const text_extensions[] = {
+        ".txt", ".log", ".md", ".csv", ".ini", ".cfg", ".json",
+        ".xml", ".yaml", ".yml", ".c", ".h", ".cpp", ".py"
+    };
+    uint8_t i;
+    if(menu_file_extension_is(path, ".bmp") || menu_file_extension_is(path, ".jpg") ||
+       menu_file_extension_is(path, ".jpeg") || menu_file_extension_is(path, ".jpe")) return FILE_VIEW_IMAGE;
+    for(i = 0U; i < sizeof(text_extensions) / sizeof(text_extensions[0]); i++)
+        if(menu_file_extension_is(path, text_extensions[i])) return FILE_VIEW_TEXT;
+    return FILE_VIEW_UNSUPPORTED;
 }
 
-static void menu_browser_enter_selected(void)
+static void menu_file_text_status(file_text_result_t result)
 {
-    size_t path_length;
-    size_t name_length;
-
-    if(browser_item_count == 0U)
-    {
-        return;
+    const file_text_page_t *text = file_text_get_page();
+    if(result == FILE_TEXT_IO_ERROR) {
+        snprintf(file_view_status, sizeof(file_view_status), "\xb6\xc1\xc8\xa1\xca\xa7\xb0\xdc\x20\x45\x25\x75\xa3\xac\xbc\xec\xb2\xe9\x20\x53\x44\x20\xbf\xa8\xa3\xbb\x4f\x4b\x20\xd6\xd8\xca\xd4",
+                 text->fatfs_error);
+    } else if(result == FILE_TEXT_INVALID) {
+        strcpy(file_view_status, "\xce\xc4\xbc\xfe\xb8\xf1\xca\xbd\xbb\xf2\xb1\xe0\xc2\xeb\xce\xde\xd0\xa7\xa3\xac\x4f\x4b\x20\xd6\xd8\xca\xd4");
+    } else if(result == FILE_TEXT_NOT_OPEN) {
+        strcpy(file_view_status, "\xce\xc4\xbc\xfe\xce\xb4\xb4\xf2\xbf\xaa\xa3\xac\x4f\x4b\x20\xd6\xd8\xca\xd4");
+    } else if(result == FILE_TEXT_CANCELLED) {
+        strcpy(file_view_status, "\xd2\xd1\xc8\xa1\xcf\xfb\xb6\xc1\xc8\xa1");
+    } else if(!text->file_size) {
+        strcpy(file_view_status, "\xbf\xd5\xce\xc4\xb5\xb5");
+    } else {
+        snprintf(file_view_status, sizeof(file_view_status), "\x25\x6c\x75\x20\x2f\x20\x25\x6c\x75\x20\xd7\xd6\xbd\xda\x25\x73",
+            (unsigned long)text->end_offset, (unsigned long)text->file_size,
+            text->has_next ? "" : "\x20\x20\xd2\xd1\xb5\xbd\xce\xc4\xb5\xb5\xc4\xa9\xce\xb2");
     }
-
-    if(browser_virtual_root != 0U)
-    {
-        strcpy(browser_path, "0:");
-        menu_browser_load_directory();
-        page_dirty = 1U;
-        page_changed = 1U;
-        return;
-    }
-
-    if(browser_entries[browser_selected_item].is_directory != 0U)
-    {
-        path_length = strlen(browser_path);
-        name_length = strlen(browser_entries[browser_selected_item].name);
-        if((path_length + name_length + 2U) >= sizeof(browser_path))
-        {
-            menu_browser_set_status("Path is too long");
-            page_dirty = 1U;
-            return;
-        }
-
-        browser_path[path_length++] = '/';
-        memcpy(&browser_path[path_length],
-               browser_entries[browser_selected_item].name, name_length + 1U);
-        menu_browser_load_directory();
-        page_dirty = 1U;
-        page_changed = 1U;
-    }
-    else
-    {
-        sprintf(browser_status, "Selected file | %lu bytes",
-                browser_entries[browser_selected_item].size);
-        page_dirty = 1U;
-    }
+    file_text_result = result;
 }
 
-static void menu_browser_go_back(void)
+static void menu_file_return(void)
 {
-    char *last_separator;
-
-    if(browser_virtual_root != 0U)
-    {
-        current_page = MENU_PAGE_CATEGORY;
-        page_dirty = 1U;
-        page_changed = 1U;
-        return;
-    }
-
-    last_separator = strrchr(browser_path, '/');
-    if(last_separator == NULL)
-    {
-        menu_browser_load_drives();
-    }
-    else
-    {
-        *last_separator = '\0';
-        menu_browser_load_directory();
-    }
-    page_dirty = 1U;
-    page_changed = 1U;
+    file_text_close();
+    file_image_pending = 0U;
+    current_page = MENU_PAGE_FILE_BROWSER;
+    page_dirty = page_changed = 1U;
 }
 
 static void menu_handle_browser_key(MenuKey key)
 {
-    switch(key)
-    {
-        case MENU_KEY_LEFT:
-            if(browser_item_count != 0U)
-            {
-                browser_selected_item = (browser_selected_item == 0U) ?
-                    (browser_item_count - 1U) : (browser_selected_item - 1U);
-                menu_browser_adjust_window();
-                page_dirty = 1U;
+    const FileBrowserState *browser = file_browser_state();
+    FileBrowserEnterResult result;
+    menu_file_begin();
+    if(key == MENU_KEY_LEFT || key == MENU_KEY_RIGHT) {
+        file_browser_move(key == MENU_KEY_LEFT ? -1 : 1);
+    } else if(key == MENU_KEY_BACK) {
+        if(file_browser_back()) {
+            current_page = MENU_PAGE_CATEGORY;
+            page_changed = 1U;
+        }
+    } else if(key == MENU_KEY_OK) {
+        if(!browser->virtual_root && !browser->visible_count) {
+            file_browser_refresh();
+            page_dirty = 1U;
+            return;
+        }
+        if(browser->visible_count) {
+            strncpy(file_view_name, browser->entries[browser->selected_row].name,
+                    sizeof(file_view_name) - 1U);
+            file_view_name[sizeof(file_view_name) - 1U] = '\0';
+        }
+        result = file_browser_enter(file_view_path, sizeof(file_view_path));
+        if(result == FILE_BROWSER_ENTER_FILE) {
+            /* 长文件名可能显示截断，但文件类型优先使用完整的磁盘路径别名。 */
+            file_view_kind = menu_file_kind(file_view_path);
+            if(file_view_kind == FILE_VIEW_UNSUPPORTED)
+                file_view_kind = menu_file_kind(file_view_name);
+            current_page = MENU_PAGE_FILE_VIEWER;
+            file_image_pending = file_view_kind == FILE_VIEW_IMAGE;
+            if(file_view_kind == FILE_VIEW_TEXT) {
+                menu_file_text_status(file_text_open(file_view_path));
+                if(file_operation_cancelled) menu_file_return();
             }
-            break;
+            page_changed = 1U;
+        }
+    }
+    page_dirty = 1U;
+}
 
-        case MENU_KEY_RIGHT:
-            if(browser_item_count != 0U)
-            {
-                browser_selected_item =
-                    (uint8_t)((browser_selected_item + 1U) % browser_item_count);
-                menu_browser_adjust_window();
-                page_dirty = 1U;
+static void menu_handle_file_viewer_key(MenuKey key)
+{
+    const file_text_page_t *text;
+    file_text_result_t result;
+    if(key == MENU_KEY_BACK) {
+        menu_file_return();
+        return;
+    }
+    menu_file_begin();
+    if(file_view_kind == FILE_VIEW_IMAGE && key == MENU_KEY_OK) {
+        file_image_pending = 1U;
+    } else if(file_view_kind == FILE_VIEW_TEXT) {
+        text = file_text_get_page();
+        result = file_text_result;
+        if(key == MENU_KEY_OK) {
+            if(file_text_result != FILE_TEXT_OK && file_text_result != FILE_TEXT_END)
+                result = file_text_open(file_view_path);
+            else
+                result = file_text_set_encoding((file_text_encoding_t)
+                    (((unsigned)text->encoding + 1U) % (FILE_TEXT_ENCODING_UTF16_BE + 1U)));
+        } else if(key == MENU_KEY_LEFT) result = file_text_previous();
+        else if(key == MENU_KEY_RIGHT) result = file_text_next();
+        menu_file_text_status(result);
+        if(file_operation_cancelled) menu_file_return();
+    }
+    page_dirty = 1U;
+}
+
+static void menu_draw_browser(void)
+{
+    const FileBrowserState *browser = file_browser_state();
+    const char *path = browser->virtual_root ? "\xb4\xe6\xb4\xa2\xc9\xe8\xb1\xb8" : browser->path;
+    char status[96];
+    if(browser->virtual_root) strcpy(status, "\x4f\x4b\x20\xe4\xaf\xc0\xc0\x20\x53\x44\x20\xbf\xa8\xa3\xac\xd6\xa7\xb3\xd6\xcd\xbc\xc6\xac\xba\xcd\xce\xc4\xb5\xb5");
+    else if(browser->status == FILE_BROWSER_IO_ERROR)
+        snprintf(status, sizeof(status), "\xb6\xc1\xc8\xa1\xca\xa7\xb0\xdc\x20\x45\x25\x75\xa3\xac\xbc\xec\xb2\xe9\x20\x53\x44\x20\xbf\xa8\xa3\xbb\x4f\x4b\x20\xd6\xd8\xca\xd4", (unsigned)browser->result);
+    else if(browser->status == FILE_BROWSER_PATH_LIMIT) strcpy(status, "\xc4\xbf\xc2\xbc\xb9\xfd\xc9\xee\xbb\xf2\xc2\xb7\xbe\xb6\xb9\xfd\xb3\xa4");
+    else if(browser->status == FILE_BROWSER_CANCELLED) strcpy(status, "\xd2\xd1\xc8\xa1\xcf\xfb\xb6\xc1\xc8\xa1\xa3\xac\x4f\x4b\x20\xd6\xd8\xca\xd4");
+    else if(!browser->total_count) strcpy(status, "\xbf\xd5\xc4\xbf\xc2\xbc\xa3\xac\x4f\x4b\x20\xd6\xd8\xd0\xc2\xb6\xc1\xc8\xa1");
+    else status[0] = '\0';
+    file_browser_page(path, browser->entries, browser->visible_count, browser->selected_row,
+                      0U, browser->revision, status);
+    file_browser_position(browser->visible_count ? browser->first_index + browser->selected_row + 1U : 0U,
+                          browser->total_count, !browser->virtual_root && !browser->visible_count);
+}
+
+static void menu_draw_file_viewer(void)
+{
+    const file_text_page_t *text;
+    static const char * const encodings[] = {"UTF-8", "GBK", "UTF-16 LE", "UTF-16 BE"};
+    char position[40], kind[48];
+    FileImageInfo image;
+    FileImageResult result;
+    static const char unsupported[][75] = {
+        "\xb4\xcb\xb8\xf1\xca\xbd\xd4\xdd\xb2\xbb\xd6\xa7\xb3\xd6\xd4\xa4\xc0\xc0\xa1\xa3",
+        "",
+        "\xcd\xbc\xc6\xac\xa3\xba\x4a\x50\x47\x20\x2f\x20\x4a\x50\x45\x47\x20\x2f\x20\x42\x4d\x50",
+        "\xce\xc4\xb5\xb5\xa3\xba\x54\x58\x54\x20\x2f\x20\x4c\x4f\x47\x20\x2f\x20\x4d\x44\x20\x2f\x20\x43\x53\x56\x20\x2f\x20\x49\x4e\x49\x20\x2f\x20\x4a\x53\x4f\x4e\x20\xb5\xc8\xb4\xbf\xce\xc4\xb1\xbe",
+        "",
+        "\x50\x44\x46\x20\x2f\x20\x57\x6f\x72\x64\x20\xc7\xeb\xcf\xc8\xd7\xaa\xbb\xbb\xb3\xc9\x20\x54\x58\x54\x20\xbb\xf2\x20\x4a\x50\x47\x20\x2f\x20\x42\x4d\x50\xa1\xa3",
+        "",
+        "\x42\x41\x43\x4b\x20\xb7\xb5\xbb\xd8\xce\xc4\xbc\xfe\xc1\xd0\xb1\xed\xa1\xa3"
+    };
+    if(file_view_kind == FILE_VIEW_TEXT) {
+        text = file_text_get_page();
+        if(text->page_number)
+            snprintf(position, sizeof(position), "\xb5\xda\x20\x25\x6c\x75\x20\xd2\xb3\x25\x73", (unsigned long)text->page_number,
+                     text->has_next ? "" : "\x20\x2f\x20\xc4\xa9\xd2\xb3");
+        else position[0] = '\0';
+        snprintf(kind, sizeof(kind), "\xce\xc4\xb5\xb5\x20\x2f\x20\x25\x73", encodings[text->encoding]);
+        file_preview_page(file_view_name, kind, &text->lines[0][0], sizeof(text->lines[0]),
+            text->line_count, file_view_status, position, 1U, 1U);
+    } else if(file_view_kind == FILE_VIEW_IMAGE) {
+        if(file_image_pending) {
+            file_image_pending = 0U;
+            file_preview_page(file_view_name, "\xcd\xbc\xc6\xac\x20\x2f\x20\xd7\xd4\xb6\xaf\xcb\xf5\xb7\xc5", NULL, 0U, 0U,
+                "\xd5\xfd\xd4\xda\xb6\xc1\xc8\xa1\xcd\xbc\xc6\xac\xa3\xac\x42\x41\x43\x4b\x20\xbf\xc9\xc8\xa1\xcf\xfb", "", 1U, 0U);
+            /* 先显示读取提示，再在保留帧中合成图片，避免直接写屏造成撕裂。 */
+            gui_clock_overlay();
+            LCD_EndPage();
+            LCD_BeginUpdate();
+            menu_file_begin();
+            memset(&image, 0, sizeof(image));
+            result = file_image_draw(file_view_path, 24U, 136U, 752U, 280U,
+                                     &image, menu_file_service, NULL);
+            if(result == FILE_IMAGE_CANCELLED) {
+                menu_file_return();
+                /* 丢弃尚未完成的图片，直接合成列表，取消时不提交半张图片。 */
+                gui_prepare_page();
+                menu_draw_browser();
+                page_dirty = page_changed = 0U;
+                return;
             }
-            break;
-
-        case MENU_KEY_OK:
-            menu_browser_enter_selected();
-            break;
-
-        case MENU_KEY_BACK:
-            menu_browser_go_back();
-            break;
-
-        default:
-            break;
+            if(result == FILE_IMAGE_OK) {
+                snprintf(file_view_status, sizeof(file_view_status), "\x25\x6c\x75\x20\x78\x20\x25\x6c\x75\x20\x2d\x3e\x20\x25\x75\x20\x78\x20\x25\x75\x20\xcf\xf1\xcb\xd8",
+                    (unsigned long)image.width, (unsigned long)image.height,
+                    image.drawn_width, image.drawn_height);
+            } else if(result == FILE_IMAGE_IO) strcpy(file_view_status, "\xb6\xc1\xc8\xa1\xca\xa7\xb0\xdc\xa3\xac\xc7\xeb\xbc\xec\xb2\xe9\x20\x53\x44\x20\xbf\xa8\xa3\xbb\x4f\x4b\x20\xd6\xd8\xca\xd4");
+            else if(result == FILE_IMAGE_TOO_LARGE) strcpy(file_view_status, "\xcd\xbc\xc6\xac\xb9\xfd\xb4\xf3\xa3\xac\xc7\xeb\xcb\xf5\xd0\xa1\xba\xf3\xd6\xd8\xca\xd4");
+            else if(result == FILE_IMAGE_UNSUPPORTED) strcpy(file_view_status, "\xb2\xbb\xd6\xa7\xb3\xd6\xb4\xcb\xcd\xbc\xc6\xac\xb1\xe0\xc2\xeb\xa3\xac\xc7\xeb\xd7\xaa\xbb\xbb\xce\xaa\xc6\xd5\xcd\xa8\x20\x4a\x50\x47\x20\xbb\xf2\x20\x42\x4d\x50");
+            else strcpy(file_view_status, "\xcd\xbc\xc6\xac\xca\xfd\xbe\xdd\xcb\xf0\xbb\xb5\xbb\xf2\xce\xc4\xbc\xfe\xb2\xbb\xcd\xea\xd5\xfb");
+            file_preview_page(file_view_name, "\xcd\xbc\xc6\xac\x20\x2f\x20\xd7\xd4\xb6\xaf\xcb\xf5\xb7\xc5", NULL, 0U, 0U,
+                              file_view_status, "", result != FILE_IMAGE_OK, 0U);
+        }
+    } else {
+        file_preview_page(file_view_name, "\xce\xc4\xbc\xfe\xb8\xf1\xca\xbd", &unsupported[0][0], sizeof(unsupported[0]),
+                          sizeof(unsupported) / sizeof(unsupported[0]), "\xd6\xbb\xb6\xc1\xe4\xaf\xc0\xc0\xa3\xac\xce\xc4\xbc\xfe\xc4\xda\xc8\xdd\xb2\xbb\xbb\xe1\xd0\xde\xb8\xc4", "", 1U, 0U);
     }
 }
 
@@ -1171,6 +1177,12 @@ static void menu_handle_page_key(MenuKey key)
         return;
     }
 
+    if(current_page == MENU_PAGE_FILE_VIEWER)
+    {
+        menu_handle_file_viewer_key(key);
+        return;
+    }
+
     if(current_page == MENU_PAGE_FILE_BROWSER)
     {
         menu_handle_browser_key(key);
@@ -1256,9 +1268,11 @@ static void menu_draw_current_page(void)
             break;
 
         case MENU_PAGE_FILE_BROWSER:
-            file_browser_page(browser_path, browser_entries, browser_item_count,
-                              browser_selected_item, browser_first_visible,
-                              browser_revision, browser_status);
+            menu_draw_browser();
+            break;
+
+        case MENU_PAGE_FILE_VIEWER:
+            menu_draw_file_viewer();
             break;
 
         case MENU_PAGE_PARAMETER_SETTINGS:
@@ -1387,7 +1401,8 @@ void menu_post_repeat(MenuKey key)
     if(key != MENU_KEY_LEFT && key != MENU_KEY_RIGHT) return;
     if(current_page != MENU_PAGE_HOME && current_page != MENU_PAGE_CATEGORY &&
        current_page != MENU_PAGE_PARAMETER_SETTINGS && current_page != MENU_PAGE_NRF &&
-       current_page != MENU_PAGE_FILE_BROWSER && current_page != MENU_PAGE_CALENDAR) return;
+       current_page != MENU_PAGE_FILE_BROWSER && current_page != MENU_PAGE_FILE_VIEWER &&
+       current_page != MENU_PAGE_CALENDAR) return;
     if(event_read_index != event_write_index || repeat_pending) return;
     repeat_key = key;
     repeat_pending = 1U;

@@ -10,6 +10,8 @@ extern unsigned char fatfs_write_buff[512];
 
 void fatfs_sdcard_test(void)
 {
+	/* 只写入正文，避免将缓冲区末尾的零填充保存到文本文件。 */
+	const UINT text_length = (UINT)strlen((const char *)fatfs_write_buff);
 	printf("===========================SD卡文件系统移植测试开始=============================\n\r");
 	
 	//在SDCard挂载文件系统，文件系统挂载时会对SDCard设备初始化
@@ -60,11 +62,15 @@ void fatfs_sdcard_test(void)
 	{
 		printf("》打开/创建FatFs读写测试文件.txt文件成功，向文件写入数据。\r\n");
 		/* 将指定存储区内容写入到文件内 */
-		res=f_write(&fnew_sdcard,fatfs_write_buff,sizeof(fatfs_write_buff),&fnum);
-		if(res==FR_OK)
+		res=f_write(&fnew_sdcard,fatfs_write_buff,text_length,&fnum);
+		if(res==FR_OK && fnum==text_length)
 		{	
 			printf("》文件写入成功，写入字节数据：%d\n",fnum);
 			printf("》向文件写入的数据为：\r\n%s\r\n",fatfs_write_buff);
+		}
+		else if(res==FR_OK)
+		{
+			printf("文件写入不完整：实际 %u / 预期 %u 字节\r\n",fnum,text_length);
 		}
 		else
 		{

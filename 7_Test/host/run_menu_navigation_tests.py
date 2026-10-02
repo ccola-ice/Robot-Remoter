@@ -31,8 +31,8 @@ functions = '\n'.join(match(r'(^' + r'(?:static )?(?:void|uint8_t|uint32_t) ' + 
 with tempfile.TemporaryDirectory(prefix='remoter-menu-navigation-') as folder:
     temp = Path(folder)
     (temp / 'stm32f4xx.h').write_text('#include <stdint.h>\n')
-    (temp / 'menu_state.inc').write_text(constants + '\n' + state)
-    (temp / 'menu_functions.inc').write_text(functions)
+    (temp / 'menu_state.inc').write_text(constants + '\n' + state, encoding='latin1')
+    (temp / 'menu_functions.inc').write_text(functions, encoding='latin1')
     exe = temp / 'test.exe'
     subprocess.run([compiler, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
                     '-I' + str(temp), '-I' + str(root / '1_App'),

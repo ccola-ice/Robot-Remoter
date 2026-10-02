@@ -10,8 +10,8 @@
 typedef struct {
     uint16_t sequence;
     int16_t x, y, heading; /* 前两项范围为 ±1000；第三项为 ±1800，单位为 0.1 度。 */
-    uint16_t limit;       /* 相对接收端配置的轮速上限，取值 0..1000，表示千分比。 */
-    uint16_t digital;     /* 低六位对应 DCH1..6，输入为低电平有效。 */
+    uint16_t limit;        /* 相对接收端配置的轮速上限，取值 0..1000，表示千分比。 */
+    uint16_t digital;      /* 低六位对应 DCH1..6，输入为低电平有效。 */
     uint8_t armed;
 } RobotControlCommand;
 

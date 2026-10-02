@@ -822,6 +822,49 @@ static void test_chinese_file_rendering(void)
 
 #include "lcd_transaction_test.inc"
 
+static const char document_fixture[][75] = {
+    "\xce\xc4\xbc\xfe\xe4\xaf\xc0\xc0 / \xce\xc4\xb5\xb5\xd4\xa4\xc0\xc0",
+    "",
+    "TXT / LOG / MD / CSV / JSON",
+    "UTF-8 / GBK / UTF-16",
+    "",
+    "\xc9\xcf/\xcf\xc2 \xb7\xad\xd2\xb3  OK \xb1\xe0\xc2\xeb  BACK \xb7\xb5\xbb\xd8"
+};
+
+static void draw_document_fixture(unsigned shorter)
+{
+    file_preview_page("\xce\xc4\xbc\xfe.txt", "\xce\xc4\xb5\xb5 / UTF-8",
+        &document_fixture[0][0], sizeof(document_fixture[0]), shorter ? 1U : 6U,
+        "1024 / 8192 \xd7\xd6\xbd\xda", "\xb5\xda 2 \xd2\xb3", 1U, 1U);
+}
+
+static void test_file_preview_pixels(void)
+{
+    unsigned x, y, missing_font_ink = 0U;
+    LCD_PageBuffer_Enable(1U);
+    gui_prepare_page(); draw_document_fixture(1U); LCD_EndPage();
+    memcpy(expected, panel, sizeof(panel));
+    gui_prepare_page(); draw_document_fixture(0U); LCD_EndPage();
+    LCD_BeginUpdate(); draw_document_fixture(1U); LCD_EndPage();
+    assert(memcmp(expected, panel, sizeof(panel)) == 0);
+    gui_prepare_page();
+    file_preview_page("PHOTO.JPG", "JPG", NULL, 0U, 0U, "752 x 280", "", 1U, 0U);
+    ui_fill(24U, 136U, 752U, 280U, 0x1248U);
+    LCD_EndPage();
+    LCD_BeginUpdate();
+    file_preview_page("PHOTO.JPG", "JPG", NULL, 0U, 0U, "Complete", "", 0U, 0U);
+    gui_clock_overlay();
+    LCD_EndPage();
+    for(y = 136U; y < 416U; y++)
+        for(x = 24U; x < 776U; x++) assert(panel[y * 800U + x] == 0x1248U);
+    gui_prepare_page();
+    file_preview_page("\xcb\xb5\xc3\xf7.txt", "TXT", NULL, 0U, 0U, "", "", 1U, 0U);
+    LCD_EndPage();
+    for(y = 98U; y < 130U; y++)
+        for(x = 32U; x < 96U; x++) missing_font_ink += panel[y * 800U + x] == UI_ACCENT;
+    assert(missing_font_ink != 0U);
+}
+
 int main(int argc, char **argv)
 {
     if(argc > 2) {
@@ -844,6 +887,7 @@ int main(int argc, char **argv)
     test_catalog_pixels(); test_output_pixels(); test_settings_pixels(); test_dashboard_truth(); test_clock_overlay();
     test_calendar_pixels();
     test_chinese_file_rendering();
+    test_file_preview_pixels();
     if(argc > 1) {
         ControlLinkSnapshot snapshot = {0};
         GuiRobotTelemetry telemetry = {0};
@@ -882,8 +926,12 @@ int main(int argc, char **argv)
         save_preview(argv[1], "parameter-settings.bmp");
         gui_prepare_page(); nrf_settings_page(1U, 0U, 1U, 40U, 3U, 2U, "\xd0\xde\xb8\xc4\xb5\xc4\xca\xc7\xb2\xdd\xb8\xe5\xa3\xac\xd3\xa6\xd3\xc3\xb2\xa2\xb1\xa3\xb4\xe6\xba\xf3\xc9\xfa\xd0\xa7", 1U, 1U, 40U, 3U, 2U); LCD_EndPage();
         save_preview(argv[1], "wireless-settings.bmp");
-        gui_prepare_page(); file_browser_page("0:/", preview_files, 7U, 2U, 0U, 1U, "Select a folder to open"); LCD_EndPage();
+        gui_prepare_page(); file_browser_page("0:/", preview_files, 7U, 2U, 0U, 1U,
+            "");
+        file_browser_position(3U, 130U, 0U); LCD_EndPage();
         save_preview(argv[1], "file-browser.bmp");
+        gui_prepare_page(); draw_document_fixture(0U); LCD_EndPage();
+        save_preview(argv[1], "text-reader.bmp");
         {
 #include "lcd_diag_names.inc"
             uint8_t states[TEST_COUNT]={0};
