@@ -16,6 +16,9 @@ virtualFolder:
         - path: ../1_App/file_browser.c
         - path: ../1_App/file_text.c
         - path: ../1_App/file_image.c
+        - path: ../1_App/file_png.c
+        - path: ../1_App/file_gif.c
+        - path: ../1_App/system_settings.c
         - path: ../1_App/control_link.c
         - path: ../1_App/param.c
         - path: ../1_App/boot_status.c

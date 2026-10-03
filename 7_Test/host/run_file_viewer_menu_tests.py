@@ -23,7 +23,7 @@ names = [
     "menu_file_service", "menu_file_begin", "menu_browser_load_drives",
     "menu_file_extension_is", "menu_file_kind", "menu_file_text_status",
     "menu_file_return", "menu_handle_browser_key", "menu_handle_file_viewer_key",
-    "menu_draw_browser", "menu_draw_file_viewer", "menu_handle_page_key",
+    "menu_draw_browser", "menu_image_error", "menu_gif_tick", "menu_draw_gif", "menu_draw_file_viewer", "menu_handle_page_key",
     "menu_refresh_dynamic_page", "menu_tick_10ms", "menu_process",
 ]
 functions = "\n".join(match(

@@ -95,6 +95,9 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
                              uint8_t dirty, uint16_t revision,
                              const char *status_text);
 
+void system_settings_page(const GuiParamRow *rows, uint8_t selected,
+                          uint8_t editing, uint8_t dirty, const char *status);
+
 void nrf_settings_page(uint8_t selected_item, uint8_t editing,
                        uint8_t enabled, uint8_t channel,
                        uint8_t power_index, uint8_t data_rate,

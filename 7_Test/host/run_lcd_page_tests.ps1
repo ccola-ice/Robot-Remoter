@@ -53,7 +53,7 @@ try {
         'gui_robot_stick_value', 'gui_robot_dot_patch', 'gui_robot_draw_stick', 'gui_robot_format_value', 'robot_control_page',
         'gui_file_decode_utf8', 'gui_file_source_is_utf8', 'gui_file_display_text', 'gui_file_size_text',
         'gui_settings_row', 'gui_settings_scroll', 'gui_file_row_icon',
-        'parameter_settings_page', 'nrf_settings_page', 'file_browser_page', 'file_browser_position',
+        'parameter_settings_page', 'system_settings_page', 'nrf_settings_page', 'file_browser_page', 'file_browser_position',
         'gui_file_text_line', 'file_preview_page', 'calendar_page')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_gui.inc'), ($mapping + [Environment]::NewLine + $guiFunctions), $enc)
     $diag = [IO.File]::ReadAllText((Join-Path $repo '1_App/diagnostics.c'), $enc)

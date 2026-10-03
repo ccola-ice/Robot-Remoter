@@ -20,6 +20,15 @@ static unsigned nrf_loads, browser_loads, param_loads, raw_draws, output_draws, 
 static void menu_nrf_load_settings(void) { nrf_loads++; }
 static void menu_browser_load_drives(void) { browser_loads++; }
 static void menu_param_load(void) { param_loads++; }
+static void menu_system_load(void) {}
+static void menu_gif_tick(void) {}
+static void system_key_beep(void) {}
+static void system_key_beep_stop(void) {}
+static void menu_handle_system_key(MenuKey key)
+{
+    assert(key == MENU_KEY_BACK);
+    current_page = MENU_PAGE_CATEGORY; page_changed = page_dirty = 1U;
+}
 static void menu_calendar_load(void) { memset(&calendar_state,0,sizeof(calendar_state)); }
 static void menu_handle_calendar_key(MenuKey key)
 {
@@ -74,21 +83,21 @@ static void test_all_routes(void)
 {
     static const MenuPage expected[] = {
         MENU_PAGE_ROBOT_CONTROL, MENU_PAGE_MONITOR, MENU_PAGE_DIGITAL_CHANNELS,
-        MENU_PAGE_PARAMETER_SETTINGS, MENU_PAGE_NRF, MENU_PAGE_CALENDAR, MENU_PAGE_SYSTEM_INFO,
+        MENU_PAGE_PARAMETER_SETTINGS, MENU_PAGE_NRF, MENU_PAGE_CALENDAR, MENU_PAGE_SYSTEM_SETTINGS, MENU_PAGE_SYSTEM_INFO,
         MENU_PAGE_IMU, MENU_PAGE_GPS, MENU_PAGE_FILE_BROWSER,
         MENU_PAGE_CATEGORY, MENU_PAGE_CATEGORY
     };
     unsigned entry, step;
     for(entry = 0U; entry < sizeof(expected) / sizeof(expected[0]); entry++) {
-        unsigned group = entry < 3U ? 0U : entry < 6U ? 1U : 2U;
-        unsigned first = group == 0U ? 0U : group == 1U ? 3U : 6U;
+        unsigned group = menu_entry_group(entry);
+        unsigned first = menu_group_first(group);
         open_group(group);
         for(step = first; step < entry; step++) press(MENU_KEY_RIGHT);
         assert(selected_item == entry);
         press(MENU_KEY_OK);
         assert(current_page == expected[entry]);
         assert(menu_control_active() == (entry == 0U));
-        if(entry == 3U || entry == 4U || entry == 9U) continue;
+        if(entry == MENU_ENTRY_PARAMETER_SETTINGS || entry == MENU_ENTRY_NRF || entry == MENU_ENTRY_FILE_BROWSER) continue;
         if(current_page != MENU_PAGE_CATEGORY) press(MENU_KEY_BACK);
         assert(current_page == MENU_PAGE_CATEGORY && selected_item == entry);
         assert(!menu_control_active());
@@ -104,8 +113,8 @@ static void test_all_routes(void)
 static void test_wrap_and_memory(void)
 {
     unsigned group, count;
-    static const unsigned first[] = {0U, 3U, 6U};
-    static const unsigned size[] = {3U, 3U, 6U};
+    static const unsigned first[] = {0U, 3U, 7U};
+    static const unsigned size[] = {3U, 4U, 6U};
     menu_init(); menu_process();
     press(MENU_KEY_LEFT); assert(selected_group == 2U);
     press(MENU_KEY_RIGHT); assert(selected_group == 0U);
@@ -181,7 +190,7 @@ static void test_repeat_dispatch(void)
     before = repeat_cancels;
     menu_post_repeat(MENU_KEY_RIGHT); press(MENU_KEY_OK);
     assert(current_page == MENU_PAGE_CATEGORY && repeat_cancels == before + 1U && !repeat_held);
-    menu_post_repeat(MENU_KEY_RIGHT); menu_process(); assert(selected_item == 6U);
+    menu_post_repeat(MENU_KEY_RIGHT); menu_process(); assert(selected_item == 7U);
     open_group(1U); press(MENU_KEY_RIGHT); press(MENU_KEY_RIGHT); press(MENU_KEY_OK);
     assert(current_page == MENU_PAGE_CALENDAR);
     repeat_held = MENU_KEY_RIGHT + 1U; before = repeat_cancels;
@@ -199,6 +208,6 @@ int main(void)
     test_all_routes(); test_wrap_and_memory(); test_monitor_is_observer(); test_render_transactions();
     test_repeat_dispatch();
     assert(draws > 0U);
-    puts("Menu navigation: all 12 routes, selection memory, repeat release/context/priority/coalescing, service event discard, monitor isolation and robot exit: PASS");
+    puts("Menu navigation: all 13 routes, selection memory, repeat release/context/priority/coalescing, service event discard, monitor isolation and robot exit: PASS");
     return 0;
 }

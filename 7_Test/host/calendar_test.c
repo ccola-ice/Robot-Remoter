@@ -11,6 +11,7 @@ static RtcCalendar rtc_now,last_written;
 static RtcTimeSource rtc_source,last_source;
 static uint8_t read_error,write_error,rtc_valid,gps_fresh,gps_expires_during_action;
 static uint8_t current_page,page_changed,page_dirty;
+static uint8_t calendar_return_page = MENU_PAGE_CATEGORY;
 static unsigned rtc_writes,fresh_checks;
 static struct { int year,mon,day,hour,min,sec; } beiJingTime;
 

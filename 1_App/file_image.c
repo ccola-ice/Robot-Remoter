@@ -1,4 +1,5 @@
 #include "file_image.h"
+#include "file_png.h"
 #include "ff.h"
 #include "tjpgd.h"
 #include "bsp_fsmc_lcd.h"
@@ -10,6 +11,21 @@
 #define IMAGE_LINE_PIXELS 800U
 #define IMAGE_IO_BYTES 512U
 #define IMAGE_JPEG_POOL 7168U
+
+static void *image_workspace;
+static uint32_t image_workspace_capacity;
+
+void file_image_set_workspace(void *buffer, uint32_t capacity)
+{
+    image_workspace = buffer;
+    image_workspace_capacity = buffer ? capacity : 0U;
+}
+
+void *file_image_get_workspace(uint32_t *capacity)
+{
+    if(capacity) *capacity = image_workspace_capacity;
+    return image_workspace;
+}
 
 /* 文件缓存和解码工作区放在静态区，避免挤占主循环栈。 */
 static struct {
@@ -402,7 +418,17 @@ FileImageResult file_image_draw(const char *path, uint16_t x, uint16_t y,
     else if(image_read(image.bytes, 2U)) {
         if(image.bytes[0] == 'B' && image.bytes[1] == 'M') image_bmp(info);
         else if(image.bytes[0] == 0xFFU && image.bytes[1] == 0xD8U) image_jpeg(info);
-        else image.status = FILE_IMAGE_UNSUPPORTED;
+        else if(image.bytes[0] == 0x89U && image.bytes[1] == 'P') {
+            /* PNG 有独立的流式文件对象，交接前关闭当前对象。 */
+            if(f_close(&image.file) != FR_OK) {
+                image.busy = 0U;
+                return FILE_IMAGE_IO;
+            }
+            result = file_png_draw(path, x, y, w, h, info, service, context,
+                                  image_workspace, image_workspace_capacity);
+            image.busy = 0U;
+            return result;
+        } else image.status = FILE_IMAGE_UNSUPPORTED;
     }
     if(f_close(&image.file) != FR_OK && image.status == FILE_IMAGE_OK) image.status = FILE_IMAGE_IO;
     result = image.status;

@@ -6,6 +6,7 @@
 #include "file_browser.h"
 #include "file_text.h"
 #include "file_image.h"
+#include "file_gif.h"
 
 #define DIGITAL_CHANNEL_COUNT 8U
 #include "file_viewer_state.inc"
@@ -28,8 +29,12 @@ static unsigned background_calls, clock_draws, commits, mounts;
 static uint32_t browser_position, browser_total;
 static uint8_t browser_retry, text_live, cancel_next_operation, inject_background_back;
 static uint8_t transaction, last_text_mode, last_clear, last_lines, cancelled_image_visible;
+static uint32_t now_ms;
+static unsigned gif_opens, gif_nexts, gif_closes;
+static uint8_t gif_opened, gif_ended, gif_end_next, inject_background_ok;
 
 static void menu_handle_page_key(MenuKey key);
+static uint8_t menu_file_service(void *context);
 static void menu_draw_browser(void);
 static void menu_draw_file_viewer(void);
 static void menu_dispatch_key(MenuKey key) { menu_handle_page_key(key); }
@@ -56,6 +61,9 @@ static void menu_handle_category_key(MenuKey key) { (void)key; }
 static void menu_handle_nrf_key(MenuKey key) { (void)key; assert(0); }
 static void menu_handle_calendar_key(MenuKey key) { (void)key; assert(0); }
 static void menu_handle_param_key(MenuKey key) { (void)key; assert(0); }
+static void menu_handle_system_key(MenuKey key) { (void)key; assert(0); }
+static void system_key_beep(void) {}
+static int get_tick_count(unsigned long *time) { *time = now_ms; return 0; }
 void menu_group_page(uint8_t group) { (void)group; assert(0); }
 static void menu_draw_monitor(void) { assert(0); }
 static void digital_channel_get_snapshot(uint8_t *raw, uint8_t *stable)
@@ -147,6 +155,43 @@ file_text_result_t file_text_set_encoding(file_text_encoding_t encoding)
 void file_text_close(void) { ++text_closes; text_live = 0U; }
 const file_text_page_t *file_text_get_page(void) { return &mock_text; }
 
+void *file_image_get_workspace(uint32_t *capacity)
+{
+    static uint32_t workspace[2];
+    *capacity = sizeof(workspace); return workspace;
+}
+FileImageResult file_gif_open(const char *path, uint16_t x, uint16_t y,
+                              uint16_t w, uint16_t h, uint16_t background,
+                              FileImageInfo *info, void *scratch, uint32_t capacity,
+                              uint8_t (*service)(void *), void *context)
+{
+    ++gif_opens;
+    assert(transaction && !strcmp(path, mock_path) && scratch && capacity == 8U);
+    assert(x == 24U && y == 136U && w == 752U && h == 280U && background == 0xffffU);
+    if(cancel_next_operation) { cancel_next_operation = 0U; menu_post_key(MENU_KEY_BACK); }
+    if(!service(context)) return FILE_IMAGE_CANCELLED;
+    gif_opened = mock_image_result == FILE_IMAGE_OK; gif_ended = 0U;
+    info->width = 640U; info->height = 400U;
+    info->drawn_width = 320U; info->drawn_height = 200U;
+    return mock_image_result;
+}
+FileImageResult file_gif_next(void)
+{
+    assert(transaction && gif_opened); ++gif_nexts;
+    if(cancel_next_operation) {
+        cancel_next_operation = 0U; menu_post_key(MENU_KEY_BACK);
+        assert(!menu_file_service(NULL)); gif_opened = 0U;
+        return FILE_IMAGE_CANCELLED;
+    }
+    if(mock_image_result != FILE_IMAGE_OK) gif_opened = 0U;
+    if(gif_end_next) { gif_end_next = 0U; gif_ended = 1U; gif_opened = 0U; }
+    return mock_image_result;
+}
+void file_gif_close(void) { if(gif_opened) ++gif_closes; gif_opened = 0U; }
+uint32_t file_gif_delay_ms(void) { return 100U; }
+uint8_t file_gif_finished(void) { return gif_ended; }
+uint8_t file_gif_is_open(void) { return gif_opened; }
+
 FileImageResult file_image_draw(const char *path, uint16_t x, uint16_t y,
                                uint16_t width, uint16_t height, FileImageInfo *info,
                                uint8_t (*service)(void *), void *context)
@@ -188,6 +233,9 @@ static void background(void)
 {
     ++background_calls;
     if(inject_background_back) { inject_background_back = 0U; menu_post_key(MENU_KEY_BACK); }
+    if(inject_background_ok && current_page == MENU_PAGE_FILE_VIEWER) {
+        inject_background_ok = 0U; menu_post_key(MENU_KEY_OK);
+    }
 }
 
 static void setup(const char *path, const char *name)
@@ -213,6 +261,9 @@ static void setup(const char *path, const char *name)
     mock_image_result = FILE_IMAGE_OK;
     text_opens = text_closes = text_nexts = text_previouses = encoding_changes = 0U;
     image_draws = preview_draws = browser_draws = browser_refreshes = 0U;
+    now_ms = gif_opens = gif_nexts = gif_closes = 0U;
+    gif_opened = gif_ended = gif_paused = gif_step_pending = gif_toggle_pending = 0U;
+    gif_end_next = inject_background_ok = 0U;
     clock_draws = commits = background_calls = mounts = 0U;
     transaction = text_live = cancel_next_operation = inject_background_back = cancelled_image_visible = 0U;
     event_read_index = event_write_index = repeat_pending = 0U;
@@ -360,6 +411,56 @@ static void test_long_display_names_keep_document_and_image_type(void)
     press(MENU_KEY_BACK);
 }
 
+static void test_png_and_gif_playback(void)
+{
+    unsigned nexts;
+    setup("0:/ALPHA.PNG", "Alpha.png");
+    press(MENU_KEY_OK);
+    assert(file_view_kind == FILE_VIEW_IMAGE && image_draws == 1U);
+    press(MENU_KEY_BACK);
+
+    setup("0:/ANIM.GIF", "Animation.gif");
+    press(MENU_KEY_OK);
+    assert(file_view_kind == FILE_VIEW_GIF && gif_opens == 1U && gif_opened);
+    assert(last_text_mode == 2U && !image_draws && !text_opens);
+    now_ms = 99U; menu_process(); assert(gif_nexts == 0U);
+    now_ms = 100U; menu_process(); assert(gif_nexts == 1U);
+    press(MENU_KEY_OK); assert(gif_paused);
+    now_ms = 5000U; clock_refresh_due = 1U; menu_process();
+    assert(gif_nexts == 1U && !transaction);
+    press(MENU_KEY_OK); assert(!gif_paused && gif_nexts == 1U);
+    now_ms = 5100U; menu_process(); assert(gif_nexts == 2U);
+    now_ms = 9000U; menu_process(); assert(gif_nexts == 3U);
+    menu_process(); assert(gif_nexts == 3U); /* No accumulated frame burst. */
+    gif_end_next = 1U;
+    now_ms = 12000U; menu_process(); assert(gif_nexts == 4U && !gif_opened);
+    assert(strstr(last_status, "OK"));
+    press(MENU_KEY_OK); assert(gif_opens == 2U && !gif_ended);
+    now_ms += 100U; cancel_next_operation = 1U; menu_process();
+    assert(current_page == MENU_PAGE_FILE_BROWSER && !gif_opened && !transaction);
+
+    setup("0:/ANIM.GIF", "Animation.gif");
+    now_ms = UINT32_MAX - 50U;
+    press(MENU_KEY_OK);
+    now_ms = 48U; menu_process(); assert(gif_nexts == 0U);
+    now_ms = 49U; menu_process(); assert(gif_nexts == 1U);
+    now_ms = 149U; mock_image_result = FILE_IMAGE_IO; menu_process();
+    assert(!gif_opened && strstr(last_status, "OK"));
+    mock_image_result = FILE_IMAGE_OK;
+    press(MENU_KEY_OK); assert(gif_opened && gif_opens == 2U);
+    nexts = gif_nexts;
+    now_ms += 100U; press(MENU_KEY_BACK);
+    assert(!gif_opened && gif_nexts == nexts && current_page == MENU_PAGE_FILE_BROWSER);
+
+    setup("0:/ANIM.GIF", "Animation.gif");
+    inject_background_ok = 1U;
+    press(MENU_KEY_OK);
+    assert(gif_toggle_pending && !gif_paused);
+    menu_process(); assert(gif_paused && !gif_toggle_pending);
+    now_ms = 5000U; menu_process(); assert(gif_nexts == 0U);
+    press(MENU_KEY_BACK); assert(!gif_opened);
+}
+
 int main(void)
 {
     test_text_navigation_encoding_and_return();
@@ -367,6 +468,7 @@ int main(void)
     test_errors_retry_cancel_and_unsupported();
     test_empty_and_error_directory_retry();
     test_long_display_names_keep_document_and_image_type();
-    puts("file viewer menu tests: PASS (text, images, stable clock refresh, retry, cancel, formats, close)");
+    test_png_and_gif_playback();
+    puts("file viewer menu tests: PASS (text, PNG/GIF, animation pause/replay/timing, clock, retry, cancel, close)");
     return 0;
 }

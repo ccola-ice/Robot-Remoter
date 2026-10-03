@@ -167,6 +167,13 @@ static const GuiParamRow preview_rows[6] = {
     {"\xce\xde\xcf\xdf\xc6\xb5\xb5\xc0", "40 / 2440 MHz"},
     {"\xb7\xa2\xc9\xe4\xb9\xa6\xc2\xca", "0 dBm"}
 };
+static const GuiParamRow preview_system_rows[5] = {
+    {"\xc6\xc1\xc4\xbb\xc1\xc1\xb6\xc8", "75 %"},
+    {"\xb0\xb4\xbc\xfc\xc9\xf9\xd2\xf4", "\xbf\xaa\xc6\xf4"},
+    {"\xc8\xd5\xc6\xda\xca\xb1\xbc\xe4", "\xc8\xd5\xc0\xfa / \xd0\xa3\xca\xb1"},
+    {"\xb1\xa3\xb4\xe6\xc9\xe8\xd6\xc3", "\xd0\xb4\xc8\xeb\xb4\xe6\xb4\xa2"},
+    {"\xbb\xd6\xb8\xb4\xc4\xac\xc8\xcf", "\xc6\xc1\xc4\xbb / \xc9\xf9\xd2\xf4"}
+};
 static const GuiFileEntry preview_files[7] = {
     {"Models", 0U, 0U, 0U, 1U}, {"Logs", 0U, 0U, 0U, 1U},
     {"robot-profile.txt", 2048U, 0U, 0U, 0U},
@@ -865,6 +872,33 @@ static void test_file_preview_pixels(void)
     assert(missing_font_ink != 0U);
 }
 
+static void draw_system_fixture(unsigned state)
+{
+    GuiParamRow rows[5];
+    memcpy(rows, preview_system_rows, sizeof(rows));
+    snprintf(rows[0].value, sizeof(rows[0].value), "%u %%", 10U + state * 10U);
+    strcpy(rows[1].value, state & 1U ? "OFF" : "ON");
+    system_settings_page(rows, state % 5U, state >= 5U, state & 1U,
+                         state & 1U ? "Unsaved screen brightness preview" : "Saved");
+}
+
+static void test_system_settings_pixels(void)
+{
+    unsigned before, after;
+    LCD_PageBuffer_Enable(1U);
+    checking_ui_text = 1U;
+    for(after = 0U; after < 10U; ++after) {
+        gui_prepare_page(); draw_system_fixture(after); LCD_EndPage();
+        memcpy(expected, panel, sizeof(panel));
+        for(before = 0U; before < 10U; ++before) {
+            gui_prepare_page(); draw_system_fixture(before); LCD_EndPage();
+            LCD_BeginUpdate(); draw_system_fixture(after); LCD_EndPage();
+            assert(memcmp(panel, expected, sizeof(panel)) == 0);
+        }
+    }
+    checking_ui_text = 0U;
+}
+
 int main(int argc, char **argv)
 {
     if(argc > 2) {
@@ -888,6 +922,7 @@ int main(int argc, char **argv)
     test_calendar_pixels();
     test_chinese_file_rendering();
     test_file_preview_pixels();
+    test_system_settings_pixels();
     if(argc > 1) {
         ControlLinkSnapshot snapshot = {0};
         GuiRobotTelemetry telemetry = {0};
@@ -924,6 +959,9 @@ int main(int argc, char **argv)
         save_preview(argv[1], "robot-control.bmp");
         gui_prepare_page(); parameter_settings_page(preview_rows, 6U, 4U, 0U, 40U, 0U, 0U, 1U, "\xd2\xd1\xd4\xd8\xc8\xeb\xb5\xb1\xc7\xb0\xb2\xce\xca\xfd\xa3\xac\xbd\xf6\xcf\xd4\xca\xbe\xd2\xd1\xca\xb5\xcf\xd6\xcf\xee\xc4\xbf"); LCD_EndPage();
         save_preview(argv[1], "parameter-settings.bmp");
+        gui_prepare_page(); system_settings_page(preview_system_rows, 0U, 1U, 1U,
+            "\xc1\xc1\xb6\xc8\xbc\xb4\xca\xb1\xd4\xa4\xc0\xc0\xa3\xac\xb1\xa3\xb4\xe6\xba\xf3\xbf\xaa\xbb\xfa\xc9\xfa\xd0\xa7"); LCD_EndPage();
+        save_preview(argv[1], "system-settings.bmp");
         gui_prepare_page(); nrf_settings_page(1U, 0U, 1U, 40U, 3U, 2U, "\xd0\xde\xb8\xc4\xb5\xc4\xca\xc7\xb2\xdd\xb8\xe5\xa3\xac\xd3\xa6\xd3\xc3\xb2\xa2\xb1\xa3\xb4\xe6\xba\xf3\xc9\xfa\xd0\xa7", 1U, 1U, 40U, 3U, 2U); LCD_EndPage();
         save_preview(argv[1], "wireless-settings.bmp");
         gui_prepare_page(); file_browser_page("0:/", preview_files, 7U, 2U, 0U, 1U,

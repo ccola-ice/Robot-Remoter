@@ -11,6 +11,8 @@
 #include "ff.h"
 #include "file_browser.h"
 #include "file_image.h"
+#include "file_gif.h"
+#include "system_settings.h"
 #include "file_text.h"
 
 extern FATFS fs_sdcard;
@@ -52,6 +54,7 @@ typedef enum
     MENU_PAGE_FILE_BROWSER,
     MENU_PAGE_FILE_VIEWER,
     MENU_PAGE_PARAMETER_SETTINGS,
+    MENU_PAGE_SYSTEM_SETTINGS,
     MENU_PAGE_DIAGNOSTICS,
     MENU_PAGE_EEPROM,
     MENU_PAGE_ROBOT_CONTROL
@@ -79,6 +82,9 @@ static const char * const nrf_status_text[] =
 static MenuKey repeat_key;
 static uint8_t repeat_pending;
 static GuiCalendarState calendar_state;
+static MenuPage calendar_return_page = MENU_PAGE_CATEGORY;
+static uint8_t system_selected, system_editing, system_brightness, system_sound, system_backup;
+static char system_status[96];
 static MenuKey event_queue[MENU_EVENT_QUEUE_SIZE];
 static uint8_t event_read_index;
 static uint8_t event_write_index;
@@ -105,13 +111,17 @@ static uint8_t nrf_runtime_enabled;
 static uint8_t nrf_runtime_channel;
 static uint8_t nrf_runtime_power_index;
 static uint8_t nrf_runtime_data_rate;
-enum { FILE_VIEW_UNSUPPORTED, FILE_VIEW_IMAGE, FILE_VIEW_TEXT };
+enum { FILE_VIEW_UNSUPPORTED, FILE_VIEW_IMAGE, FILE_VIEW_TEXT, FILE_VIEW_GIF };
 static void (*file_background_service)(void);
 static uint8_t file_operation_cancelled;
 static char file_view_path[FILE_BROWSER_PATH_LENGTH];
 static char file_view_name[GUI_FILE_NAME_LENGTH];
 static char file_view_status[128];
 static uint8_t file_view_kind, file_image_pending;
+static uint8_t gif_paused, gif_step_pending, gif_toggle_pending;
+static uint32_t gif_due_ms;
+static FileImageInfo gif_info;
+static FileImageResult gif_result;
 static file_text_result_t file_text_result;
 static param_Config param_edit;
 static param_Config param_edit_backup;
@@ -726,7 +736,7 @@ void menu_set_background_service(void (*service)(void))
     file_background_service = service;
 }
 
-/* 文件操作期间只服务后台和取消键，不递归进入菜单或文件系统。 */
+/* 文件操作期间服务后台和取消键；动画暂停请求留到当前帧结束后处理。 */
 static uint8_t menu_file_service(void *context)
 {
     MenuKey key;
@@ -734,6 +744,8 @@ static uint8_t menu_file_service(void *context)
     if(file_background_service) file_background_service();
     while(menu_get_key(&key)) {
         if(key == MENU_KEY_BACK) file_operation_cancelled = 1U;
+        else if(key == MENU_KEY_OK && current_page == MENU_PAGE_FILE_VIEWER &&
+                file_view_kind == FILE_VIEW_GIF) gif_toggle_pending = 1U;
     }
     repeat_pending = 0U;
     return file_operation_cancelled == 0U;
@@ -748,6 +760,7 @@ static void menu_file_begin(void)
 static void menu_browser_load_drives(void)
 {
     file_text_close();
+    file_gif_close();
     /* 即使启动时未插卡，也注册文件系统；实际介质初始化在打开目录时完成。 */
     f_mount(&fs_sdcard, "0:", 0U);
     menu_file_begin();
@@ -776,7 +789,9 @@ static uint8_t menu_file_kind(const char *path)
     };
     uint8_t i;
     if(menu_file_extension_is(path, ".bmp") || menu_file_extension_is(path, ".jpg") ||
-       menu_file_extension_is(path, ".jpeg") || menu_file_extension_is(path, ".jpe")) return FILE_VIEW_IMAGE;
+       menu_file_extension_is(path, ".jpeg") || menu_file_extension_is(path, ".jpe") ||
+       menu_file_extension_is(path, ".png")) return FILE_VIEW_IMAGE;
+    if(menu_file_extension_is(path, ".gif")) return FILE_VIEW_GIF;
     for(i = 0U; i < sizeof(text_extensions) / sizeof(text_extensions[0]); i++)
         if(menu_file_extension_is(path, text_extensions[i])) return FILE_VIEW_TEXT;
     return FILE_VIEW_UNSUPPORTED;
@@ -807,6 +822,8 @@ static void menu_file_text_status(file_text_result_t result)
 static void menu_file_return(void)
 {
     file_text_close();
+    file_gif_close();
+    gif_step_pending = gif_paused = gif_toggle_pending = 0U;
     file_image_pending = 0U;
     current_page = MENU_PAGE_FILE_BROWSER;
     page_dirty = page_changed = 1U;
@@ -842,7 +859,8 @@ static void menu_handle_browser_key(MenuKey key)
             if(file_view_kind == FILE_VIEW_UNSUPPORTED)
                 file_view_kind = menu_file_kind(file_view_name);
             current_page = MENU_PAGE_FILE_VIEWER;
-            file_image_pending = file_view_kind == FILE_VIEW_IMAGE;
+            file_image_pending = file_view_kind == FILE_VIEW_IMAGE || file_view_kind == FILE_VIEW_GIF;
+            gif_paused = gif_step_pending = gif_toggle_pending = 0U;
             if(file_view_kind == FILE_VIEW_TEXT) {
                 menu_file_text_status(file_text_open(file_view_path));
                 if(file_operation_cancelled) menu_file_return();
@@ -864,6 +882,17 @@ static void menu_handle_file_viewer_key(MenuKey key)
     menu_file_begin();
     if(file_view_kind == FILE_VIEW_IMAGE && key == MENU_KEY_OK) {
         file_image_pending = 1U;
+    } else if(file_view_kind == FILE_VIEW_GIF && key == MENU_KEY_OK) {
+        if(!file_gif_is_open() || file_gif_finished()) {
+            file_gif_close();
+            file_image_pending = 1U;
+            gif_paused = 0U;
+        } else {
+            unsigned long now;
+            gif_paused = !gif_paused;
+            get_tick_count(&now);
+            gif_due_ms = (uint32_t)now + file_gif_delay_ms();
+        }
     } else if(file_view_kind == FILE_VIEW_TEXT) {
         text = file_text_get_page();
         result = file_text_result;
@@ -899,6 +928,71 @@ static void menu_draw_browser(void)
                           browser->total_count, !browser->virtual_root && !browser->visible_count);
 }
 
+
+static void menu_image_error(FileImageResult result)
+{
+    if(result == FILE_IMAGE_IO) strcpy(file_view_status, "\xb6\xc1\xc8\xa1\xca\xa7\xb0\xdc\xa3\xac\xc7\xeb\xbc\xec\xb2\xe9 SD \xbf\xa8\xa3\xbbOK \xd6\xd8\xca\xd4");
+    else if(result == FILE_IMAGE_TOO_LARGE) strcpy(file_view_status, "\xcd\xbc\xc6\xac\xb9\xfd\xb4\xf3\xa3\xac\xc7\xeb\xcb\xf5\xd0\xa1\xba\xf3\xd6\xd8\xca\xd4");
+    else if(result == FILE_IMAGE_NO_MEMORY) strcpy(file_view_status, "\xcd\xe2\xb2\xbf\xc4\xda\xb4\xe6\xb2\xbb\xbf\xc9\xd3\xc3\xa3\xac\xc7\xeb\xbc\xec\xb2\xe9\xd3\xb2\xbc\xfe\xd7\xd4\xbc\xec");
+    else if(result == FILE_IMAGE_UNSUPPORTED) strcpy(file_view_status, "\xb2\xbb\xd6\xa7\xb3\xd6\xb4\xcb\xcd\xbc\xc6\xac\xb1\xe0\xc2\xeb\xa3\xac\xc7\xeb\xd7\xaa\xbb\xbb\xce\xaa\xc6\xd5\xcd\xa8 PNG / JPG / BMP");
+    else strcpy(file_view_status, "\xcd\xbc\xc6\xac\xca\xfd\xbe\xdd\xcb\xf0\xbb\xb5\xbb\xf2\xce\xc4\xbc\xfe\xb2\xbb\xcd\xea\xd5\xfb\xa3\xbbOK \xd6\xd8\xca\xd4");
+}
+
+/* 每次主循环最多准备一帧，不因积压时间连赶多帧。 */
+static void menu_gif_tick(void)
+{
+    unsigned long now;
+    if(current_page != MENU_PAGE_FILE_VIEWER || file_view_kind != FILE_VIEW_GIF ||
+       file_image_pending || gif_paused || !file_gif_is_open() || file_gif_finished()) return;
+    get_tick_count(&now);
+    if((int32_t)((uint32_t)now - gif_due_ms) >= 0) {
+        gif_step_pending = 1U;
+        page_dirty = 1U;
+    }
+}
+
+static void menu_draw_gif(void)
+{
+    FileImageResult result = FILE_IMAGE_OK;
+    uint32_t capacity;
+    void *workspace;
+    unsigned long now;
+    uint8_t first = file_image_pending;
+    if(first || gif_step_pending) {
+        file_image_pending = gif_step_pending = 0U;
+        menu_file_begin();
+        if(first) {
+            file_preview_page(file_view_name, "GIF / \xb6\xaf\xbb\xad", NULL, 0U, 0U,
+                              "\xd5\xfd\xd4\xda\xb6\xc1\xc8\xa1\xb6\xaf\xbb\xad\xa3\xac\x42\x41\x43K \xbf\xc9\xc8\xa1\xcf\xfb", "", 1U, 2U);
+            gui_clock_overlay();
+            LCD_EndPage();
+            LCD_BeginUpdate();
+            workspace = file_image_get_workspace(&capacity);
+            result = file_gif_open(file_view_path, 24U, 136U, 752U, 280U, 0xffffU,
+                                  &gif_info, workspace, capacity, menu_file_service, NULL);
+        } else result = file_gif_next();
+        if(result == FILE_IMAGE_CANCELLED) {
+            menu_file_return();
+            gui_prepare_page();
+            menu_draw_browser();
+            page_dirty = page_changed = 0U;
+            return;
+        }
+        get_tick_count(&now);
+        gif_due_ms = (uint32_t)now + file_gif_delay_ms();
+        gif_result = result;
+        if(result != FILE_IMAGE_OK) menu_image_error(result);
+    }
+    if(gif_result == FILE_IMAGE_OK) {
+        snprintf(file_view_status, sizeof(file_view_status), "%lu x %lu -> %u x %u  %s",
+                 (unsigned long)gif_info.width, (unsigned long)gif_info.height,
+                 gif_info.drawn_width, gif_info.drawn_height,
+                 file_gif_finished() ? "\xb2\xa5\xb7\xc5\xbd\xe1\xca\xf8\xa3\xacOK \xd6\xd8\xb2\xa5" : gif_paused ? "\xd2\xd1\xd4\xdd\xcd\xa3" : "\xd5\xfd\xd4\xda\xb2\xa5\xb7\xc5");
+    }
+    file_preview_page(file_view_name, "GIF / \xb6\xaf\xbb\xad", NULL, 0U, 0U,
+                      file_view_status, "", 0U, 2U);
+}
+
 static void menu_draw_file_viewer(void)
 {
     const file_text_page_t *text;
@@ -909,14 +1003,16 @@ static void menu_draw_file_viewer(void)
     static const char unsupported[][75] = {
         "\xb4\xcb\xb8\xf1\xca\xbd\xd4\xdd\xb2\xbb\xd6\xa7\xb3\xd6\xd4\xa4\xc0\xc0\xa1\xa3",
         "",
-        "\xcd\xbc\xc6\xac\xa3\xba\x4a\x50\x47\x20\x2f\x20\x4a\x50\x45\x47\x20\x2f\x20\x42\x4d\x50",
+        "\xcd\xbc\xc6\xac\xa3\xbaJPG / JPEG / BMP / PNG / GIF",
         "\xce\xc4\xb5\xb5\xa3\xba\x54\x58\x54\x20\x2f\x20\x4c\x4f\x47\x20\x2f\x20\x4d\x44\x20\x2f\x20\x43\x53\x56\x20\x2f\x20\x49\x4e\x49\x20\x2f\x20\x4a\x53\x4f\x4e\x20\xb5\xc8\xb4\xbf\xce\xc4\xb1\xbe",
         "",
         "\x50\x44\x46\x20\x2f\x20\x57\x6f\x72\x64\x20\xc7\xeb\xcf\xc8\xd7\xaa\xbb\xbb\xb3\xc9\x20\x54\x58\x54\x20\xbb\xf2\x20\x4a\x50\x47\x20\x2f\x20\x42\x4d\x50\xa1\xa3",
         "",
         "\x42\x41\x43\x4b\x20\xb7\xb5\xbb\xd8\xce\xc4\xbc\xfe\xc1\xd0\xb1\xed\xa1\xa3"
     };
-    if(file_view_kind == FILE_VIEW_TEXT) {
+    if(file_view_kind == FILE_VIEW_GIF) {
+        menu_draw_gif();
+    } else if(file_view_kind == FILE_VIEW_TEXT) {
         text = file_text_get_page();
         if(text->page_number)
             snprintf(position, sizeof(position), "\xb5\xda\x20\x25\x6c\x75\x20\xd2\xb3\x25\x73", (unsigned long)text->page_number,
@@ -950,10 +1046,7 @@ static void menu_draw_file_viewer(void)
                 snprintf(file_view_status, sizeof(file_view_status), "\x25\x6c\x75\x20\x78\x20\x25\x6c\x75\x20\x2d\x3e\x20\x25\x75\x20\x78\x20\x25\x75\x20\xcf\xf1\xcb\xd8",
                     (unsigned long)image.width, (unsigned long)image.height,
                     image.drawn_width, image.drawn_height);
-            } else if(result == FILE_IMAGE_IO) strcpy(file_view_status, "\xb6\xc1\xc8\xa1\xca\xa7\xb0\xdc\xa3\xac\xc7\xeb\xbc\xec\xb2\xe9\x20\x53\x44\x20\xbf\xa8\xa3\xbb\x4f\x4b\x20\xd6\xd8\xca\xd4");
-            else if(result == FILE_IMAGE_TOO_LARGE) strcpy(file_view_status, "\xcd\xbc\xc6\xac\xb9\xfd\xb4\xf3\xa3\xac\xc7\xeb\xcb\xf5\xd0\xa1\xba\xf3\xd6\xd8\xca\xd4");
-            else if(result == FILE_IMAGE_UNSUPPORTED) strcpy(file_view_status, "\xb2\xbb\xd6\xa7\xb3\xd6\xb4\xcb\xcd\xbc\xc6\xac\xb1\xe0\xc2\xeb\xa3\xac\xc7\xeb\xd7\xaa\xbb\xbb\xce\xaa\xc6\xd5\xcd\xa8\x20\x4a\x50\x47\x20\xbb\xf2\x20\x42\x4d\x50");
-            else strcpy(file_view_status, "\xcd\xbc\xc6\xac\xca\xfd\xbe\xdd\xcb\xf0\xbb\xb5\xbb\xf2\xce\xc4\xbc\xfe\xb2\xbb\xcd\xea\xd5\xfb");
+            } else menu_image_error(result);
             file_preview_page(file_view_name, "\xcd\xbc\xc6\xac\x20\x2f\x20\xd7\xd4\xb6\xaf\xcb\xf5\xb7\xc5", NULL, 0U, 0U,
                               file_view_status, "", result != FILE_IMAGE_OK, 0U);
         }
@@ -1010,7 +1103,7 @@ static void menu_handle_calendar_key(MenuKey key)
     int year;
     if(key==MENU_KEY_BACK) {
         if(calendar_state.mode==CALENDAR_BROWSE) {
-            current_page=MENU_PAGE_CATEGORY; page_changed=1U;
+            current_page=calendar_return_page; page_changed=1U;
         } else {
             if(calendar_state.mode==CALENDAR_EDIT) calendar_state.status=CALENDAR_STATUS_CANCELED;
             calendar_state.mode=CALENDAR_BROWSE;
@@ -1076,6 +1169,88 @@ static void menu_handle_calendar_key(MenuKey key)
     page_dirty=1U;
 }
 
+
+/* 系统设置只编辑屏幕和声音，不修改通道校准或无线参数。 */
+static void menu_system_load(void)
+{
+    system_selected = system_editing = 0U;
+    system_brightness = param.screenBrightness;
+    system_sound = param.keySound;
+    strcpy(system_status, "\xc1\xc1\xb6\xc8\xbc\xb4\xca\xb1\xd4\xa4\xc0\xc0\xa3\xac\xb1\xa3\xb4\xe6\xba\xf3\xbf\xaa\xbb\xfa\xc9\xfa\xd0\xa7");
+}
+
+static void menu_handle_system_key(MenuKey key)
+{
+    uint8_t old_brightness, old_sound;
+    int value;
+    if(key == MENU_KEY_BACK) {
+        if(system_editing) {
+            if(system_selected == 0U) system_brightness = system_backup;
+            else system_sound = system_backup;
+            system_editing = 0U;
+            LCD_SetBrightness(system_brightness);
+            strcpy(system_status, "\xd2\xd1\xc8\xa1\xcf\xfb\xb1\xbe\xcf\xee\xd0\xde\xb8\xc4");
+        } else {
+            LCD_SetBrightness(param.screenBrightness);
+            current_page = MENU_PAGE_CATEGORY;
+            page_changed = 1U;
+        }
+    } else if(key == MENU_KEY_LEFT || key == MENU_KEY_RIGHT) {
+        if(!system_editing)
+            system_selected = (uint8_t)((system_selected + (key == MENU_KEY_RIGHT ? 1U : 4U)) % 5U);
+        else {
+            if(system_selected == 0U) {
+                value = (int)system_brightness + (key == MENU_KEY_RIGHT ? 5 : -5);
+                if(value < 10) value = 10;
+                if(value > 100) value = 100;
+                system_brightness = (uint8_t)value;
+                LCD_SetBrightness(system_brightness);
+            } else system_sound = !system_sound;
+            strcpy(system_status, "OK \xc8\xb7\xc8\xcf\xb1\xbe\xcf\xee\xa3\xac\x42\x41\x43K \xb3\xb7\xcf\xfa\xa3\xbb\xc7\xeb\xb1\xa3\xb4\xe6\xc9\xe8\xd6\xc3");
+        }
+    } else if(key == MENU_KEY_OK) {
+        if(system_editing) system_editing = 0U;
+        else if(system_selected < 2U) {
+            system_backup = system_selected == 0U ? system_brightness : system_sound;
+            system_editing = 1U;
+        } else if(system_selected == 2U) {
+            calendar_return_page = MENU_PAGE_SYSTEM_SETTINGS;
+            menu_calendar_load();
+            current_page = MENU_PAGE_CALENDAR;
+            page_changed = 1U;
+        } else if(system_selected == 3U) {
+            old_brightness = param.screenBrightness; old_sound = param.keySound;
+            param.screenBrightness = system_brightness; param.keySound = system_sound;
+            if(write_param() == 0U) strcpy(system_status, "\xcf\xb5\xcd\xb3\xc9\xe8\xd6\xc3\xd2\xd1\xb1\xa3\xb4\xe6");
+            else {
+                param.screenBrightness = old_brightness; param.keySound = old_sound;
+                strcpy(system_status, "\xb1\xa3\xb4\xe6\xca\xa7\xb0\xdc\xa3\xac\xd0\xde\xb8\xc4\xc9\xd0\xce\xb4\xb1\xa3\xb4\xe6\xa3\xbbOK \xd6\xd8\xca\xd4");
+            }
+        } else {
+            system_brightness = 100U; system_sound = 1U;
+            LCD_SetBrightness(system_brightness);
+            strcpy(system_status, "\xcf\xb5\xcd\xb3\xc4\xac\xc8\xcf\xd6\xb5\xd2\xd1\xd4\xd8\xc8\xeb\xa3\xac\xc7\xeb\xb1\xa3\xb4\xe6\xc9\xe8\xd6\xc3");
+        }
+    }
+    page_dirty = 1U;
+}
+
+static void menu_draw_system(void)
+{
+    GuiParamRow rows[5];
+    static const char * const labels[] = {"\xc6\xc1\xc4\xbb\xc1\xc1\xb6\xc8", "\xb0\xb4\xbc\xfc\xc9\xf9\xd2\xf4", "\xc8\xd5\xc6\xda\xca\xb1\xbc\xe4", "\xb1\xa3\xb4\xe6\xc9\xe8\xd6\xc3", "\xbb\xd6\xb8\xb4\xc4\xac\xc8\xcf"};
+    uint8_t row;
+    memset(rows, 0, sizeof(rows));
+    for(row = 0U; row < 5U; ++row) strcpy(rows[row].label, labels[row]);
+    snprintf(rows[0].value, sizeof(rows[0].value), "%u %%", system_brightness);
+    strcpy(rows[1].value, system_sound ? "\xbf\xaa\xc6\xf4" : "\xb9\xd8\xb1\xd5");
+    strcpy(rows[2].value, "\xc8\xd5\xc0\xfa / \xd0\xa3\xca\xb1");
+    strcpy(rows[3].value, "\xd0\xb4\xc8\xeb\xb4\xe6\xb4\xa2");
+    strcpy(rows[4].value, "\xc6\xc1\xc4\xbb / \xc9\xf9\xd2\xf4");
+    system_settings_page(rows, system_selected, system_editing,
+        system_brightness != param.screenBrightness || system_sound != param.keySound, system_status);
+}
+
 static void menu_handle_home_key(MenuKey key)
 {
     if(key == MENU_KEY_LEFT)
@@ -1111,6 +1286,7 @@ static void menu_handle_category_key(MenuKey key)
         case MENU_KEY_OK:
             current_page = menu_items[selected_item];
             if(current_page == MENU_PAGE_DIAGNOSTICS || current_page == MENU_PAGE_EEPROM) {
+                system_key_beep_stop();
                 if(current_page == MENU_PAGE_DIAGNOSTICS) diagnostics_menu();
                 else eeprom_menu();
                 user_BUTTON_resume();
@@ -1129,6 +1305,7 @@ static void menu_handle_category_key(MenuKey key)
             }
             else if(current_page == MENU_PAGE_CALENDAR)
             {
+                calendar_return_page = MENU_PAGE_CATEGORY;
                 menu_calendar_load();
             }
             else if(current_page == MENU_PAGE_FILE_BROWSER)
@@ -1139,6 +1316,7 @@ static void menu_handle_category_key(MenuKey key)
             {
                 menu_param_load();
             }
+            else if(current_page == MENU_PAGE_SYSTEM_SETTINGS) menu_system_load();
             page_dirty = 1;
             page_changed = 1;
             break;
@@ -1168,6 +1346,11 @@ static void menu_handle_page_key(MenuKey key)
     if(current_page == MENU_PAGE_NRF)
     {
         menu_handle_nrf_key(key);
+        return;
+    }
+
+    if(current_page == MENU_PAGE_SYSTEM_SETTINGS) {
+        menu_handle_system_key(key);
         return;
     }
 
@@ -1265,6 +1448,10 @@ static void menu_draw_current_page(void)
 
         case MENU_PAGE_CALENDAR:
             menu_draw_calendar();
+            break;
+
+        case MENU_PAGE_SYSTEM_SETTINGS:
+            menu_draw_system();
             break;
 
         case MENU_PAGE_FILE_BROWSER:
@@ -1374,6 +1561,7 @@ void menu_post_key(MenuKey key)
         return;
     }
 
+    system_key_beep();
     event_queue[event_write_index] = key;
     event_write_index = next_index;
 }
@@ -1401,6 +1589,7 @@ void menu_post_repeat(MenuKey key)
     if(key != MENU_KEY_LEFT && key != MENU_KEY_RIGHT) return;
     if(current_page != MENU_PAGE_HOME && current_page != MENU_PAGE_CATEGORY &&
        current_page != MENU_PAGE_PARAMETER_SETTINGS && current_page != MENU_PAGE_NRF &&
+       current_page != MENU_PAGE_SYSTEM_SETTINGS &&
        current_page != MENU_PAGE_FILE_BROWSER && current_page != MENU_PAGE_FILE_VIEWER &&
        current_page != MENU_PAGE_CALENDAR) return;
     if(event_read_index != event_write_index || repeat_pending) return;
@@ -1412,7 +1601,7 @@ static uint32_t menu_key_context(void)
 {
     return (uint32_t)current_page | ((uint32_t)param_editing << 8U) |
         ((uint32_t)nrf_editing << 9U) | ((uint32_t)calendar_state.mode << 10U) |
-        ((uint32_t)calendar_state.field << 12U);
+        ((uint32_t)calendar_state.field << 12U) | ((uint32_t)system_editing << 16U);
 }
 
 static void menu_dispatch_key(MenuKey key)
@@ -1441,6 +1630,11 @@ void menu_process(void)
         repeat_pending = 0U;
         if(user_BUTTON_repeat_held((uint8_t)key)) menu_dispatch_key(key);
     }
+    if(gif_toggle_pending && current_page == MENU_PAGE_FILE_VIEWER && file_view_kind == FILE_VIEW_GIF) {
+        gif_toggle_pending = 0U;
+        menu_handle_file_viewer_key(MENU_KEY_OK);
+    }
+    menu_gif_tick();
 
     if(page_dirty)
     {

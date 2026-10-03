@@ -1074,12 +1074,74 @@ void LCD_Draw_Rect(uint16_t x0,uint16_t x1,uint16_t y0,uint16_t y1,uint16_t colo
   *     @arg DISABLE :禁用背光LED
  * @retval 无
  */
-void ILI9806G_BackLed_Control ( FunctionalState enumState )
+/* PF9 对应 TIM14_CH1；高电平点亮背光。独立硬件 PWM 不占用中断。 */
+static uint8_t lcd_backlight_brightness = 100U;
+static uint8_t lcd_backlight_enabled = 1U;
+static uint8_t lcd_backlight_pwm_ready;
+
+static void lcd_backlight_apply(uint8_t percent)
 {
-	if ( enumState )
-		 GPIO_SetBits( ILI9806G_BK_PORT, ILI9806G_BK_PIN );	
-	else
-		 GPIO_ResetBits( ILI9806G_BK_PORT, ILI9806G_BK_PIN );
+    if(lcd_backlight_pwm_ready == 0U) {
+        GPIO_InitTypeDef gpio;
+        TIM_TimeBaseInitTypeDef base;
+        TIM_OCInitTypeDef output;
+        RCC_ClocksTypeDef clocks;
+        uint32_t timer_clock, divider;
+        RCC_AHB1PeriphClockCmd(ILI9806G_BK_CLK, ENABLE);
+        RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM14, ENABLE);
+        RCC_GetClocksFreq(&clocks);
+        timer_clock = clocks.PCLK1_Frequency;
+        /* APB1 有分频时，定时器时钟是外设总线时钟的两倍。 */
+        if((RCC->CFGR & RCC_CFGR_PPRE1) != 0U) timer_clock *= 2U;
+        divider = timer_clock / 1000000UL;
+        if(divider == 0U) divider = 1U;
+        TIM_TimeBaseStructInit(&base);
+        base.TIM_Prescaler = (uint16_t)(divider - 1U);
+        base.TIM_Period = 999U;
+        base.TIM_CounterMode = TIM_CounterMode_Up;
+        base.TIM_ClockDivision = TIM_CKD_DIV1;
+        TIM_TimeBaseInit(TIM14, &base);
+        TIM_OCStructInit(&output);
+        output.TIM_OCMode = TIM_OCMode_PWM1;
+        output.TIM_OutputState = TIM_OutputState_Enable;
+        output.TIM_OCPolarity = TIM_OCPolarity_High;
+        output.TIM_Pulse = (uint16_t)percent * 10U;
+        TIM_OC1Init(TIM14, &output);
+        TIM_OC1PreloadConfig(TIM14, TIM_OCPreload_Enable);
+        TIM_ARRPreloadConfig(TIM14, ENABLE);
+        TIM_GenerateEvent(TIM14, TIM_EventSource_Update);
+        TIM_Cmd(TIM14, ENABLE);
+        GPIO_StructInit(&gpio);
+        gpio.GPIO_Pin = ILI9806G_BK_PIN;
+        gpio.GPIO_Mode = GPIO_Mode_AF;
+        gpio.GPIO_OType = GPIO_OType_PP;
+        gpio.GPIO_PuPd = GPIO_PuPd_NOPULL;
+        gpio.GPIO_Speed = GPIO_Speed_25MHz;
+        GPIO_PinAFConfig(ILI9806G_BK_PORT, GPIO_PinSource9, GPIO_AF_TIM14);
+        GPIO_Init(ILI9806G_BK_PORT, &gpio);
+        lcd_backlight_pwm_ready = 1U;
+    }
+    /* CCR=ARR+1 为持续高电平，0 为持续低电平，不会留下窄脉冲。 */
+    TIM_SetCompare1(TIM14, (uint16_t)percent * 10U);
+}
+
+void LCD_SetBrightness(uint8_t percent)
+{
+    if(percent > 100U) percent = 100U;
+    if(percent != 0U) lcd_backlight_brightness = percent;
+    lcd_backlight_enabled = percent != 0U;
+    lcd_backlight_apply(percent);
+}
+
+uint8_t LCD_GetBrightness(void)
+{
+    return lcd_backlight_enabled ? lcd_backlight_brightness : 0U;
+}
+
+void ILI9806G_BackLed_Control(FunctionalState enumState)
+{
+    /* 兼容原有开关接口；重新开启时恢复上次亮度。 */
+    LCD_SetBrightness(enumState != DISABLE ? lcd_backlight_brightness : 0U);
 }
 
 

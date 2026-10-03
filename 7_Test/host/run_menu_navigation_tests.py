@@ -20,7 +20,7 @@ state = '\n'.join([
     match(r'(^typedef enum\s*\{.*?\} MenuPage;)'),
     match(r'(^static const MenuPage menu_items\[MENU_ITEM_COUNT\] =.*?^\};)'),
     match(r'(^static MenuKey event_queue.*?^static MenuPage current_page;)'),
-    'static MenuKey repeat_key; static uint8_t repeat_pending, param_editing, nrf_editing; static GuiCalendarState calendar_state;',
+    'static MenuKey repeat_key; static uint8_t repeat_pending, param_editing, nrf_editing, system_editing, gif_toggle_pending, file_view_kind; enum { FILE_VIEW_GIF=3 }; static GuiCalendarState calendar_state; static MenuPage calendar_return_page;',
 ])
 constants = '\n'.join(re.findall(r'^#define (?:MENU_ITEM_COUNT|MENU_EVENT_QUEUE_SIZE|MENU_REFRESH_TICKS|CLOCK_REFRESH_TICKS)[^\r\n]*', source, re.M))
 names = ['menu_get_key', 'menu_handle_home_key', 'menu_handle_category_key',

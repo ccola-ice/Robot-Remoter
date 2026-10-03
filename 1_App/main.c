@@ -42,6 +42,7 @@
 #include "FLASH_test.h"
 #include "EEPROM_test.h"
 #include "SRAM_test.h"
+#include "file_image.h"
 #include "FATFS_FLASH_test.h"
 #include "FATFS_SDCARD_test.h"
 #include "nmea_decode_test.h"
@@ -261,6 +262,9 @@ void setup(void)
     boot_start(BOOT_SRAM);
     ok = sram_read_write_test();
     LCD_PageBuffer_Enable(ok);
+    /* 首 750 KiB 保留给 LCD，剩余 274 KiB 用于 PNG/GIF 解码。 */
+    file_image_set_workspace(ok ? (void *)(SRAM_BASE_ADDR + 800UL * 480UL * 2UL) : NULL,
+                             ok ? IS62WV51216_SIZE - 800UL * 480UL * 2UL : 0UL);
     boot_done(BOOT_SRAM, ok ? BOOT_PASS : BOOT_FAIL,
               "External 1 MiB, 8/16-bit R/W, each block restored");
 
@@ -391,6 +395,7 @@ void setup(void)
         set_default_param();
         boot_skip(BOOT_PARAMS, "Flash unavailable; RAM defaults, no persistence access");
     }
+    LCD_SetBrightness(param.screenBrightness);
     if(boot_report.items[BOOT_NRF].state == BOOT_PASS) {
         boot_start(BOOT_NRF_CONFIG);
         nrf24l01_apply_settings(param.NRF_Mode, param.NRF_Channel,

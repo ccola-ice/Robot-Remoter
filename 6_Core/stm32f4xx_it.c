@@ -53,6 +53,7 @@
 #include "bsp_adc1_independent_dual.h"
 #include "bsp_adc3_independent_dual.h"
 #include "menu.h"
+#include "system_settings.h"
 #include "bsp_gpio_stick.h"
 #include "nmea_decode_test.h"
 
@@ -179,6 +180,7 @@ void PendSV_Handler(void)
 void SysTick_Handler(void)
 {
   TimeStamp_Increment();
+  system_settings_tick_1ms();
 }
 
 /******************************************************************************/

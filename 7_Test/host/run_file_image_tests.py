@@ -87,6 +87,21 @@ def coefficient_jpeg(quantizer, dc_category=0, dc_bits="", ac_symbol=None,
             segment(192, frame) + segment(196, tables) + segment(218, scan) + entropy + b"\xff\xd9")
 
 
+def rgba_png(width, height):
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)
+        for x in range(width):
+            rows.extend(((x * 53) & 255, (y * 41) & 255, (x * 37 + y * 19) & 255,
+                         (0, 128, 255)[(x + y) % 3]))
+    compressed = zlib.compress(rows)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) +
+            chunk(b"IDAT", compressed[:7]) + chunk(b"IDAT", compressed[7:]) + chunk(b"IEND", b""))
+
+
 with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
     folder = Path(temporary)
     for name, data in (("types.h", TYPES), ("ff.h", FF), ("bsp_fsmc_lcd.h", LCD)):
@@ -96,6 +111,7 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
                     "-include", str(folder / "types.h"), "-I", str(folder),
                     "-I", str(root / "1_App"), "-I", str(root / "5_Middleware/tjpgd/src"),
                     str(host / "file_image_test.c"), str(root / "1_App/file_image.c"),
+                    str(root / "1_App/file_png.c"),
                     str(root / "5_Middleware/tjpgd/src/tjpgd.c"), "-o", str(exe)], check=True)
     idct_exe = folder / "idct-test.exe"
     subprocess.run([compiler, "-std=c99", "-O2", "-ftrapv", "-Wall", "-Wextra", "-Werror",
@@ -105,15 +121,17 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
     count = 0
 
     def run(name, data, expected=0, viewport=(24, 136, 752, 280), cancel=0,
-            fail_read=0, fail_seek=0, fail_close=0):
+            fail_read=0, fail_seek=0, fail_close=0, workspace=None, following=()):
         global count
         path = folder / name
         if data is not None:
             path.write_bytes(data)
         output = folder / "frame.bin"
-        result = subprocess.run([str(exe), str(path), str(expected), *map(str, viewport),
-                                 str(cancel), str(fail_read), str(fail_seek), str(fail_close),
-                                 str(output)], check=True, capture_output=True, text=True)
+        arguments = [str(exe), str(path), str(expected), *map(str, viewport),
+                     str(cancel), str(fail_read), str(fail_seek), str(fail_close), str(output)]
+        if workspace is not None:
+            arguments += [str(workspace), *map(str, following)]
+        result = subprocess.run(arguments, check=True, capture_output=True, text=True)
         count += 1
         info = tuple(map(int, result.stdout.split()))
         frame = struct.unpack("<384000H", output.read_bytes())
@@ -180,6 +198,32 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
                 assert run("decode-cancel.jpg", data, 5, viewport, cancel=info[5] - 1)[0][6] == 1
                 assert run("decode-read.jpg", data, 3, viewport, fail_read=info[7])[0][6] == 1
     baseline = zlib.decompress(base64.b64decode(JPEG_FIXTURES[0][3]))
+    # 使用真实生产入口，通过魔数路由 PNG，并在同一进程验证后续 BMP/JPEG。
+    follow_bmp, follow_jpeg = folder / "following.bmp", folder / "following.jpg"
+    follow_bmp.write_bytes(bmp(17, 11))
+    follow_jpeg.write_bytes(baseline)
+    following = (follow_bmp, follow_jpeg)
+    for width, height in ((17, 11), (901, 411)):
+        data = rgba_png(width, height)
+        info, frame = run("png-route.bin", data, workspace=280576, following=following)
+        assert info[:2] == (width, height) and info[4] == 3 and info[6] == 2
+        dw, dh = info[2:4]
+        dx, dy = 24 + (752 - dw) // 2, 136 + (280 - dh) // 2
+        for y in range(dh):
+            for x in range(dw):
+                sx, sy = x * width // dw, y * height // dh
+                rgb = ((sx * 53) & 255, (sy * 41) & 255, (sx * 37 + sy * 19) & 255)
+                alpha = (0, 128, 255)[(sx + sy) % 3]
+                r, g, b = [(v * alpha + 255 * (255 - alpha) + 127) // 255 for v in rgb]
+                assert frame[(dy + y) * 800 + dx + x] == ((r & 248) << 8 | (g & 252) << 3 | b >> 3)
+    data = rgba_png(17, 11)
+    run("png-unregistered.bin", data, 6, workspace=0, following=following)
+    run("png-small-workspace.bin", data, 6, workspace=100, following=following)
+    run("png-handoff-close.bin", data, 3, workspace=280576, fail_close=1, following=following)
+    run("png-route-read.bin", data, 3, workspace=280576, fail_read=1, following=following)
+    run("png-decoder-read.bin", data, 3, workspace=280576, fail_read=2, following=following)
+    run("png-decoder-cancel.bin", data, 5, workspace=280576, cancel=3, following=following)
+    run("png-route-cancel.bin", data, 5, workspace=280576, cancel=1, following=following)
     for marker, length in ((b"\xff\xc0", 3), (b"\xff\xda", 3), (b"\xff\xdb", 3), (b"\xff\xc4", 3)):
         bad = bytearray(baseline)
         at = bad.index(marker)
@@ -205,4 +249,4 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
             bad[at] ^= 1 << random_source.randrange(8)
         info, _ = run("mutated.jpg", bad, 99)
         assert info[6] == 1
-    print(f"File image: {count} cases passed; real BMP pixels, real JPEG decoder, bounded drawing, errors and cancellation.")
+    print(f"File image: {count} cases passed; real BMP/JPEG/PNG routing, transparency, scaling, workspace, file closure, format switching and cancellation.")

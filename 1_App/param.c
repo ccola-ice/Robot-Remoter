@@ -4,12 +4,14 @@
 #include <string.h>
 
 /* 只持久化结构体前部的参数值，不保存运行时字符串指针。
- * 格式版本 1 保留现有 STM32 小端序及 32 位 int/float 的存储布局。 */
+ * 格式版本 2 仅在末尾追加屏幕亮度，保留版本 1 的校准和遥控参数布局。 */
 #define PARAM_PAYLOAD_SIZE offsetof(param_Config, version)
+#define PARAM_PAYLOAD_V1_SIZE offsetof(param_Config, screenBrightness)
 #define PARAM_FLASH_LEGACY_ADDR 0UL
 #define PARAM_FLASH_OVERLAP_ADDR (2560UL * 4096UL)
 #define PARAM_RECORD_MAGIC 0x31524d50UL
-#define PARAM_RECORD_SCHEMA 1U
+#define PARAM_RECORD_SCHEMA 2U
+#define PARAM_RECORD_PREVIOUS_SCHEMA 1U
 #define PARAM_RECORD_COMMITTED 0x434f4d54UL
 
 #pragma pack(push, 1)
@@ -60,6 +62,7 @@ void param_load_defaults(volatile param_Config *config)
 	config->NRF_Power = 0x09U;
 	config->NRF_Channel = 40U;
 	config->NRF_DataRate = 2U;
+	config->screenBrightness = 100U;
 	config->version = FM_VERSION;
 	config->version_time = FM_TIME;
 }
@@ -113,6 +116,8 @@ uint8_t param_sanitize(volatile param_Config *config)
                  config->NRF_Power != 0x0fU);
     PARAM_REPAIR(NRF_Channel, config->NRF_Channel > 125U);
     PARAM_REPAIR(NRF_DataRate, config->NRF_DataRate > 2U);
+    PARAM_REPAIR(screenBrightness, config->screenBrightness < 10U ||
+                 config->screenBrightness > 100U);
 #undef PARAM_REPAIR
     config->version = FM_VERSION;
     config->version_time = FM_TIME;
@@ -135,15 +140,31 @@ static uint32_t param_crc32(const uint8_t *data, uint16_t size)
 static uint8_t param_read_slot(uint32_t address, param_record *record)
 {
     param_Config candidate;
+    uint8_t raw[sizeof(param_record)];
+    uint16_t size;
+    uint32_t crc, committed;
     memset(record, 0xff, sizeof(*record));
-    FLASH_Read_Data((uint8_t *)record, address, sizeof(*record));
-    if(FLASH_GetIoError() != 0U || record->magic != PARAM_RECORD_MAGIC ||
-       record->schema != PARAM_RECORD_SCHEMA || record->payload_size != PARAM_PAYLOAD_SIZE ||
-       record->committed != PARAM_RECORD_COMMITTED ||
-       record->crc != param_crc32((const uint8_t *)record, offsetof(param_record, crc))) return 0U;
+    FLASH_Read_Data(raw, address, sizeof(raw));
+    if(FLASH_GetIoError() != 0U) return 0U;
+    memcpy(record, raw, offsetof(param_record, payload));
+    if(record->magic != PARAM_RECORD_MAGIC) return 0U;
+    if(record->schema == PARAM_RECORD_SCHEMA) size = PARAM_PAYLOAD_SIZE;
+    else if(record->schema == PARAM_RECORD_PREVIOUS_SCHEMA) size = PARAM_PAYLOAD_V1_SIZE;
+    else return 0U;
+    if(record->payload_size != size) return 0U;
+    memcpy(&crc, raw + offsetof(param_record, payload) + size, sizeof(crc));
+    memcpy(&committed, raw + offsetof(param_record, payload) + size + sizeof(crc),
+           sizeof(committed));
+    if(committed != PARAM_RECORD_COMMITTED ||
+       crc != param_crc32(raw, offsetof(param_record, payload) + size)) return 0U;
     param_load_defaults(&candidate);
-    memcpy(&candidate, record->payload, PARAM_PAYLOAD_SIZE);
-    return param_sanitize(&candidate) == 0U ? 1U : 0U;
+    memcpy(&candidate, raw + offsetof(param_record, payload), size);
+    if(param_sanitize(&candidate) != 0U) return 0U;
+    /* 旧记录在内存中补默认亮度；保存时再写入另一槽，不擦除旧校准数据。 */
+    memcpy(record->payload, &candidate, PARAM_PAYLOAD_SIZE);
+    record->crc = crc;
+    record->committed = committed;
+    return 1U;
 }
 
 /* 返回最新已提交记录所在的槽位；两个槽位均无效时返回 2。
@@ -164,7 +185,8 @@ static uint8_t param_find_latest(param_record *latest)
 static uint8_t param_read_legacy(uint32_t address, param_Config *candidate)
 {
     param_load_defaults(candidate);
-    FLASH_Read_Data((uint8_t *)candidate, address, PARAM_PAYLOAD_SIZE);
+    /* 旧裸结构的参数之后是无效运行时指针，不可读作新增设置。 */
+    FLASH_Read_Data((uint8_t *)candidate, address, PARAM_PAYLOAD_V1_SIZE);
     if(FLASH_GetIoError() != 0U ||
        (candidate->writeFlag != FM_FLAG && candidate->writeFlag != FM_PREVIOUS_FLAG)) return 0U;
     if(candidate->writeFlag == FM_PREVIOUS_FLAG) {

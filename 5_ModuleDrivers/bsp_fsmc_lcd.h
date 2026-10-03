@@ -201,6 +201,9 @@ void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
 void                     	ILI9806G_Init                    ( void );
 void                    	ILI9806G_Rst                     ( void );
 void                     	ILI9806G_BackLed_Control         ( FunctionalState enumState );
+/* 百分比 0～100，0 关闭背光；系统设置限制为 10～100。 */
+void LCD_SetBrightness(uint8_t percent);
+uint8_t LCD_GetBrightness(void);
 void                     	ILI9806G_GramScan                ( uint8_t ucOtion );
 void                     	ILI9806G_OpenWindow              ( uint16_t usX, uint16_t usY, uint16_t usWidth, uint16_t usHeight );
 void                     	ILI9806G_Clear                   ( uint16_t usX, uint16_t usY, uint16_t usWidth, uint16_t usHeight );

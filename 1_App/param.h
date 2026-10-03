@@ -44,6 +44,7 @@ typedef struct param_Config   // 用户参数设置结构体
 	u8 NRF_Power;//NRF发射功率
 	u8 NRF_Channel;//NRF射频频道，范围0~125
 	u8 NRF_DataRate;//NRF空中速率：0=250Kbps，1=1Mbps，2=2Mbps
+	u8 screenBrightness;//屏幕亮度百分比，10～100
 	char *version;
 	char *version_time;
 }param_Config;

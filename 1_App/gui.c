@@ -506,13 +506,13 @@ void main_menu(uint8_t selected_item)
 #undef MENU_LABEL
     static const char * const subtitles[] = {
         "\312\326\266\257\277\330\326\306", "\312\344\310\353\323\353\267\242\313\315\312\375\276\335", "\260\264\274\374\323\353\262\246\270\313", "\317\265\315\263\323\353\315\250\265\300", "\316\336\317\337\301\264\302\267",
-        "\310\325\300\372\323\353\320\243\312\261",
+        "\310\325\300\372\323\353\320\243\312\261", "屏幕与声音",
         "\271\314\274\376\323\353\304\332\264\346", "\261\276\273\372\327\313\314\254", "\266\250\316\273\323\353\316\300\320\307", "SD / Flash \316\304\274\376",
         "\323\262\274\376\274\354\262\342", "\264\346\264\242\325\357\266\317"
     };
     static const char * const groups[] = {"\322\243\277\330","\311\350\326\303","\271\244\276\337"};
     static const uint8_t icons[] = {UI_ICON_CONTROL,UI_ICON_CHANNEL,UI_ICON_SWITCH,
-        UI_ICON_SETTINGS,UI_ICON_RADIO,UI_ICON_CALENDAR,UI_ICON_CHIP,UI_ICON_IMU,UI_ICON_GPS,
+        UI_ICON_SETTINGS,UI_ICON_RADIO,UI_ICON_CALENDAR,UI_ICON_SETTINGS,UI_ICON_CHIP,UI_ICON_IMU,UI_ICON_GPS,
         UI_ICON_FOLDER,UI_ICON_TOOLS,UI_ICON_MEMORY};
     static uint8_t previous=255U;
     uint8_t first, group, start, count, i, entry;
@@ -989,7 +989,36 @@ void file_preview_page(const char *name, const char *kind, const char *lines,
     }
     ui_fill(24U, 420U, 752U, 24U, UI_BG);
     ui_text(24U, 424U, 94U, status, UI_MUTED, UI_BG, 0U);
-    ui_footer(text_mode ? "\xc9\xcf/\xcf\xc2 \xb7\xad\xd2\xb3  OK \xb1\xe0\xc2\xeb  BACK \xb7\xb5\xbb\xd8" : "OK \xd6\xd8\xd0\xc2\xb4\xf2\xbf\xaa  BACK \xb7\xb5\xbb\xd8", position);
+    ui_footer(text_mode == 2U ? "OK 暂停/继续/重播  BACK 返回" : text_mode ? "\xc9\xcf/\xcf\xc2 \xb7\xad\xd2\xb3  OK \xb1\xe0\xc2\xeb  BACK \xb7\xb5\xbb\xd8" : "OK \xd6\xd8\xd0\xc2\xb4\xf2\xbf\xaa  BACK \xb7\xb5\xbb\xd8", position);
+}
+
+
+void system_settings_page(const GuiParamRow *rows, uint8_t selected,
+                          uint8_t editing, uint8_t dirty, const char *status)
+{
+    static GuiParamRow previous_rows[5];
+    static uint8_t previous_selected, previous_editing;
+    uint8_t first = display_flag != 0U, row;
+    if(first) {
+        display_flag = 0U; GTP_IRQ_Disable();
+        ui_shell("系统设置", "屏幕 / 声音 / 日期时间", "设置");
+        ui_round_rect(16U, 104U, 160U, 284U, 12U, UI_SURFACE);
+        ui_icon(72U, 136U, 48U, UI_ICON_SETTINGS, UI_ACCENT, UI_SURFACE);
+        ui_text(32U, 208U, 8U, "系统设置", UI_INK, UI_SURFACE, 1U);
+        ui_text(32U, 264U, 16U, "长按上下连续调整", UI_MUTED, UI_SURFACE, 0U);
+        ui_text(32U, 296U, 16U, "亮度即时预览", UI_MUTED, UI_SURFACE, 0U);
+    }
+    for(row = 0U; row < 5U; ++row) {
+        if(first || memcmp(&rows[row], &previous_rows[row], sizeof(rows[row])) != 0 ||
+           (selected != previous_selected && (row == selected || row == previous_selected)) ||
+           (editing != previous_editing && row == selected))
+            gui_settings_row(row, row + 1U, rows[row].label, rows[row].value, row == selected, editing);
+    }
+    ui_text(208U, 368U, 68U, dirty ? "有未保存的修改" : "当前设置已保存", dirty ? UI_AMBER : UI_GREEN, UI_BG, 0U);
+    ui_text(24U, 416U, 94U, status, UI_MUTED, UI_BG, 0U);
+    ui_footer(editing ? "上/下 调整  OK 确认  BACK 撤销" : "上/下 选择  OK 打开  BACK 返回", "SYSTEM");
+    memcpy(previous_rows, rows, sizeof(previous_rows));
+    previous_selected = selected; previous_editing = editing;
 }
 
 void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,

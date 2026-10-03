@@ -25,6 +25,7 @@ static void *fake_dwt(void)
 #define DWT_CTRL_CYCCNTENA_Msk 1UL
 static uint32_t SystemCoreClock = 168000000UL, systick_period;
 static uint32_t SysTick_Config(uint32_t ticks) { systick_period = ticks; return 0UL; }
+static void system_settings_tick_1ms(void) {}
 
 static uint32_t interrupt_mask;
 static volatile uint8_t *inject_pending;

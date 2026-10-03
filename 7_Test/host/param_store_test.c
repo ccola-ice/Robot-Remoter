@@ -87,6 +87,8 @@ static void test_round_trip(void)
     param.PWMadjustUnit = 100U;
     param.PPM_Out = ON;
     param.throttleProtect = 100U;
+    param.screenBrightness = 35U;
+    param.keySound = OFF;
     for(i = 0U; i < chNum; i++) {
         param.chLower[i] = (uint16_t)(100U + i);
         param.chMiddle[i] = (uint16_t)(1900U + i);
@@ -175,12 +177,16 @@ static void test_legacy_migration(void)
             legacy.chMiddle[2] = 1876U;
             legacy.NRF_Channel = old_schema ? 0xffU : 63U;
             legacy.NRF_DataRate = old_schema ? 0xffU : 1U;
-            memcpy(storage + sources[source], &legacy, PARAM_PAYLOAD_SIZE);
+            memcpy(storage + sources[source], &legacy, PARAM_PAYLOAD_V1_SIZE);
+            /* 旧裸记录中的指针字节不可成为新亮度。 */
+            storage[sources[source] + PARAM_PAYLOAD_V1_SIZE] = 0x55U;
             reboot();
             assert(param.clockTime == 33U && param.chMiddle[2] == 1876U);
             assert(param.NRF_Channel == (old_schema ? 40U : 63U));
             assert(param.NRF_DataRate == (old_schema ? 2U : 1U));
-            assert(memcmp(storage + sources[source], &legacy, PARAM_PAYLOAD_SIZE) == 0);
+            assert(param.screenBrightness == 100U);
+            assert(memcmp(storage + sources[source], &legacy, PARAM_PAYLOAD_V1_SIZE) == 0);
+            assert(storage[sources[source] + PARAM_PAYLOAD_V1_SIZE] == 0x55U);
             assert(param_read_slot(SPI_FLASH_PARAM_SLOT_B_ADDR, &(param_record){0}) != 0U);
             reboot();
             assert(param.clockTime == 33U && erase_calls == 0U);
@@ -198,12 +204,83 @@ static void test_legacy_migration(void)
     assert(param.clockTime == 71U);
 }
 
+static void make_schema1_fixture(uint32_t address, uint32_t sequence, uint8_t clock_time)
+{
+    uint8_t bytes[134];
+    param_Config old;
+    uint32_t value;
+    uint16_t half;
+    /* 固定旧格式的长度，不用新 param_record 的 CRC/提交偏移生成旧记录。 */
+    assert(PARAM_PAYLOAD_V1_SIZE == 114U);
+    param_load_defaults(&old);
+    old.clockTime = clock_time;
+    old.chMiddle[4] = 1777U;
+    old.NRF_Channel = 97U;
+    old.keySound = OFF;
+    memset(bytes, 0xff, sizeof(bytes));
+    value = 0x31524d50UL; memcpy(bytes, &value, 4U);
+    half = 1U; memcpy(bytes + 4U, &half, 2U);
+    half = 114U; memcpy(bytes + 6U, &half, 2U);
+    memcpy(bytes + 8U, &sequence, 4U);
+    memcpy(bytes + 12U, &old, 114U);
+    value = param_crc32(bytes, 126U); memcpy(bytes + 126U, &value, 4U);
+    value = 0x434f4d54UL; memcpy(bytes + 130U, &value, 4U);
+    memcpy(storage + address, bytes, sizeof(bytes));
+}
+
+static void test_schema1_migration(void)
+{
+    uint8_t slot_a[SPI_FLASH_LAYOUT_SECTOR_SIZE], slot_b[SPI_FLASH_LAYOUT_SECTOR_SIZE];
+    unsigned cut, total = SPI_FLASH_LAYOUT_SECTOR_SIZE + sizeof(param_record);
+    param_record record;
+    erase_fixture();
+    make_schema1_fixture(SPI_FLASH_PARAM_SLOT_A_ADDR, 11U, 71U);
+    make_schema1_fixture(SPI_FLASH_PARAM_SLOT_B_ADDR, 10U, 19U);
+    reboot();
+    assert(param.clockTime == 71U && param.chMiddle[4] == 1777U);
+    assert(param.NRF_Channel == 97U && param.keySound == OFF);
+    assert(param.screenBrightness == 100U && erase_calls == 0U && program_calls == 0U);
+    memcpy(slot_a, storage + SPI_FLASH_PARAM_SLOT_A_ADDR, sizeof(slot_a));
+    memcpy(slot_b, storage + SPI_FLASH_PARAM_SLOT_B_ADDR, sizeof(slot_b));
+    for(cut = 0U; cut <= total; cut++) {
+        memcpy(storage + SPI_FLASH_PARAM_SLOT_A_ADDR, slot_a, sizeof(slot_a));
+        memcpy(storage + SPI_FLASH_PARAM_SLOT_B_ADDR, slot_b, sizeof(slot_b));
+        reset_io();
+        param.screenBrightness = 35U;
+        power_budget = (int)cut;
+        assert(write_param() == (cut < total ? 1U : 0U));
+        assert(memcmp(storage + SPI_FLASH_PARAM_SLOT_A_ADDR, slot_a, sizeof(slot_a)) == 0);
+        reboot();
+        assert(param.screenBrightness == (cut < total ? 100U : 35U));
+        assert(param.clockTime == 71U && param.chMiddle[4] == 1777U);
+        assert(param.NRF_Channel == 97U && param.keySound == OFF);
+        assert(erase_calls == 0U && program_calls == 0U);
+    }
+    assert(param_read_slot(SPI_FLASH_PARAM_SLOT_B_ADDR, &record) != 0U);
+    assert(record.schema == 2U);
+    /* 即使 CRC 正确，超范围亮度也必须回退到旧的完整记录。 */
+    record.payload[offsetof(param_Config, screenBrightness)] = 0U;
+    record.crc = param_crc32((const uint8_t *)&record, offsetof(param_record, crc));
+    memcpy(storage + SPI_FLASH_PARAM_SLOT_B_ADDR, &record, sizeof(record));
+    reboot();
+    assert(param.screenBrightness == 100U && param.clockTime == 71U);
+    puts("schema 1 migration: calibration preserved across every power-cut boundary");
+}
+
 static void test_field_validation_and_io_failure(void)
 {
     param_Config bad, defaults;
     uint32_t nan_bits = 0x7fc00000UL, infinity_bits = 0x7f800000UL;
     unsigned i;
     param_load_defaults(&defaults);
+    assert(defaults.screenBrightness == 100U);
+    bad = defaults;
+    bad.screenBrightness = 10U;
+    assert(param_sanitize(&bad) == 0U);
+    bad.screenBrightness = 101U;
+    assert(param_sanitize(&bad) != 0U && bad.screenBrightness == 100U);
+    bad.screenBrightness = 0U;
+    assert(param_sanitize(&bad) != 0U && bad.screenBrightness == 100U);
     bad = defaults;
     memset(bad.chReverse, 0xff, sizeof(bad.chReverse));
     for(i = 0U; i < chNum; i++) {
@@ -236,6 +313,7 @@ int main(void)
     test_every_interrupted_update();
     test_corruption_and_sequence_wrap();
     test_legacy_migration();
+    test_schema1_migration();
     test_field_validation_and_io_failure();
     puts("parameter storage: all tests passed");
     return 0;
