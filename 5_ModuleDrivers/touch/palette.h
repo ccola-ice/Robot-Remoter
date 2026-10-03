@@ -10,17 +10,9 @@
 #define PALETTE_START_Y   0
 #define PALETTE_END_Y     LCD_Y_LENGTH
 
-#if 1     //按钮栏在左边
-  #define BUTTON_START_X      0
-  #define PALETTE_START_X   (COLOR_BLOCK_WIDTH*2+1)
-  #define PALETTE_END_X     LCD_X_LENGTH
-
-#else     //按钮栏在右边，(存在触摸按键时也会的bug仅用于测试触摸屏左边界)
-  #define BUTTON_START_X     ( LCD_X_LENGTH-2*COLOR_BLOCK_WIDTH)
-  #define PALETTE_START_X   0
-  #define PALETTE_END_X     (LCD_X_LENGTH-2*COLOR_BLOCK_WIDTH)
-
-#endif
+#define BUTTON_START_X      0
+#define PALETTE_START_X   (COLOR_BLOCK_WIDTH*2+1)
+#define PALETTE_END_X     LCD_X_LENGTH
 
 
 

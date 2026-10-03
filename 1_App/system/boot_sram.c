@@ -1,10 +1,11 @@
-#include "SRAM_test.h"
+#include "boot_sram.h"
+#include "bsp_fsmc_sram.h"
+#include <stdio.h>
 
-/* External SRAM only. Save/restore each block using compiler-allocated RAM.
- * Never use a literal address in MCU RAM, Flash, EEPROM or an SD/FatFs volume.
- * Run before mounting filesystems or starting application consumers.
- * This is a block R/W check, not a complete address-alias/March memory test. */
-static uint8_t sram_test_region(volatile uint8_t *base, uint32_t size)
+/* 仅检查外部 SRAM，逐块备份并恢复原内容，不访问 MCU 固定内存地址。
+ * 必须在挂载文件系统及启动其他 SRAM 使用者之前调用。
+ * 本自检验证分块读写，不覆盖完整的地址别名或 March 测试。 */
+static uint8_t boot_sram_check_region(volatile uint8_t *base, uint32_t size)
 {
     uint8_t backup[256];
     uint32_t offset, i, count;
@@ -53,8 +54,8 @@ static uint8_t sram_test_region(volatile uint8_t *base, uint32_t size)
     return 1U;
 }
 
-uint8_t sram_read_write_test(void)
+uint8_t boot_sram_check(void)
 {
-    return sram_test_region((volatile uint8_t *)SRAM_BASE_ADDR,
+    return boot_sram_check_region((volatile uint8_t *)SRAM_BASE_ADDR,
                              IS62WV51216_SIZE);
 }

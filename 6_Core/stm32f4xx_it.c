@@ -55,7 +55,6 @@
 #include "ui_menu.h"
 #include "system_feedback.h"
 #include "bsp_gpio_stick.h"
-#include "nmea_decode_test.h"
 
 extern void TimeStamp_Increment(void);
 

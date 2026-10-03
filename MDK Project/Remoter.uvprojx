@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>USE_STDPERIPH_DRIVER,STM32F40_41xxx,USE_DMP,MPL_LOG_NDEBUG=1,EMPL,MPU6050,EMPL_TARGET_STM32F4</Define>
               <Undefine></Undefine>
-              <IncludePath>..\4_Libraries\CMSIS\Device\ST\STM32F4xx\Include;..\4_Libraries\CMSIS\Include;..\4_Libraries\STM32F4xx_StdPeriph_Driver\inc;..\1_App;..\1_App\config;..\1_App\control;..\1_App\protocol;..\1_App\ui;..\1_App\files;..\1_App\diagnostics;..\1_App\system;..\7_Test;..\2_Platform;..\3_Protocol\FatFs;..\3_Protocol\nmea_decode\include;..\5_Middleware\MPU6050\eMPL;..\5_Middleware\MultiButton;..\5_Middleware\uGUI;..\5_Middleware\Malloc;..\5_ModuleDrivers;..\5_ModuleDrivers\fonts;..\5_ModuleDrivers\touch;..\5_SystemDrivers;..\6_Core;..\5_Middleware\tjpgd\src</IncludePath>
+              <IncludePath>..\4_Libraries\CMSIS\Device\ST\STM32F4xx\Include;..\4_Libraries\CMSIS\Include;..\4_Libraries\STM32F4xx_StdPeriph_Driver\inc;..\1_App;..\1_App\config;..\1_App\control;..\1_App\protocol;..\1_App\ui;..\1_App\files;..\1_App\diagnostics;..\1_App\system;..\2_Platform;..\3_Protocol\FatFs;..\3_Protocol\nmea_decode\include;..\5_Middleware\MPU6050\eMPL;..\5_Middleware\MultiButton;..\5_Middleware\uGUI;..\5_Middleware\Malloc;..\5_ModuleDrivers;..\5_ModuleDrivers\fonts;..\5_ModuleDrivers\touch;..\5_SystemDrivers;..\6_Core;..\5_Middleware\tjpgd\src</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -608,40 +608,25 @@
               <FileType>5</FileType>
               <FilePath>..\1_App\system\system_feedback.h</FilePath>
             </File>
-          </Files>
-        </Group>
-        <Group>
-          <GroupName>Test</GroupName>
-          <Files>
             <File>
-              <FileName>EEPROM_test.c</FileName>
+              <FileName>boot_sram.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\7_Test\EEPROM_test.c</FilePath>
+              <FilePath>..\1_App\system\boot_sram.c</FilePath>
             </File>
             <File>
-              <FileName>FLASH_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\7_Test\FLASH_test.c</FilePath>
+              <FileName>boot_sram.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\1_App\system\boot_sram.h</FilePath>
             </File>
             <File>
-              <FileName>SDCARD_test.c</FileName>
+              <FileName>gps_service.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\7_Test\SDCARD_test.c</FilePath>
+              <FilePath>..\1_App\system\gps_service.c</FilePath>
             </File>
             <File>
-              <FileName>SRAM_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\7_Test\SRAM_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>LCD_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\7_Test\LCD_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>nmea_decode_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\7_Test\nmea_decode_test.c</FilePath>
+              <FileName>gps_service.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\1_App\system\gps_service.h</FilePath>
             </File>
           </Files>
         </Group>
@@ -752,16 +737,6 @@
               <FileName>ff.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\3_Protocol\FatFs\ff.c</FilePath>
-            </File>
-            <File>
-              <FileName>FATFS_SDCARD_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\3_Protocol\FatFs\FATFS_SDCARD_test.c</FilePath>
-            </File>
-            <File>
-              <FileName>FATFS_FLASH_test.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\3_Protocol\FatFs\FATFS_FLASH_test.c</FilePath>
             </File>
           </Files>
         </Group>

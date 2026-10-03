@@ -39,12 +39,10 @@
 
 #include "jpgPort.h"
 #include "platform_nrf.h"
-#include "FLASH_test.h"
-#include "EEPROM_test.h"
-#include "SRAM_test.h"
+#include "boot_sram.h"
 #include "image_viewer.h"
 #include "ff.h"
-#include "nmea_decode_test.h"
+#include "gps_service.h"
 #include "inv_mpu.h"
 #include "inv_mpu_dmp_motion_driver.h" 
 #include "ui_pages.h"
@@ -256,7 +254,7 @@ void setup(void)
 
     /* 在 f_mount 和应用使用存储器之前完成存储器测试。 */
     boot_start(BOOT_SRAM);
-    ok = sram_read_write_test();
+    ok = boot_sram_check();
     LCD_PageBuffer_Enable(ok);
     /* 首 750 KiB 保留给 LCD，剩余 274 KiB 用于 PNG/GIF 解码。 */
     file_image_set_workspace(ok ? (void *)(SRAM_BASE_ADDR + 800UL * 480UL * 2UL) : NULL,
@@ -315,7 +313,7 @@ void setup(void)
 
     GPS_USART_Config();
     GPS_DMA_Config();
-    nmea_decode_init();
+    gps_service_init();
     EXTI_MPU_Config();
     boot_start(BOOT_MPU);
     for(attempt = 0U; attempt < MPU_DMP_BOOT_ATTEMPTS; attempt++) {
@@ -488,7 +486,7 @@ static void app_background_service(void)
     }
     GTP_Service();
     /* 及时处理已接收完整的 GPS 输入，不受 UI 刷新节奏限制。 */
-    nmea_decode_test();
+    gps_service_poll();
     if(take_tick(&finish_1hz) && imu_dmp_ready) {
         temp = MPU_Get_Temperature();
         MPU_Get_Accelerometer(&aacx,&aacy,&aacz);

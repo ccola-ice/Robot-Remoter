@@ -2,7 +2,7 @@
 #include "ui_menu_catalog.h"
 #include "ui_analog_filter.h"
 #include "ui_robot_filter.h"
-#include "nmea_decode_test.h"
+#include "gps_service.h"
 #include "control_link.h"
 #include "bsp_fsmc_lcd.h"
 #include "bsp_adc1_independent_dual.h"

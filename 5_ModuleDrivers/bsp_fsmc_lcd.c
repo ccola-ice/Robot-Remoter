@@ -43,9 +43,6 @@ static uint16_t            	ILI9806G_Read_PixelData      ( void );
 #define LCD_DIRTY_TILE_SIZE 16U
 #define LCD_DIRTY_TILE_CAPACITY (50U * 30U)
 #define LCD_DIRTY_WORDS ((LCD_DIRTY_TILE_CAPACITY + 31U) / 32U)
-#ifndef LCD_PAGE_TIMING_LOG
-#define LCD_PAGE_TIMING_LOG 0
-#endif
 static volatile uint16_t * const lcd_page_pixels =
     (volatile uint16_t *)SRAM_BASE_ADDR;
 /* active: 0 direct, 1 full page, 2 retained-image partial transaction. */
@@ -53,7 +50,7 @@ static uint8_t lcd_page_enabled, lcd_page_active, lcd_page_window_valid;
 static uint8_t lcd_page_committed;
 static uint16_t lcd_page_width, lcd_page_height, lcd_dirty_columns, lcd_dirty_rows;
 static uint32_t lcd_page_x0, lcd_page_y0, lcd_page_x1, lcd_page_y1;
-static uint32_t lcd_page_x, lcd_page_y, lcd_page_started_cycles;
+static uint32_t lcd_page_x, lcd_page_y;
 static uint32_t lcd_dirty[LCD_DIRTY_WORDS];
 
 static void lcd_page_mark_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
@@ -157,7 +154,6 @@ void LCD_BeginPage(uint16_t background)
         ILI9806G_FillColor(count,background);
         return;
     }
-    lcd_page_started_cycles = DWT->CYCCNT;
     lcd_page_width = LCD_X_LENGTH;
     lcd_page_height = LCD_Y_LENGTH;
     lcd_page_window_valid = 0U;
@@ -179,7 +175,6 @@ void LCD_BeginUpdate(void)
     if((uint32_t)lcd_dirty_columns * lcd_dirty_rows > LCD_DIRTY_TILE_CAPACITY) return;
     for(i = 0U; i < LCD_DIRTY_WORDS; i++) lcd_dirty[i] = 0U;
     lcd_page_window_valid = 0U;
-    lcd_page_started_cycles = DWT->CYCCNT;
     lcd_page_active = 2U;
 }
 
@@ -275,12 +270,11 @@ static void lcd_page_present_rect(uint16_t x, uint16_t y, uint16_t width, uint16
 
 void LCD_EndPage(void)
 {
-    uint32_t present_started, present_finished, cycles_per_us, bit;
+    uint32_t bit;
     uint16_t row, column, end_column, end_row, test_row, test_column;
     uint16_t x, y, right, bottom;
     uint8_t full, complete;
     if(lcd_page_active == 0U) return;
-    present_started = DWT->CYCCNT;
     full = lcd_page_active == 1U;
     lcd_page_active = 0U;
     if(full) lcd_page_present_rect(0U,0U,lcd_page_width,lcd_page_height);
@@ -313,14 +307,6 @@ void LCD_EndPage(void)
         }
     }
     lcd_page_committed = 1U;
-    present_finished = DWT->CYCCNT;
-    cycles_per_us = SystemCoreClock / 1000000UL;
-    /* No serial traffic on the normal input/render path. Enable explicitly
-     * for hardware measurements. This is not a TE-synchronized GRAM swap. */
-    if(LCD_PAGE_TIMING_LOG && cycles_per_us != 0U)
-        printf("[LCD] compose=%lu us, transfer=%lu us\r\n",
-            (unsigned long)((present_started-lcd_page_started_cycles)/cycles_per_us),
-            (unsigned long)((present_finished-present_started)/cycles_per_us));
 }
 ///**
 //  * @brief  œÚILI9806G–¥»Î√¸¡Ó

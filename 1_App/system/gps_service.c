@@ -1,4 +1,4 @@
-#include "nmea_decode_test.h"
+#include "gps_service.h"
 #include "bsp_usart_gps.h"
 #include "bsp_SysTick.h"
 #include "bsp_rtc.h"
@@ -50,7 +50,7 @@ static int gps_date_valid(const nmeaTIME *utc)
 
 static int gps_position_valid(double lat, char ns, double lon, char ew)
 {
-    /* Comparisons also reject NaN; NMEA coordinates are degrees/minutes. */
+    /* NMEA 坐标使用度分格式；范围比较同时排除 NaN。 */
     return (ns == 'N' || ns == 'S') && (ew == 'E' || ew == 'W') &&
         lat >= 0 && lat <= 9000 && lon >= 0 && lon <= 18000 &&
         fmod(lat, 100.0) < 60.0 && fmod(lon, 100.0) < 60.0;
@@ -178,7 +178,7 @@ static void gps_process_packet(int type, void *packet, uint32_t received_ms)
     }
 }
 
-void nmea_decode_init(void)
+void gps_service_init(void)
 {
     if(parser_ready)
         nmea_parser_destroy(&parser);
@@ -193,7 +193,7 @@ void nmea_decode_init(void)
     parser_ready = (uint8_t)nmea_parser_init(&parser);
 }
 
-int nmea_decode_test(void)
+int gps_service_poll(void)
 {
     uint8_t block[HALF_GPS_RBUFF_SIZE];
     uint32_t received_ms;

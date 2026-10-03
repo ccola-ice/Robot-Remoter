@@ -18,7 +18,7 @@
 extern FATFS fs_sdcard;
 #include "bsp_SysTick.h"
 #include "bsp_rtc.h"
-#include "nmea_decode_test.h"
+#include "gps_service.h"
 #include "nmea/nmea.h"
 
 extern nmeaTIME beiJingTime;

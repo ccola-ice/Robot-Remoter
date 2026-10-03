@@ -65,18 +65,15 @@ virtualFolder:
           folders: []
         - name: system
           files:
+            - path: ../1_App/system/boot_sram.c
+            - path: ../1_App/system/boot_sram.h
+            - path: ../1_App/system/gps_service.c
+            - path: ../1_App/system/gps_service.h
             - path: ../1_App/system/boot_status.c
             - path: ../1_App/system/boot_status.h
             - path: ../1_App/system/system_feedback.c
             - path: ../1_App/system/system_feedback.h
           folders: []
-    - name: Test
-      files:
-        - path: ../7_Test/EEPROM_test.c
-        - path: ../7_Test/FLASH_test.c
-        - path: ../7_Test/SRAM_test.c
-        - path: ../7_Test/nmea_decode_test.c
-      folders: []
     - name: Platforn
       files:
         - path: ../2_Platform/platform_nrf.c
@@ -110,8 +107,6 @@ virtualFolder:
             - path: ../3_Protocol/FatFs/cc936.c
             - path: ../3_Protocol/FatFs/diskio.c
             - path: ../3_Protocol/FatFs/ff.c
-            - path: ../3_Protocol/FatFs/FATFS_SDCARD_test.c
-            - path: ../3_Protocol/FatFs/FATFS_FLASH_test.c
           folders: []
         - name: nmealib
           files:
@@ -238,7 +233,6 @@ targets:
         - ../1_App/files
         - ../1_App/diagnostics
         - ../1_App/system
-        - ../7_Test
         - ../2_Platform
         - ../3_Protocol/FatFs
         - ../3_Protocol/nmea_decode/include
