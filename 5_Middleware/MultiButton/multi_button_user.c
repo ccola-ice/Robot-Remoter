@@ -4,7 +4,7 @@
 #include "stm32f4xx.h"
 #include "bsp_gpio_button.h"
 #include "bsp_SysTick.h"
-#include "menu.h"
+#include "ui_menu.h"
 
 static struct Button button_ok;
 static struct Button button_back;

@@ -2,10 +2,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "menu.h"
-#include "menu_catalog.h"
+#include "ui_menu.h"
+#include "ui_menu_catalog.h"
 #include "control_link.h"
-#include "gui.h"
+#include "ui_pages.h"
 
 #define WHITE 0xffffU
 #define BLACK 0U

@@ -1,4 +1,5 @@
 """逐像素核对 PNG 色型/位深/滤波/Adam7/压缩，并检查损坏输入及取消边界。"""
+from app_test_paths import app_include_args
 from pathlib import Path
 import random
 import struct
@@ -139,8 +140,8 @@ with tempfile.TemporaryDirectory(prefix="remoter-png-") as temporary:
         (folder / name).write_text(value, encoding="ascii")
     exe = folder / "png-test.exe"
     subprocess.run([compiler, "-std=c99", "-O2", "-ftrapv", "-Wall", "-Wextra", "-Werror",
-                    "-I", str(folder), "-I", str(root / "1_App"),
-                    str(host / "file_png_test.c"), str(root / "1_App/file_png.c"), "-o", str(exe)], check=True)
+                    "-I", str(folder), *app_include_args(),
+                    str(host / "file_png_test.c"), str(root / "1_App/files/image_png.c"), "-o", str(exe)], check=True)
     count = 0
 
     def run(data, expected=0, viewport=(24, 136, 752, 280), cancel=0, fail_read=0,

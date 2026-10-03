@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "menu.h"
+#include "ui_menu.h"
 
 #define WHITE 1U
 #define DIAG_UI_BLACK 0U
@@ -59,7 +59,7 @@ static uint8_t EEPROM_Byte_Write(uint8_t address, uint8_t value)
 { assert(address != 255U); writes++; eeprom_bytes[address] = value; return 0U; }
 
 #include "diag_key.inc"
-#include "eeprom_menu.c"
+#include "diag_eeprom.c"
 
 static void reset_at(uint32_t tick)
 {

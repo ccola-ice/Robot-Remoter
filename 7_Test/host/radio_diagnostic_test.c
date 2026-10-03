@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "bsp_spi_nrf.h"
-#include "hardware_tests.h"
+#include "diag_hardware.h"
 
 static uint8_t regs[32][5], before[32][5], payload[32];
 static uint8_t command, offset, selected, response, ce, pending;
@@ -79,7 +79,7 @@ const char *hardware_result_name(HwResult r)
     return names[r];
 }
 
-#include "radio_diagnostic.c"
+#include "diag_radio.c"
 
 static void reset(void)
 {

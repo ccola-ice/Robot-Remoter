@@ -24,7 +24,7 @@ try {
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
     $gbk = [Text.Encoding]::GetEncoding(936, [Text.EncoderFallback]::ExceptionFallback, [Text.DecoderFallback]::ExceptionFallback)
     foreach($headerDirectory in @('1_App', '5_SystemDrivers')) {
-        Get-ChildItem -LiteralPath (Join-Path $repo $headerDirectory) -Filter '*.h' -File | ForEach-Object {
+        Get-ChildItem -LiteralPath (Join-Path $repo $headerDirectory) -Filter '*.h' -File -Recurse | ForEach-Object {
             $headerBytes = [IO.File]::ReadAllBytes($_.FullName)
             try { $headerText = $utf8.GetString($headerBytes) }
             catch { $headerText = $gbk.GetString($headerBytes) }
@@ -45,7 +45,7 @@ try {
     $forward = 'void ILI9806G_OpenWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h); static __inline void ILI9806G_FillColor(uint32_t count, uint16_t color);'
     $drawFunctions = [regex]::Replace($drawFunctions, '\bILI9806G_DispString_EN\b', 'lcd_real_DispString_EN')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_driver.inc'), ($forward + [Environment]::NewLine + $block + $drawFunctions), $enc)
-    $gui = [IO.File]::ReadAllText((Join-Path $repo '1_App/gui.c'), $enc)
+    $gui = [IO.File]::ReadAllText((Join-Path $repo '1_App/ui/ui_pages.c'), $enc)
     $mapping = ([regex]::Matches($gui, '(?m)^#define ROBOT_\w+[^\r\n]*') | ForEach-Object { $_.Value }) -join [Environment]::NewLine
     $guiFunctions = Get-Functions $gui @('gui_prepare_page', 'gui_clock_overlay',
         'gui_control_status_text', 'gui_dashboard_status', 'menu_group_page', 'main_menu', 'gui_monitor_tabs',
@@ -56,7 +56,7 @@ try {
         'parameter_settings_page', 'system_settings_page', 'nrf_settings_page', 'file_browser_page', 'file_browser_position',
         'gui_file_text_line', 'file_preview_page', 'calendar_page')
     [IO.File]::WriteAllText((Join-Path $temp 'lcd_page_gui.inc'), ($mapping + [Environment]::NewLine + $guiFunctions), $enc)
-    $diag = [IO.File]::ReadAllText((Join-Path $repo '1_App/diagnostics.c'), $enc)
+    $diag = [IO.File]::ReadAllText((Join-Path $repo '1_App/diagnostics/diag_menu.c'), $enc)
     $start = $diag.IndexOf('#define DIAG_LINE_CACHE_COUNT')
     $end = $diag.IndexOf('static uint8_t confirm(', $start)
     $diagCode = $diag.Substring($start, $end - $start)
@@ -75,7 +75,7 @@ void FLASH_SPI_Init(void);
 void FLASH_Read_Data(uint8_t *buffer, unsigned address, unsigned size);
 '@)
     $exe = Join-Path $temp 'lcd-page-test.exe'
-    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-finput-charset=GBK' '-fexec-charset=GBK' '-I' $temp '-I' (Join-Path $repo '1_App') '-I' (Join-Path $repo '5_SystemDrivers') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') (Join-Path $temp 'cc936.c') '-o' $exe
+    & $Compiler '-std=c99' '-O2' '-Wall' '-Wextra' '-Werror' '-Wno-sign-compare' '-finput-charset=GBK' '-fexec-charset=GBK' '-I' $temp '-I' (Join-Path $repo '1_App/config') '-I' (Join-Path $repo '1_App/control') '-I' (Join-Path $repo '1_App/protocol') '-I' (Join-Path $repo '1_App/ui') '-I' (Join-Path $repo '1_App/files') '-I' (Join-Path $repo '1_App/diagnostics') '-I' (Join-Path $repo '1_App/system') '-I' (Join-Path $repo '5_SystemDrivers') '-I' (Join-Path $repo '5_ModuleDrivers/fonts') (Join-Path $PSScriptRoot 'lcd_page_test.c') (Join-Path $repo '5_ModuleDrivers/fonts/fonts.c') (Join-Path $temp 'cc936.c') '-o' $exe
     if($LASTEXITCODE -ne 0) { throw 'LCD page test compilation failed.' }
     if ($PreviewDirectory) {
         [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($PreviewDirectory)) | Out-Null

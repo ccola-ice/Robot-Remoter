@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "calendar_ui.h"
+#include "ui_calendar.h"
 
 typedef enum { MENU_KEY_LEFT=0,MENU_KEY_RIGHT,MENU_KEY_OK,MENU_KEY_BACK } MenuKey;
 enum { MENU_PAGE_CATEGORY=1,MENU_PAGE_CALENDAR=2 };
@@ -186,6 +186,6 @@ static void gps_set(void)
 int main(void)
 {
     draft_math(); browsing_and_cancel(); manual_save(); gps_set();
-    puts("calendar menu regression passed (actual menu functions + calendar_ui.h)");
+    puts("calendar menu regression passed (actual menu functions + ui_calendar.h)");
     return 0;
 }

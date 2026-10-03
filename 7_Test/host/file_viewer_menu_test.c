@@ -2,11 +2,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "menu.h"
+#include "ui_menu.h"
 #include "file_browser.h"
-#include "file_text.h"
-#include "file_image.h"
-#include "file_gif.h"
+#include "text_reader.h"
+#include "image_viewer.h"
+#include "image_gif.h"
 
 #define DIGITAL_CHANNEL_COUNT 8U
 #include "file_viewer_state.inc"

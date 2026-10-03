@@ -1,4 +1,5 @@
 """验证 GIF 逐帧像素、LZW 字典、合成方式、循环和损坏输入的资源释放。"""
+from app_test_paths import app_include_args
 from pathlib import Path
 import io
 import random
@@ -115,8 +116,8 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-gif-") as temporary:
     (folder / "bsp_fsmc_lcd.h").write_text(LCD, encoding="ascii")
     exe = folder / "gif-test.exe"
     subprocess.run([compiler, "-std=c99", "-O2", "-ftrapv", "-Wall", "-Wextra", "-Werror",
-                    "-I", str(folder), "-I", str(root / "1_App"),
-                    str(host / "file_gif_test.c"), str(root / "1_App/file_gif.c"),
+                    "-I", str(folder), *app_include_args(),
+                    str(host / "file_gif_test.c"), str(root / "1_App/files/image_gif.c"),
                     "-o", str(exe)], check=True)
     count = 0
 

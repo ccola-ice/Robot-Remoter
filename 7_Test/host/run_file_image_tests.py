@@ -1,4 +1,5 @@
 """用真实 BMP/JPEG 字节验证缩放、像素边界、损坏数据和取消/读写错误。"""
+from app_test_paths import app_include_args
 from pathlib import Path
 import base64
 import random
@@ -109,9 +110,9 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
     exe = folder / "image-test.exe"
     subprocess.run([compiler, "-std=c99", "-O2", "-ftrapv", "-Wall", "-Wextra", "-Werror",
                     "-include", str(folder / "types.h"), "-I", str(folder),
-                    "-I", str(root / "1_App"), "-I", str(root / "5_Middleware/tjpgd/src"),
-                    str(host / "file_image_test.c"), str(root / "1_App/file_image.c"),
-                    str(root / "1_App/file_png.c"),
+                    *app_include_args(), "-I", str(root / "5_Middleware/tjpgd/src"),
+                    str(host / "file_image_test.c"), str(root / "1_App/files/image_viewer.c"),
+                    str(root / "1_App/files/image_png.c"),
                     str(root / "5_Middleware/tjpgd/src/tjpgd.c"), "-o", str(exe)], check=True)
     idct_exe = folder / "idct-test.exe"
     subprocess.run([compiler, "-std=c99", "-O2", "-ftrapv", "-Wall", "-Wextra", "-Werror",

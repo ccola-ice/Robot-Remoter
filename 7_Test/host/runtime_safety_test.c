@@ -5,9 +5,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "gui.h"
-#include "gui_robot_filter.h"
-#include "param.h"
+#include "ui_pages.h"
+#include "ui_robot_filter.h"
+#include "app_config.h"
 
 #define __IO volatile
 static struct { uint32_t DEMCR; } debug_registers;
@@ -123,7 +123,7 @@ static uint8_t LCD_DrawFontGlyph(uint16_t x,uint16_t y,uint16_t code,uint16_t si
     uint8_t bold,uint16_t fg,uint16_t bg)
 { (void)x; (void)y; (void)code; (void)size; (void)bold; (void)fg; (void)bg; return 0U; }
 
-#include "gui_theme.h"
+#include "ui_theme.h"
 #undef ui_text
 static void ui_text(uint16_t x, uint16_t y, uint8_t columns,
     const char *text, uint16_t fg, uint16_t bg, uint8_t large)

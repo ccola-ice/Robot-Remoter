@@ -11,22 +11,65 @@ virtualFolder:
     - name: App
       files:
         - path: ../1_App/main.c
-        - path: ../1_App/gui.c
-        - path: ../1_App/menu.c
-        - path: ../1_App/file_browser.c
-        - path: ../1_App/file_text.c
-        - path: ../1_App/file_image.c
-        - path: ../1_App/file_png.c
-        - path: ../1_App/file_gif.c
-        - path: ../1_App/system_settings.c
-        - path: ../1_App/control_link.c
-        - path: ../1_App/param.c
-        - path: ../1_App/boot_status.c
-        - path: ../1_App/hardware_tests.c
-        - path: ../1_App/diagnostics.c
-        - path: ../1_App/eeprom_menu.c
-        - path: ../1_App/radio_diagnostic.c
-      folders: []
+      folders:
+        - name: config
+          files:
+            - path: ../1_App/config/app_config.c
+            - path: ../1_App/config/app_config.h
+          folders: []
+        - name: control
+          files:
+            - path: ../1_App/control/channel_input.h
+            - path: ../1_App/control/control_link.c
+            - path: ../1_App/control/control_link.h
+            - path: ../1_App/control/control_safety.h
+          folders: []
+        - name: protocol
+          files:
+            - path: ../1_App/protocol/robot_control_protocol.h
+            - path: ../1_App/protocol/robot_telemetry_protocol.h
+          folders: []
+        - name: ui
+          files:
+            - path: ../1_App/ui/ui_analog_filter.h
+            - path: ../1_App/ui/ui_calendar.h
+            - path: ../1_App/ui/ui_menu.c
+            - path: ../1_App/ui/ui_menu.h
+            - path: ../1_App/ui/ui_menu_catalog.h
+            - path: ../1_App/ui/ui_pages.c
+            - path: ../1_App/ui/ui_pages.h
+            - path: ../1_App/ui/ui_robot_filter.h
+            - path: ../1_App/ui/ui_theme.h
+          folders: []
+        - name: files
+          files:
+            - path: ../1_App/files/file_browser.c
+            - path: ../1_App/files/file_browser.h
+            - path: ../1_App/files/image_gif.c
+            - path: ../1_App/files/image_gif.h
+            - path: ../1_App/files/image_png.c
+            - path: ../1_App/files/image_png.h
+            - path: ../1_App/files/image_viewer.c
+            - path: ../1_App/files/image_viewer.h
+            - path: ../1_App/files/text_reader.c
+            - path: ../1_App/files/text_reader.h
+          folders: []
+        - name: diagnostics
+          files:
+            - path: ../1_App/diagnostics/diag_eeprom.c
+            - path: ../1_App/diagnostics/diag_hardware.c
+            - path: ../1_App/diagnostics/diag_hardware.h
+            - path: ../1_App/diagnostics/diag_menu.c
+            - path: ../1_App/diagnostics/diag_menu.h
+            - path: ../1_App/diagnostics/diag_radio.c
+          folders: []
+        - name: system
+          files:
+            - path: ../1_App/system/boot_status.c
+            - path: ../1_App/system/boot_status.h
+            - path: ../1_App/system/system_feedback.c
+            - path: ../1_App/system/system_feedback.h
+          folders: []
     - name: Test
       files:
         - path: ../7_Test/EEPROM_test.c
@@ -188,6 +231,13 @@ targets:
         - ../4_Libraries/CMSIS/Include
         - ../4_Libraries/STM32F4xx_StdPeriph_Driver/inc
         - ../1_App
+        - ../1_App/config
+        - ../1_App/control
+        - ../1_App/protocol
+        - ../1_App/ui
+        - ../1_App/files
+        - ../1_App/diagnostics
+        - ../1_App/system
         - ../7_Test
         - ../2_Platform
         - ../3_Protocol/FatFs

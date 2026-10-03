@@ -1,4 +1,4 @@
-#include "file_png.h"
+#include "image_png.h"
 #include "ff.h"
 #include <assert.h>
 #include <stdio.h>

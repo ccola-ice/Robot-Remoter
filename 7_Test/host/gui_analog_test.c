@@ -3,9 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <float.h>
-#include "gui.h"
-#include "gui_analog_filter.h"
-#include "gui_robot_filter.h"
+#include "ui_pages.h"
+#include "ui_analog_filter.h"
+#include "ui_robot_filter.h"
 #include "control_link.h"
 
 enum { WHITE, GREY, BLACK, BLUE, BLUE2, GREEN, RED };
@@ -101,7 +101,7 @@ static void capture_text(uint16_t x, uint16_t y, const char *text)
     if(x == 40U && y == 364U) telemetry_texts++;
 }
 
-/* Runner extracts these complete functions from the production gui.c. */
+/* Runner extracts these complete functions from the production ui_pages.c. */
 static int GetGBKCode(uint8_t *bitmap, uint16_t code)
 { memset(bitmap, (code & 1U) ? 0x55 : 0xaa, 128U); return 0; }
 uint8_t FLASH_GetIoError(void) { return 0U; }
@@ -119,7 +119,7 @@ static uint8_t LCD_DrawFontGlyph(uint16_t x,uint16_t y,uint16_t code,uint16_t si
     uint8_t bold,uint16_t fg,uint16_t bg)
 { (void)x; (void)y; (void)code; (void)size; (void)bold; (void)fg; (void)bg; return 0U; }
 
-#include "gui_theme.h"
+#include "ui_theme.h"
 #undef ui_text
 static void ui_text(uint16_t x, uint16_t y, uint8_t columns,
     const char *text, uint16_t fg, uint16_t bg, uint8_t large)

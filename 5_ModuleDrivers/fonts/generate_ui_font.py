@@ -32,7 +32,7 @@ def arguments():
 
 def source_codes():
     codes = set()
-    for path in sorted((ROOT / "1_App").glob("*.[ch]")):
+    for path in sorted((ROOT / "1_App").rglob("*.[ch]")):
         text = path.read_bytes().decode("latin1")
         for match in re.finditer(r'"(?:[^"\\]|\\.)*"', text):
             try:

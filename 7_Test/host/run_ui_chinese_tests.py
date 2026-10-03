@@ -1,4 +1,5 @@
-"""Compile and execute the production gui_theme.h with a deterministic glyph source."""
+"""Compile and execute the production ui_theme.h with a deterministic glyph source."""
+from app_test_paths import app_include_args
 from pathlib import Path
 import subprocess
 import sys
@@ -10,7 +11,7 @@ with tempfile.TemporaryDirectory(prefix="remoter-ui-chinese-") as temporary:
     executable = Path(temporary) / "ui-chinese-test.exe"
     subprocess.run([
         compiler, "-std=c99", "-O2", "-Wall", "-Wextra", "-Werror",
-        "-Wno-unused-function", "-I", str(repo / "1_App"),
+        "-Wno-unused-function", *app_include_args(),
         str(Path(__file__).with_name("ui_chinese_test.c")), "-o", str(executable)
     ], check=True)
     subprocess.run([str(executable)], check=True)

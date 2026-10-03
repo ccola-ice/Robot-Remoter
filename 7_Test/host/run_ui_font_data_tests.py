@@ -16,7 +16,7 @@ codes = manifest["codes"]
 assert codes == sorted(set(codes))
 assert manifest["bitmap_bytes"] < 600*1024
 assert manifest["code_index_bytes"] == len(codes)*2
-for path in (root / "1_App").glob("*.[ch]"):
+for path in (root / "1_App").rglob("*.[ch]"):
     for token in re.findall(r'"(?:[^"\\]|\\.)*"',path.read_bytes().decode("latin1")):
         try:
             value=ast.literal_eval(token).encode("latin1").decode("gb2312")

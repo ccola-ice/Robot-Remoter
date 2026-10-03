@@ -1,3 +1,4 @@
+from app_test_paths import app_include_args
 from pathlib import Path
 import re
 import subprocess
@@ -26,8 +27,8 @@ def function(source, signature):
 timer = read('6_Core/stm32f4xx_it.c')
 systick = read('5_SystemDrivers/bsp_SysTick.c')
 main = read('1_App/main.c')
-menu = read('1_App/menu.c')
-gui = read('1_App/gui.c')
+menu = read('1_App/ui/ui_menu.c')
+gui = read('1_App/ui/ui_pages.c')
 mpu = read('5_Middleware/MPU6050/eMPL/inv_mpu.c')
 pieces = ['\n'.join(re.findall(r'^#define (?:PARAM_|ROBOT_)\w+[^\n]*', menu + '\n' + gui, re.M))]
 pieces += [systick[systick.index('static volatile uint32_t g_ul_ms_ticks;'):]]
@@ -48,7 +49,7 @@ with tempfile.TemporaryDirectory(prefix='remoter-runtime-') as folder:
     exe = tmp / 'runtime-test.exe'
     subprocess.run([sys.argv[1] if len(sys.argv) > 1 else 'gcc', '-std=gnu99', '-O2',
                     '-Wall', '-Wextra', '-Werror', '-Wno-format-truncation',
-                    '-I', str(tmp), '-I', str(root / '1_App'), '-I', str(root / '5_ModuleDrivers'),
+                    '-I', str(tmp), *app_include_args(), '-I', str(root / '5_ModuleDrivers'),
                     '-I', str(root / '5_SystemDrivers'),
                     str(host / 'runtime_safety_test.c'), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

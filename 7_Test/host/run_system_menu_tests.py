@@ -1,3 +1,4 @@
+from app_test_paths import app_include_args
 from pathlib import Path
 import re
 import subprocess
@@ -7,8 +8,8 @@ import tempfile
 host = Path(__file__).resolve().parent
 root = host.parents[1]
 compiler = sys.argv[1] if len(sys.argv) > 1 else 'gcc'
-menu = (root / '1_App/menu.c').read_bytes().decode('latin1').replace('\r\n', '\n')
-param = (root / '1_App/param.c').read_bytes().decode('latin1').replace('\r\n', '\n')
+menu = (root / '1_App/ui/ui_menu.c').read_bytes().decode('latin1').replace('\r\n', '\n')
+param = (root / '1_App/config/app_config.c').read_bytes().decode('latin1').replace('\r\n', '\n')
 interrupts = (root / '6_Core/stm32f4xx_it.c').read_bytes().decode('latin1').replace('\r\n', '\n')
 
 
@@ -36,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='remoter-system-menu-') as folder:
     (tmp / 'stm32f4xx.h').write_text('#include <stdint.h>\ntypedef uint8_t u8;\ntypedef uint16_t u16;\n')
     exe = tmp / 'system-menu-test.exe'
     subprocess.run([compiler, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-I', str(tmp), '-I', str(root / '1_App'),
+                    '-I', str(tmp), *app_include_args(),
                     '-I', str(root / '5_ModuleDrivers'), '-I', str(root / '5_SystemDrivers'),
                     str(host / 'system_menu_test.c'), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

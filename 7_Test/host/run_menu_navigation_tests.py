@@ -1,4 +1,5 @@
 """Exercise the production menu event/state functions with peripheral pages mocked."""
+from app_test_paths import app_include_args
 from pathlib import Path
 import re
 import subprocess
@@ -8,7 +9,7 @@ import tempfile
 host = Path(__file__).resolve().parent
 root = host.parents[1]
 compiler = sys.argv[1] if len(sys.argv) > 1 else 'gcc'
-source = (root / '1_App/menu.c').read_text(encoding='latin1')
+source = (root / '1_App/ui/ui_menu.c').read_text(encoding='latin1')
 
 def match(pattern):
     found = re.findall(pattern, source, re.M | re.S)
@@ -35,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix='remoter-menu-navigation-') as folder:
     (temp / 'menu_functions.inc').write_text(functions, encoding='latin1')
     exe = temp / 'test.exe'
     subprocess.run([compiler, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-I' + str(temp), '-I' + str(root / '1_App'),
+                    '-I' + str(temp), *app_include_args(),
                     '-I' + str(root / '5_SystemDrivers'),
                     str(host / 'menu_navigation_test.c'), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

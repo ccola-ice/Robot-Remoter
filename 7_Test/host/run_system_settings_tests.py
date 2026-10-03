@@ -1,3 +1,4 @@
+from app_test_paths import app_include_args
 from pathlib import Path
 import subprocess
 import sys
@@ -86,6 +87,6 @@ void TIM_SetCompare1(TIM_TypeDef *, uint16_t);
     (tmp / 'backlight_driver.inc').write_text(driver[start:end], encoding='utf8')
     exe = tmp / 'system-settings-test.exe'
     subprocess.run([compiler, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-I', str(tmp), '-I', str(root / '5_ModuleDrivers'),
+                    '-I', str(tmp), *app_include_args(), '-I', str(root / '5_ModuleDrivers'),
                     str(host / 'system_settings_test.c'), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

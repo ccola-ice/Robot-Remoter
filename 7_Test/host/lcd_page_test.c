@@ -4,13 +4,13 @@
 #include <string.h>
 #include <float.h>
 #include "fonts.h"
-#include "gui.h"
-#include "gui_analog_filter.h"
-#include "gui_robot_filter.h"
-#include "diagnostics.h"
-#include "hardware_tests.h"
-#include "menu.h"
-#include "menu_catalog.h"
+#include "ui_pages.h"
+#include "ui_analog_filter.h"
+#include "ui_robot_filter.h"
+#include "diag_menu.h"
+#include "diag_hardware.h"
+#include "ui_menu.h"
+#include "ui_menu_catalog.h"
 #include "control_link.h"
 
 static FILE *preview_font_file;
@@ -140,7 +140,7 @@ typedef uint16_t WCHAR;
 WCHAR ff_convert(WCHAR code, unsigned direction);
 
 #define ui_text ui_render_text
-#include "gui_theme.h"
+#include "ui_theme.h"
 #undef ui_text
 static void ui_text(uint16_t x,uint16_t y,uint8_t columns,const char *text,
                     uint16_t fg,uint16_t bg,uint8_t large)

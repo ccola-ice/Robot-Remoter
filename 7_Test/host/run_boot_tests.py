@@ -1,3 +1,4 @@
+from app_test_paths import app_include_args
 from pathlib import Path
 import subprocess, tempfile, sys
 
@@ -7,8 +8,8 @@ compiler = sys.argv[1] if len(sys.argv) > 1 else 'gcc'
 with tempfile.TemporaryDirectory(prefix='remoter-boot-') as folder:
     exe = Path(folder) / 'boot-test.exe'
     subprocess.run([compiler, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-I', str(app), '-I', str(host.parent), str(host/'boot_test.c'),
-                    str(app/'boot_status.c'), '-o', str(exe)], check=True)
+                    *app_include_args(), '-I', str(host.parent), str(host/'boot_test.c'),
+                    str(app/'system/boot_status.c'), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)
 subprocess.run([sys.executable, str(host/'run_storage_probe_tests.py'), compiler], check=True)
 subprocess.run([sys.executable, str(host/'run_diagnostic_tests.py'), compiler], check=True)

@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "menu.h"
+#include "ui_menu.h"
 
 #define DIAG_UI_BLACK  0U
 #define DIAG_UI_WHITE  1U
@@ -47,7 +47,7 @@ static uint8_t EEPROM_Byte_Write(uint8_t address, uint8_t value)
     assert(address != 255U); /* Test-reserved byte is read only in the editor. */
     writes++; bytes[address]=value ^ mismatch; return 0U;
 }
-#include "eeprom_menu.c"
+#include "diag_eeprom.c"
 
 static void run(const int *events, unsigned size, unsigned fail_read, unsigned wrong_value)
 {

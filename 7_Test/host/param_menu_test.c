@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "gui.h"
-#include "param.h"
+#include "ui_pages.h"
+#include "app_config.h"
 
 typedef enum { MENU_KEY_NONE, MENU_KEY_LEFT, MENU_KEY_RIGHT, MENU_KEY_OK, MENU_KEY_BACK } MenuKey;
 enum { MENU_PAGE_CATEGORY = 1 };

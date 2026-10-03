@@ -1,4 +1,4 @@
-#include "file_gif.h"
+#include "image_gif.h"
 #include "ff.h"
 #include <assert.h>
 #include <stdio.h>

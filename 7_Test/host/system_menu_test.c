@@ -2,9 +2,9 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include "gui.h"
-#include "param.h"
-#include "menu.h"
+#include "ui_pages.h"
+#include "app_config.h"
+#include "ui_menu.h"
 
 volatile param_Config param;
 static param_Config saved;

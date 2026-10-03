@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "menu.h"
+#include "ui_menu.h"
 static uint8_t pins[4] = {1, 1, 1, 1};
 static unsigned events[4], repeats[4], attempts[4];
 static uint32_t now_ms, repeat_times[64];

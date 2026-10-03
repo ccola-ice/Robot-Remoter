@@ -52,8 +52,8 @@
 #include "platform_nrf.h"
 #include "bsp_adc1_independent_dual.h"
 #include "bsp_adc3_independent_dual.h"
-#include "menu.h"
-#include "system_settings.h"
+#include "ui_menu.h"
+#include "system_feedback.h"
 #include "bsp_gpio_stick.h"
 #include "nmea_decode_test.h"
 

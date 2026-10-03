@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "../../1_App/param.c"
+#include "../../1_App/config/app_config.c"
 
 static uint8_t storage[SPI_FLASH_LAYOUT_TOTAL_SIZE];
 static uint8_t io_error;

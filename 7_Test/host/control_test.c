@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-#include "param.h"
+#include "app_config.h"
 #include "robot_control_protocol.h"
 #include "control_safety.h"
 #define NUM_OF_ADC1CHANNEL 7U

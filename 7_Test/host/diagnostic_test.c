@@ -114,7 +114,7 @@ static void USART_SendData(Uart *u, uint8_t data) {u->DR=data; uart_sent++;}
 static uint16_t USART_ReceiveData(Uart *u) {return u->DR ^ uart_mismatch;}
 static void Delay_ms(unsigned ms) {total_ms+=ms; assert(total_ms < 10000U);}
 
-#include "hardware_tests.c"
+#include "diag_hardware.c"
 
 static void reset(void)
 {
