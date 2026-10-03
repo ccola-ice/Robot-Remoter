@@ -7,7 +7,15 @@
 #include <stdio.h>
 #include <string.h>
 
-static uint8_t sample[256], verify[256];
+/* 启动及菜单串行调用检测入口，不允许嵌套或并行执行。
+ * RAM 检测与存储器读写检测互斥，复用本模块自有空间；RAM 访问保持 volatile。 */
+static union {
+    volatile uint32_t ram[256];
+    struct {
+        uint8_t sample[256];
+        uint8_t verify[256];
+    } io;
+} test_buffer;
 static FIL test_file;
 
 const char *hardware_result_name(HwResult result)
@@ -18,7 +26,6 @@ const char *hardware_result_name(HwResult result)
 
 HwResult hardware_memory_test(void)
 {
-    static volatile uint32_t ram[256]; /* 仅测试本模块分配的内存，不使用固定地址。 */
     static const uint32_t rom[] = {0x01234567UL, 0x89abcdefUL,
                                    0x55aa55aaUL, 0xaa55aa55UL};
     const volatile uint32_t *probe = rom; /* 将对象保留在 ROM 中，并强制通过总线实际读取。 */
@@ -27,10 +34,10 @@ HwResult hardware_memory_test(void)
        probe[2] != 0x55aa55aaUL || probe[3] != 0xaa55aa55UL) return HW_FAIL;
     for(bit = 0; bit < 32U; bit++) {
         pattern = 1UL << bit;
-        for(i = 0; i < 256U; i++) ram[i] = pattern ^ i;
-        for(i = 0; i < 256U; i++) if(ram[i] != (pattern ^ i)) return HW_FAIL;
-        for(i = 0; i < 256U; i++) ram[i] = ~(pattern ^ i);
-        for(i = 0; i < 256U; i++) if(ram[i] != ~(pattern ^ i)) return HW_FAIL;
+        for(i = 0; i < 256U; i++) test_buffer.ram[i] = pattern ^ i;
+        for(i = 0; i < 256U; i++) if(test_buffer.ram[i] != (pattern ^ i)) return HW_FAIL;
+        for(i = 0; i < 256U; i++) test_buffer.ram[i] = ~(pattern ^ i);
+        for(i = 0; i < 256U; i++) if(test_buffer.ram[i] != ~(pattern ^ i)) return HW_FAIL;
     }
     return HW_PASS;
 }
@@ -42,27 +49,35 @@ HwResult hardware_flash_write_test(void)
     HwResult result = HW_PASS;
     if(FLASH_BootProbe(&id)) return HW_FAIL;
     /* 不得擦除已经存有资源、参数或文件系统数据的扇区。 */
-    for(offset = 0; offset < SPI_FLASH_LAYOUT_SECTOR_SIZE; offset += sizeof(sample)) {
-        FLASH_Read_Data(sample, SPI_FLASH_DIAG_ADDR + offset, sizeof(sample));
+    for(offset = 0; offset < SPI_FLASH_LAYOUT_SECTOR_SIZE; offset += sizeof(test_buffer.io.sample)) {
+        FLASH_Read_Data(test_buffer.io.sample, SPI_FLASH_DIAG_ADDR + offset,
+                        sizeof(test_buffer.io.sample));
         if(FLASH_GetIoError()) return HW_FAIL;
-        for(i = 0; i < sizeof(sample); i++) if(sample[i] != 0xffU) return HW_BLOCKED;
+        for(i = 0; i < sizeof(test_buffer.io.sample); i++)
+            if(test_buffer.io.sample[i] != 0xffU) return HW_BLOCKED;
     }
-    for(offset = 0; offset < SPI_FLASH_LAYOUT_SECTOR_SIZE; offset += sizeof(sample)) {
-        for(i = 0; i < sizeof(sample); i++) sample[i] = (uint8_t)(i ^ (offset >> 8) ^ 0xa5U);
+    for(offset = 0; offset < SPI_FLASH_LAYOUT_SECTOR_SIZE; offset += sizeof(test_buffer.io.sample)) {
+        for(i = 0; i < sizeof(test_buffer.io.sample); i++)
+            test_buffer.io.sample[i] = (uint8_t)(i ^ (offset >> 8) ^ 0xa5U);
         /* W25Q128 物理页大小为 256 字节，不得使用旧版的 4 KiB 页写入方式。 */
-        FLASH_Write_Page_v3(sample, SPI_FLASH_DIAG_ADDR + offset, sizeof(sample));
-        FLASH_Read_Data(verify, SPI_FLASH_DIAG_ADDR + offset, sizeof(verify));
-        if(FLASH_GetIoError() || memcmp(sample, verify, sizeof(sample))) {
+        FLASH_Write_Page_v3(test_buffer.io.sample, SPI_FLASH_DIAG_ADDR + offset,
+                            sizeof(test_buffer.io.sample));
+        FLASH_Read_Data(test_buffer.io.verify, SPI_FLASH_DIAG_ADDR + offset,
+                        sizeof(test_buffer.io.verify));
+        if(FLASH_GetIoError() || memcmp(test_buffer.io.sample, test_buffer.io.verify,
+                                       sizeof(test_buffer.io.sample))) {
             result = HW_FAIL;
             break;
         }
     }
     /* 只允许擦除本次测试使用、且测试前已确认为空白的专用扇区。 */
     FLASH_Erase_Sectors(SPI_FLASH_DIAG_ADDR);
-    for(offset = 0; offset < SPI_FLASH_LAYOUT_SECTOR_SIZE; offset += sizeof(sample)) {
-        FLASH_Read_Data(verify, SPI_FLASH_DIAG_ADDR + offset, sizeof(verify));
+    for(offset = 0; offset < SPI_FLASH_LAYOUT_SECTOR_SIZE; offset += sizeof(test_buffer.io.sample)) {
+        FLASH_Read_Data(test_buffer.io.verify, SPI_FLASH_DIAG_ADDR + offset,
+                        sizeof(test_buffer.io.verify));
         if(FLASH_GetIoError()) result = HW_FAIL;
-        for(i = 0; i < sizeof(verify); i++) if(verify[i] != 0xffU) result = HW_FAIL;
+        for(i = 0; i < sizeof(test_buffer.io.verify); i++)
+            if(test_buffer.io.verify[i] != 0xffU) result = HW_FAIL;
     }
     return result;
 }
@@ -103,9 +118,10 @@ HwResult hardware_sd_write_test(void)
     if(name == 1000U) return HW_BLOCKED;
     opened = 1U;
     for(block = 0; block < 16U; block++) {
-        for(i = 0; i < sizeof(sample); i++) sample[i] = (uint8_t)(i ^ block ^ 0x5aU);
-        if(f_write(&test_file, sample, sizeof(sample), &transferred) != FR_OK ||
-           transferred != sizeof(sample)) goto cleanup;
+        for(i = 0; i < sizeof(test_buffer.io.sample); i++)
+            test_buffer.io.sample[i] = (uint8_t)(i ^ block ^ 0x5aU);
+        if(f_write(&test_file, test_buffer.io.sample, sizeof(test_buffer.io.sample), &transferred) != FR_OK ||
+           transferred != sizeof(test_buffer.io.sample)) goto cleanup;
     }
     if(f_sync(&test_file) != FR_OK) goto cleanup;
     code = f_close(&test_file);
@@ -115,10 +131,10 @@ HwResult hardware_sd_write_test(void)
     opened = 1U;
     if(f_size(&test_file) != 4096U) goto cleanup;
     for(block = 0; block < 16U; block++) {
-        if(f_read(&test_file, verify, sizeof(verify), &transferred) != FR_OK ||
-           transferred != sizeof(verify)) goto cleanup;
-        for(i = 0; i < sizeof(verify); i++)
-            if(verify[i] != (uint8_t)(i ^ block ^ 0x5aU)) goto cleanup;
+        if(f_read(&test_file, test_buffer.io.verify, sizeof(test_buffer.io.verify), &transferred) != FR_OK ||
+           transferred != sizeof(test_buffer.io.verify)) goto cleanup;
+        for(i = 0; i < sizeof(test_buffer.io.verify); i++)
+            if(test_buffer.io.verify[i] != (uint8_t)(i ^ block ^ 0x5aU)) goto cleanup;
     }
     result = HW_PASS;
 cleanup:

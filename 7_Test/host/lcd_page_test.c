@@ -100,8 +100,7 @@ static void ILI9806G_Write_Data(uint16_t data)
     }
 }
 static uint16_t ILI9806G_Read_PixelData(void) { return 0U; }
-#define ZOOMMAXBUFF 16384U
-static uint8_t zoomBuff[ZOOMMAXBUFF],zoomTempBuff[1024],ucBuffer[128];
+static uint8_t ucBuffer[128];
 
 #include "lcd_page_driver.inc"
 

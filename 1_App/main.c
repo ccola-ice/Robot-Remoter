@@ -43,8 +43,7 @@
 #include "EEPROM_test.h"
 #include "SRAM_test.h"
 #include "image_viewer.h"
-#include "FATFS_FLASH_test.h"
-#include "FATFS_SDCARD_test.h"
+#include "ff.h"
 #include "nmea_decode_test.h"
 #include "inv_mpu.h"
 #include "inv_mpu_dmp_motion_driver.h" 
@@ -73,9 +72,6 @@ extern volatile  param_Config param;;
 
 FATFS fs_sdcard;                   	/* SD 卡 FatFs 文件系统对象 */
 FATFS fs_flash;                    	/* SPI Flash FatFs 文件系统对象 */
-extern FIL fnew_sdcard;				/* 文件对象 */
-extern FRESULT res;                	/* 文件操作结果 */
-extern unsigned int fnum;			/* 文件成功读写的字节数 */
 
 float pitch,roll,yaw; 		// DMP 解算得到的欧拉角
 short aacx,aacy,aacz;		// 加速度传感器原始数据
@@ -362,11 +358,12 @@ void setup(void)
     sprintf(detail, "SD command handshake/card information; result=%u", sd_result);
     boot_done(BOOT_SD, sd_result == SD_OK ? BOOT_PASS : BOOT_FAIL, detail);
     if(sd_result == SD_OK) {
+        FRESULT mount_result;
         boot_start(BOOT_SD_FS);
-        res = f_mount(&fs_sdcard, "0:", 1);
-        sprintf(detail, "Read partition/FAT metadata; mount result=%u", res);
-        boot_done(BOOT_SD_FS, res == FR_OK ? BOOT_PASS : BOOT_FAIL, detail);
-        if(res == FR_OK) {
+        mount_result = f_mount(&fs_sdcard, "0:", 1);
+        sprintf(detail, "Read partition/FAT metadata; mount result=%u", mount_result);
+        boot_done(BOOT_SD_FS, mount_result == FR_OK ? BOOT_PASS : BOOT_FAIL, detail);
+        if(mount_result == FR_OK) {
             boot_start(BOOT_SD_WRITE);
             hw_result = hardware_sd_write_test();
             boot_done(BOOT_SD_WRITE, hw_result == HW_PASS ? BOOT_PASS : BOOT_FAIL,

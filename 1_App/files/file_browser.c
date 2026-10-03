@@ -7,12 +7,10 @@
 typedef struct {
     uint32_t selected;
     uint32_t first;
-    uint16_t operation_length;
-    uint16_t display_length;
+    uint16_t path_length;
 } FileBrowserParent;
 
 static FileBrowserState browser;
-static char operation_path[FILE_BROWSER_PATH_LENGTH];
 static char aliases[FILE_BROWSER_VISIBLE_ROWS][FILE_BROWSER_ALIAS_LENGTH];
 static FileBrowserParent parents[FILE_BROWSER_MAX_DEPTH];
 static uint8_t depth;
@@ -131,7 +129,6 @@ static void browser_virtual_root(void)
     depth = 0U;
     selected_index = 0U;
     window_first = 0U;
-    operation_path[0] = '\0';
     browser_status(FILE_BROWSER_OK, FR_OK);
 }
 
@@ -154,7 +151,7 @@ scan_again:
         browser_failed(FILE_BROWSER_CANCELLED, FR_OK);
         return;
     }
-    result = f_opendir(&directory, operation_path);
+    result = f_opendir(&directory, browser.path);
     if(result != FR_OK) {
         browser_failed(FILE_BROWSER_IO_ERROR, result);
         return;
@@ -270,10 +267,9 @@ FileBrowserEnterResult file_browser_enter(char *path, size_t capacity)
 {
     const GuiFileEntry *entry;
     const char *alias;
-    size_t operation_length, display_length, alias_length;
+    size_t path_length, alias_length;
     if(path && capacity) path[0] = '\0';
     if(browser.virtual_root) {
-        strcpy(operation_path, "0:");
         strcpy(browser.path, "0:");
         browser.virtual_root = 0U;
         selected_index = window_first = 0U;
@@ -288,21 +284,20 @@ FileBrowserEnterResult file_browser_enter(char *path, size_t capacity)
     }
     entry = &browser.entries[browser.selected_row];
     alias = aliases[browser.selected_row];
-    operation_length = strlen(operation_path);
-    display_length = strlen(browser.path);
+    path_length = strlen(browser.path);
     alias_length = strlen(alias);
-    if(operation_length + alias_length + 2U > sizeof(operation_path)) {
+    if(path_length + alias_length + 2U > sizeof(browser.path)) {
         browser_status(FILE_BROWSER_PATH_LIMIT, FR_OK);
         return FILE_BROWSER_ENTER_ERROR;
     }
     if(!entry->is_directory) {
-        if(!path || operation_length + alias_length + 2U > capacity) {
+        if(!path || path_length + alias_length + 2U > capacity) {
             browser_status(FILE_BROWSER_PATH_LIMIT, FR_OK);
             return FILE_BROWSER_ENTER_ERROR;
         }
-        memcpy(path, operation_path, operation_length);
-        path[operation_length] = '/';
-        strcpy(path + operation_length + 1U, alias);
+        memcpy(path, browser.path, path_length);
+        path[path_length] = '/';
+        strcpy(path + path_length + 1U, alias);
         browser_status(FILE_BROWSER_OK, FR_OK);
         return FILE_BROWSER_ENTER_FILE;
     }
@@ -312,13 +307,11 @@ FileBrowserEnterResult file_browser_enter(char *path, size_t capacity)
     }
     parents[depth].selected = selected_index;
     parents[depth].first = window_first;
-    parents[depth].operation_length = (uint16_t)operation_length;
-    parents[depth].display_length = (uint16_t)display_length;
+    parents[depth].path_length = (uint16_t)path_length;
     ++depth;
-    operation_path[operation_length] = '/';
-    strcpy(operation_path + operation_length + 1U, alias);
-    /* 路径栏使用完整的短文件名层级，目录列表保留长文件名用于阅读。 */
-    strcpy(browser.path, operation_path);
+    /* 文件访问与路径栏共用完整的短文件名路径，目录列表仍保留长文件名。 */
+    browser.path[path_length] = '/';
+    strcpy(browser.path + path_length + 1U, alias);
     selected_index = window_first = 0U;
     browser_scan(1U);
     return browser.status == FILE_BROWSER_IO_ERROR || browser.status == FILE_BROWSER_CANCELLED ?
@@ -331,8 +324,7 @@ uint8_t file_browser_back(void)
     if(!depth) browser_virtual_root();
     else {
         --depth;
-        operation_path[parents[depth].operation_length] = '\0';
-        browser.path[parents[depth].display_length] = '\0';
+        browser.path[parents[depth].path_length] = '\0';
         selected_index = parents[depth].selected;
         window_first = parents[depth].first;
         browser_scan(1U);

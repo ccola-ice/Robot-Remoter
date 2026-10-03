@@ -43,7 +43,8 @@ static uint8_t EEPROM_Byte_Write(uint8_t address, uint8_t value)
 }
 typedef unsigned UINT;
 typedef unsigned FRESULT;
-typedef struct {unsigned pos, size;} FIL;
+/* 保留真实 FatFs 的 4 KiB 扇区缓存，检查文件对象与测试样本确实独立。 */
+typedef struct {unsigned pos, size; uint8_t sector[4096];} FIL;
 #define FR_OK 0U
 #define FR_EXIST 1U
 #define FR_DISK_ERR 2U
@@ -66,20 +67,25 @@ static FRESULT f_open(FIL *f, const char *path, unsigned mode)
         if(sd_fault == 5U) return FR_DISK_ERR;
     }
     f->pos=0U;
+    memset(f->sector, 0xA5, sizeof(f->sector));
     return FR_OK;
 }
 static FRESULT f_write(FIL *f, const void *data, UINT size, UINT *done)
 {
     assert(f->pos + size <= sizeof(file_data));
     *done=short_io == 1U ? size-1U : size;
-    memcpy(file_data + f->pos,data,*done); f->pos+=*done; f->size=f->pos;
+    memset(f->sector, 0xA5, sizeof(f->sector));
+    memcpy(f->sector,data,*done);
+    memcpy(file_data + f->pos,f->sector,*done); f->pos+=*done; f->size=f->pos;
     return sd_fault == 2U ? FR_DISK_ERR : FR_OK;
 }
 static FRESULT f_read(FIL *f, void *data, UINT size, UINT *done)
 {
     assert(f->pos + size <= sizeof(file_data));
     *done=short_io == 2U ? size-1U : size;
-    memcpy(data,file_data + f->pos,*done); f->pos+=*done;
+    memset(f->sector, 0xA5, sizeof(f->sector));
+    memcpy(f->sector,file_data + f->pos,*done);
+    memcpy(data,f->sector,*done); f->pos+=*done;
     if(sd_fault == 6U) ((uint8_t*)data)[0]^=1U;
     return sd_fault == 7U ? FR_DISK_ERR : FR_OK;
 }
@@ -152,6 +158,9 @@ int main(void)
         reset(); sd_fault=i;
         assert(hardware_sd_write_test() == HW_FAIL);
         assert(unlinks == (i == 1U ? 0U : 1U));
+        assert(hardware_memory_test() == HW_PASS);
+        reset();
+        assert(hardware_sd_write_test() == HW_PASS && closes == 2U && unlinks == 1U);
     }
     reset(); short_io=1U; assert(hardware_sd_write_test() == HW_FAIL && unlinks == 1U);
     reset(); short_io=2U; assert(hardware_sd_write_test() == HW_FAIL && unlinks == 1U);
@@ -160,6 +169,15 @@ int main(void)
     assert(hardware_uart_loopback_test() == HW_FAIL && total_ms <= 102U && uart.CR1 == 0x8001U);
     reset(); uart_mismatch=1U; assert(hardware_uart_loopback_test() == HW_FAIL && uart.CR1 == 0x8001U);
     reset(); uart.SR=USART_SR_ORE; assert(hardware_uart_loopback_test() == HW_FAIL && uart.CR1 == 0x8001U);
+    /* 连续切换检测类型，上一种检测留下的数据不应影响后续检测。 */
+    for(i = 0U; i < 3U; i++) {
+        reset();
+        assert(hardware_memory_test() == HW_PASS);
+        assert(hardware_flash_write_test() == HW_PASS && writes == 16U && erases == 1U);
+        assert(hardware_memory_test() == HW_PASS);
+        assert(hardware_sd_write_test() == HW_PASS && closes == 2U && unlinks == 1U);
+        assert(hardware_memory_test() == HW_PASS);
+    }
     puts("PASS: diagnostic storage guards, readback failures, cleanup, UART timeout/restore, owned RAM");
     return 0;
 }

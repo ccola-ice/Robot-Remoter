@@ -1,4 +1,5 @@
 #include "image_viewer.h"
+#include "image_gif.h"
 #include "ff.h"
 #include <assert.h>
 #include <stdio.h>
@@ -9,6 +10,7 @@ uint16_t LCD_X_LENGTH = 800U, LCD_Y_LENGTH = 480U;
 static uint16_t frame[800U * 480U];
 static uint8_t coverage[800U * 480U];
 static unsigned calls, cancel_after, reads, fail_read, fail_seek, closes, fail_close, opens;
+static unsigned maximum_blit_width;
 static uint16_t vx, vy, vw, vh;
 static uint64_t workspace[280576U / 8U + 2U];
 
@@ -60,6 +62,7 @@ void LCD_BlitRGB565(uint16_t x, uint16_t y, uint16_t width, uint16_t height,
     assert(x >= vx && y >= vy && width && height);
     assert((uint32_t)x + width <= (uint32_t)vx + vw);
     assert((uint32_t)y + height <= (uint32_t)vy + vh);
+    if(width > maximum_blit_width) maximum_blit_width = width;
     for(row = 0U; row < height; row++) {
         for(column = 0U; column < width; column++) {
             unsigned index = (y + row) * 800U + x + column;
@@ -89,22 +92,37 @@ static void verify_coverage(const FileImageInfo *info)
     }
 }
 
-/* 在同一进程内切换 PNG → BMP → JPEG，验证解码锁和文件资源已经释放。 */
-static void verify_following_images(const char *bmp, const char *jpeg)
+/* 反复切换四种格式，覆盖工作区交接、JPEG 窄行缓存和文件资源释放。 */
+static void verify_following_images(const char *bmp, const char *jpeg,
+                                    const char *png, const char *gif)
 {
+    static uint16_t previous_images[4][800U * 480U];
     FileImageInfo info;
-    const char *paths[2];
-    unsigned index, before;
-    paths[0] = bmp; paths[1] = jpeg;
+    const char *paths[4];
+    unsigned index, before, kind;
+    paths[0] = bmp; paths[1] = jpeg; paths[2] = png; paths[3] = gif;
     cancel_after = fail_read = fail_seek = fail_close = 0U;
-    for(index = 0U; index < 2U; index++) {
+    file_image_set_workspace(workspace + 1U, 280576U);
+    for(index = 0U; index < 12U; index++) {
+        kind = index % 4U;
         memset(coverage, 0, sizeof(coverage));
         memset(frame, 0x5A, sizeof(frame));
+        maximum_blit_width = 0U;
         before = closes;
-        assert(file_image_draw(paths[index], vx, vy, vw, vh, &info, service, &calls) == FILE_IMAGE_OK);
-        assert(closes == before + 1U && opens == closes);
-        assert(info.format == (index ? FILE_IMAGE_JPEG : FILE_IMAGE_BMP));
+        if(kind == 3U) {
+            assert(file_gif_open(paths[kind], vx, vy, vw, vh, 0xFFFFU, &info,
+                                workspace + 1U, 280576U, service, &calls) == FILE_IMAGE_OK);
+            file_gif_close();
+            assert(!file_gif_is_open());
+        } else {
+            assert(file_image_draw(paths[kind], vx, vy, vw, vh, &info, service, &calls) == FILE_IMAGE_OK);
+        }
+        assert(closes == before + (kind == 2U ? 2U : 1U) && opens == closes);
+        assert(info.format == kind + 1U);
+        if(kind == 1U) assert(maximum_blit_width <= 16U);
         verify_coverage(&info);
+        if(index < 4U) memcpy(previous_images[kind], frame, sizeof(frame));
+        else assert(memcmp(previous_images[kind], frame, sizeof(frame)) == 0);
     }
 }
 
@@ -114,7 +132,7 @@ int main(int argc, char **argv)
     FileImageResult result;
     unsigned expected, index, capacity = 0U;
     FILE *output;
-    assert(argc == 12 || argc == 13 || argc == 15);
+    assert(argc == 12 || argc == 13 || argc == 17);
     expected = (unsigned)atoi(argv[2]);
     vx = (uint16_t)atoi(argv[3]);
     vy = (uint16_t)atoi(argv[4]);
@@ -148,6 +166,7 @@ int main(int argc, char **argv)
     }
     if(result == FILE_IMAGE_OK) {
         assert(closes == (info.format == FILE_IMAGE_PNG ? 2U : 1U) && calls > 0U);
+        if(info.format == FILE_IMAGE_JPEG) assert(maximum_blit_width <= 16U);
         verify_coverage(&info);
     }
     output = fopen(argv[11], "wb");
@@ -156,7 +175,7 @@ int main(int argc, char **argv)
     fclose(output);
     printf("%lu %lu %u %u %u %u %u %u\n", (unsigned long)info.width, (unsigned long)info.height,
            info.drawn_width, info.drawn_height, info.format, calls, closes, reads);
-    if(argc == 15) verify_following_images(argv[13], argv[14]);
+    if(argc == 17) verify_following_images(argv[13], argv[14], argv[15], argv[16]);
     file_image_set_workspace(NULL, 280576U);
     {
         uint32_t registered = 1U;

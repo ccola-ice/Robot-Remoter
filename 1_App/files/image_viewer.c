@@ -11,6 +11,7 @@
 #define IMAGE_LINE_PIXELS 800U
 #define IMAGE_IO_BYTES 512U
 #define IMAGE_JPEG_POOL 7168U
+#define IMAGE_JPEG_MCU_PIXELS 16U
 
 static void *image_workspace;
 static uint32_t image_workspace_capacity;
@@ -30,10 +31,20 @@ void *file_image_get_workspace(uint32_t *capacity)
 /* 文件缓存和解码工作区放在静态区，避免挤占主循环栈。 */
 static struct {
     FIL file;
-    JDEC jpeg;
-    uint32_t pool[IMAGE_JPEG_POOL / 4U];
-    uint8_t bytes[IMAGE_IO_BYTES];
-    uint16_t pixels[IMAGE_LINE_PIXELS];
+    /* 格式识别、BMP 读取和 JPEG 预检使用 bmp；预检完成后才启用 jpeg。
+     * 两种解码过程不会交错，文件对象和回调状态始终独立于工作区。 */
+    union {
+        struct {
+            uint8_t bytes[IMAGE_IO_BYTES];
+            uint16_t pixels[IMAGE_LINE_PIXELS];
+        } bmp;
+        struct {
+            JDEC decoder;
+            uint32_t pool[IMAGE_JPEG_POOL / 4U];
+            /* 预检只允许 8/16 像素宽 MCU；显示只缩小，每次输出最多一行 MCU。 */
+            uint16_t pixels[IMAGE_JPEG_MCU_PIXELS];
+        } jpeg;
+    } workspace;
     uint8_t (*service)(void *);
     void *context;
     FileImageResult status;
@@ -140,11 +151,11 @@ static uint8_t image_byte(uint32_t offset, uint8_t *value)
         start = offset & ~(uint32_t)(IMAGE_IO_BYTES - 1U);
         count = (UINT)(image.size - start);
         if(image.size - start > IMAGE_IO_BYTES) count = IMAGE_IO_BYTES;
-        if(!image_seek(start) || !image_read(image.bytes, count)) return 0U;
+        if(!image_seek(start) || !image_read(image.workspace.bmp.bytes, count)) return 0U;
         image.cache_start = start;
         image.cache_count = count;
     }
-    *value = image.bytes[offset - image.cache_start];
+    *value = image.workspace.bmp.bytes[offset - image.cache_start];
     return 1U;
 }
 
@@ -154,26 +165,26 @@ static void image_bmp(FileImageInfo *info)
     uint16_t bpp, x, y;
     uint8_t top_down, blue, green, red;
     info->format = FILE_IMAGE_BMP;
-    if(!image_seek(0U) || !image_read(image.bytes, 54U)) return;
-    dib = image_le32(image.bytes + 14U);
+    if(!image_seek(0U) || !image_read(image.workspace.bmp.bytes, 54U)) return;
+    dib = image_le32(image.workspace.bmp.bytes + 14U);
     if(dib != 40U && dib != 52U && dib != 56U && dib != 108U && dib != 124U) {
         image.status = FILE_IMAGE_UNSUPPORTED;
         return;
     }
-    offset = image_le32(image.bytes + 10U);
-    declared_size = image_le32(image.bytes + 2U);
-    width = image_le32(image.bytes + 18U);
-    height = image_le32(image.bytes + 22U);
+    offset = image_le32(image.workspace.bmp.bytes + 10U);
+    declared_size = image_le32(image.workspace.bmp.bytes + 2U);
+    width = image_le32(image.workspace.bmp.bytes + 18U);
+    height = image_le32(image.workspace.bmp.bytes + 22U);
     top_down = (uint8_t)(height >> 31);
     if(top_down) height = (~height) + 1U;
-    bpp = image_le16(image.bytes + 28U);
-    if(image_le16(image.bytes + 26U) != 1U || width >= 0x80000000UL ||
+    bpp = image_le16(image.workspace.bmp.bytes + 28U);
+    if(image_le16(image.workspace.bmp.bytes + 26U) != 1U || width >= 0x80000000UL ||
        offset < 14U + dib || offset > image.size ||
        declared_size > image.size || (declared_size != 0U && declared_size < offset)) {
         image.status = FILE_IMAGE_CORRUPT;
         return;
     }
-    if((bpp != 24U && bpp != 32U) || image_le32(image.bytes + 30U) != 0U) {
+    if((bpp != 24U && bpp != 32U) || image_le32(image.workspace.bmp.bytes + 30U) != 0U) {
         image.status = FILE_IMAGE_UNSUPPORTED;
         return;
     }
@@ -193,10 +204,10 @@ static void image_bmp(FileImageInfo *info)
             position = offset + row * stride + ((uint32_t)x * width / image.width) * (bpp / 8U);
             if(!image_byte(position, &blue) || !image_byte(position + 1U, &green) ||
                !image_byte(position + 2U, &red)) return;
-            image.pixels[x] = (uint16_t)(((uint16_t)(red & 0xF8U) << 8) |
+            image.workspace.bmp.pixels[x] = (uint16_t)(((uint16_t)(red & 0xF8U) << 8) |
                                        ((uint16_t)(green & 0xFCU) << 3) | (blue >> 3));
         }
-        LCD_BlitRGB565(image.x, (uint16_t)(image.y + y), image.width, 1U, image.pixels);
+        LCD_BlitRGB565(image.x, (uint16_t)(image.y + y), image.width, 1U, image.workspace.bmp.pixels);
     }
 }
 
@@ -206,14 +217,14 @@ static uint8_t image_jpeg_tables(uint8_t marker, UINT length)
     UINT at = 0U, i, n, slots, count;
     uint8_t kind;
     while(at < length) {
-        kind = image.bytes[at++];
+        kind = image.workspace.bmp.bytes[at++];
         if(marker == 0xDBU) {
             if((kind & 0xF0U) != 0U) {
                 image.status = FILE_IMAGE_UNSUPPORTED;
                 return 0U;
             }
             if(kind > 3U || length - at < 64U) goto invalid;
-            for(i = 0U; i < 64U; i++) if(image.bytes[at + i] == 0U) break;
+            for(i = 0U; i < 64U; i++) if(image.workspace.bmp.bytes[at + i] == 0U) break;
             if(i != 64U) goto invalid;
             at += 64U;
         } else {
@@ -221,7 +232,7 @@ static uint8_t image_jpeg_tables(uint8_t marker, UINT length)
             n = 0U;
             slots = 1U;
             for(i = 0U; i < 16U; i++) {
-                count = image.bytes[at++];
+                count = image.workspace.bmp.bytes[at++];
                 slots *= 2U;
                 if(count > slots) break;
                 slots -= count;
@@ -229,7 +240,7 @@ static uint8_t image_jpeg_tables(uint8_t marker, UINT length)
             }
             if(i != 16U || n == 0U || n > 256U || n > length - at) goto invalid;
             for(i = 0U; i < n; i++) {
-                count = image.bytes[at + i];
+                count = image.workspace.bmp.bytes[at + i];
                 if((kind & 0x10U) == 0U) {
                     if(count > 11U) break;
                 } else if((count & 15U) > 10U || ((count & 15U) == 0U && count != 0U && count != 0xF0U)) break;
@@ -251,9 +262,9 @@ static uint8_t image_jpeg_validate(FileImageInfo *info)
     uint16_t marker;
     uint8_t seen_frame = 0U, in_marker = 0U, value;
     while(offset < image.size) {
-        if(!image_seek(offset) || !image_read(image.bytes, 4U)) return 0U;
-        marker = image_be16(image.bytes);
-        length = image_be16(image.bytes + 2U);
+        if(!image_seek(offset) || !image_read(image.workspace.bmp.bytes, 4U)) return 0U;
+        marker = image_be16(image.workspace.bmp.bytes);
+        length = image_be16(image.workspace.bmp.bytes + 2U);
         if((marker >> 8) != 0xFFU || length < 2U ||
            image.size - offset < (uint32_t)length + 2U) break;
         offset += (uint32_t)length + 2U;
@@ -264,24 +275,25 @@ static uint8_t image_jpeg_validate(FileImageInfo *info)
                 image.status = FILE_IMAGE_UNSUPPORTED;
                 return 0U;
             }
-            if(!image_read(image.bytes, length)) return 0U;
+            if(!image_read(image.workspace.bmp.bytes, length)) return 0U;
             if(marker == 0xFFC0U) {
                 if(length < 6U) break;
-                if(image.bytes[0] != 8U || image.bytes[5] != 3U) {
+                if(image.workspace.bmp.bytes[0] != 8U || image.workspace.bmp.bytes[5] != 3U) {
                     image.status = FILE_IMAGE_UNSUPPORTED;
                     return 0U;
                 }
                 if(length != 15U || seen_frame) break;
                 for(i = 0U; i < 3U; i++) {
-                    value = image.bytes[7U + 3U * i];
-                    if(image.bytes[6U + 3U * i] != i + 1U ||
-                       image.bytes[8U + 3U * i] > 3U ||
+                    value = image.workspace.bmp.bytes[7U + 3U * i];
+                    if(image.workspace.bmp.bytes[6U + 3U * i] != i + 1U ||
+                       image.workspace.bmp.bytes[8U + 3U * i] > 3U ||
                        (i == 0U ? (value != 0x11U && value != 0x21U && value != 0x22U) : value != 0x11U)) {
                         image.status = FILE_IMAGE_UNSUPPORTED;
                         return 0U;
                     }
                 }
-                if(!image_dimensions(image_be16(image.bytes + 3U), image_be16(image.bytes + 1U), info)) return 0U;
+                if(!image_dimensions(image_be16(image.workspace.bmp.bytes + 3U),
+                                     image_be16(image.workspace.bmp.bytes + 1U), info)) return 0U;
                 seen_frame = 1U;
             } else if(marker == 0xFFC4U || marker == 0xFFDBU) {
                 if(length == 0U) break;
@@ -290,12 +302,14 @@ static uint8_t image_jpeg_validate(FileImageInfo *info)
                 if(length != 2U) break;
             } else {
                 if(length != 10U || !seen_frame) break;
-                if(image.bytes[0] != 3U || image.bytes[7] != 0U || image.bytes[8] != 63U || image.bytes[9] != 0U) {
+                if(image.workspace.bmp.bytes[0] != 3U || image.workspace.bmp.bytes[7] != 0U ||
+                   image.workspace.bmp.bytes[8] != 63U || image.workspace.bmp.bytes[9] != 0U) {
                     image.status = FILE_IMAGE_UNSUPPORTED;
                     return 0U;
                 }
                 for(i = 0U; i < 3U; i++) {
-                    if(image.bytes[1U + 2U * i] != i + 1U || image.bytes[2U + 2U * i] != (i ? 0x11U : 0U)) break;
+                    if(image.workspace.bmp.bytes[1U + 2U * i] != i + 1U ||
+                       image.workspace.bmp.bytes[2U + 2U * i] != (i ? 0x11U : 0U)) break;
                 }
                 if(i != 3U) {
                     image.status = FILE_IMAGE_UNSUPPORTED;
@@ -360,10 +374,10 @@ static UINT image_jpeg_output(JDEC *decoder, void *bitmap, JRECT *rect)
         sy = (uint32_t)y * image.jpeg_height / image.height - rect->top;
         for(x = (uint16_t)x0; x < x1; x++) {
             sx = (uint32_t)x * image.jpeg_width / image.width - rect->left;
-            image.pixels[x - x0] = source[sy * source_width + sx];
+            image.workspace.jpeg.pixels[x - x0] = source[sy * source_width + sx];
         }
         LCD_BlitRGB565((uint16_t)(image.x + x0), (uint16_t)(image.y + y),
-                      (uint16_t)(x1 - x0), 1U, image.pixels);
+                      (uint16_t)(x1 - x0), 1U, image.workspace.jpeg.pixels);
     }
     return 1U;
 }
@@ -374,14 +388,15 @@ static void image_jpeg(FileImageInfo *info)
     uint8_t scale = 0U;
     info->format = FILE_IMAGE_JPEG;
     if(!image_jpeg_validate(info) || !image_seek(0U)) return;
-    memset(&image.jpeg, 0, sizeof(image.jpeg));
-    result = jd_prepare(&image.jpeg, image_jpeg_input, image.pool, sizeof(image.pool), 0);
+    memset(&image.workspace.jpeg.decoder, 0, sizeof(image.workspace.jpeg.decoder));
+    result = jd_prepare(&image.workspace.jpeg.decoder, image_jpeg_input, image.workspace.jpeg.pool,
+                        sizeof(image.workspace.jpeg.pool), 0);
     if(result == JDR_OK && image.status == FILE_IMAGE_OK) {
         while(scale < 3U && (info->width >> (scale + 1U)) >= image.width &&
               (info->height >> (scale + 1U)) >= image.height) scale++;
         image.jpeg_width = (uint16_t)(info->width >> scale);
         image.jpeg_height = (uint16_t)(info->height >> scale);
-        result = jd_decomp(&image.jpeg, image_jpeg_output, scale);
+        result = jd_decomp(&image.workspace.jpeg.decoder, image_jpeg_output, scale);
     }
     if(image.status != FILE_IMAGE_OK || result == JDR_OK) return;
     if(result == JDR_FMT2 || result == JDR_FMT3 || result == JDR_MEM1 || result == JDR_MEM2)
@@ -415,10 +430,10 @@ FileImageResult file_image_draw(const char *path, uint16_t x, uint16_t y,
     }
     image.size = (uint32_t)f_size(&image.file);
     if(image.size > IMAGE_MAX_BYTES) image.status = FILE_IMAGE_TOO_LARGE;
-    else if(image_read(image.bytes, 2U)) {
-        if(image.bytes[0] == 'B' && image.bytes[1] == 'M') image_bmp(info);
-        else if(image.bytes[0] == 0xFFU && image.bytes[1] == 0xD8U) image_jpeg(info);
-        else if(image.bytes[0] == 0x89U && image.bytes[1] == 'P') {
+    else if(image_read(image.workspace.bmp.bytes, 2U)) {
+        if(image.workspace.bmp.bytes[0] == 'B' && image.workspace.bmp.bytes[1] == 'M') image_bmp(info);
+        else if(image.workspace.bmp.bytes[0] == 0xFFU && image.workspace.bmp.bytes[1] == 0xD8U) image_jpeg(info);
+        else if(image.workspace.bmp.bytes[0] == 0x89U && image.workspace.bmp.bytes[1] == 'P') {
             /* PNG 有独立的流式文件对象，交接前关闭当前对象。 */
             if(f_close(&image.file) != FR_OK) {
                 image.busy = 0U;

@@ -40,7 +40,7 @@ try {
         'ILI9806G_FillColor', 'ILI9806G_Clear', 'ILI9806G_SetPointPixel', 'ILI9806G_DrawPoint',
         'ILI9806G_GetPointPixel', 'ILI9806G_DrawLine', 'ILI9806G_DrawRectangle', 'ILI9806G_Fill',
         'ILI9806G_DrawCircle', 'LCD_DrawFontGlyph', 'ILI9806G_DispChar_EN', 'ILI9806G_DispString_EN', 'LCD_DispString_EN_Bold',
-        'ILI9806G_DispChar_CH', 'ILI9806G_DispString_EN_CH', 'ILI9806G_zoomChar', 'ILI9806G_DrawChar_Ex', 'ILI9806G_DisplayStringEx',
+        'ILI9806G_DispChar_CH', 'ILI9806G_DispString_EN_CH', 'lcd_draw_scaled_glyph', 'ILI9806G_DisplayStringEx',
         'LCD_SetFont', 'LCD_SetTextColor', 'LCD_SetBackColor')
     $forward = 'void ILI9806G_OpenWindow(uint16_t x, uint16_t y, uint16_t w, uint16_t h); static __inline void ILI9806G_FillColor(uint32_t count, uint16_t color);'
     $drawFunctions = [regex]::Replace($drawFunctions, '\bILI9806G_DispString_EN\b', 'lcd_real_DispString_EN')

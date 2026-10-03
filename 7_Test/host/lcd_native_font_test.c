@@ -16,7 +16,7 @@ static uint16_t CurrentTextColor=0xf81fU,CurrentBackColor=0x07e0U;
 #define ILI9806G_DispWindow_X_Star 0U
 #define ILI9806G_DispWindow_Y_Star 0U
 static uint8_t lcd_page_active;
-static uint8_t ucBuffer[128],zoomBuff[48U*48U];
+static uint8_t ucBuffer[128];
 static uint16_t frame[480][800];
 static uint8_t fixture[48U*12U],native_enabled=1U;
 static unsigned blits,lookups,windows,legacy_pixels,flash_reads,zooms,legacy_chars;
@@ -60,10 +60,9 @@ static void lcd_begin_pixels(void) {}
 static void lcd_write_pixel(uint16_t color) { (void)color; legacy_pixels++; }
 static int GetGBKCode(uint8_t *data,uint16_t code)
 { (void)code; memset(data,0,128U); flash_reads++; return 0; }
-static void ILI9806G_zoomChar(uint16_t a,uint16_t b,uint16_t c,uint16_t d,uint8_t *input,uint8_t *output,uint8_t mode)
-{ (void)a; (void)b; (void)c; (void)d; (void)input; (void)output; (void)mode; zooms++; }
-static void ILI9806G_DrawChar_Ex(uint16_t x,uint16_t y,uint16_t w,uint16_t h,uint8_t *bitmap,uint16_t mode)
-{ (void)x; (void)y; (void)w; (void)h; (void)bitmap; (void)mode; legacy_chars++; }
+static void lcd_draw_scaled_glyph(uint16_t x,uint16_t y,uint16_t iw,uint16_t ih,
+                                  uint16_t ow,uint16_t oh,const uint8_t *bitmap,uint16_t mode)
+{ (void)x; (void)y; (void)iw; (void)ih; (void)ow; (void)oh; (void)bitmap; (void)mode; zooms++; legacy_chars++; }
 #include "lcd_native_font_impl.inc"
 
 static void reset(void)

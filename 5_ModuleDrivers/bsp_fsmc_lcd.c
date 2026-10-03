@@ -2105,145 +2105,69 @@ void ILI9806G_DispString_EN_CH_YDir (  uint16_t usX,uint16_t usY , char * pStr )
 } 
 
 /***********************缩放字体****************************/
-#define ZOOMMAXBUFF 16384
-uint8_t zoomBuff[ZOOMMAXBUFF] = {0};	//用于缩放的缓存，最大支持到128*128
-uint8_t zoomTempBuff[1024] = {0};
-
-/**
- * @brief  缩放字模，缩放后的字模由1个像素点由8个数据位来表示
-										0x01表示笔迹，0x00表示空白区
- * @param  in_width ：原始字符宽度
- * @param  in_heig ：原始字符高度
- * @param  out_width ：缩放后的字符宽度
- * @param  out_heig：缩放后的字符高度
- * @param  in_ptr ：字库输入指针	注意：1pixel 1bit
- * @param  out_ptr ：缩放后的字符输出指针 注意: 1pixel 8bit
- *		out_ptr实际上没有正常输出，改成了直接输出到全局指针zoomBuff中
- * @param  en_cn ：0为英文，1为中文
- * @retval 无
- */
-void ILI9806G_zoomChar(uint16_t in_width,	//原始字符宽度
-									uint16_t in_heig,		//原始字符高度
-									uint16_t out_width,	//缩放后的字符宽度
-									uint16_t out_heig,	//缩放后的字符高度
-									uint8_t *in_ptr,	//字库输入指针	注意：1pixel 1bit
-									uint8_t *out_ptr, //缩放后的字符输出指针 注意: 1pixel 8bit
-									uint8_t en_cn)		//0为英文，1为中文	
+/* 每次仅展开用到的源扫描行；放大时复用同一行，避免整字形往返搬运。
+ * 源行预先映射成 RGB565，输出像素循环无需位解码或选择颜色。
+ * 16.16 步长保留原算法，正常及反色绘制的像素位置不变。
+ * 保留原来的 16384 像素面积上限，并允许完整的 128×128 字形。
+ * 裁剪仍按完整尺寸取样，大倍率末端夹紧源坐标以免超出字模。 */
+static void lcd_draw_scaled_glyph(uint16_t x, uint16_t y,
+                                  uint16_t in_width, uint16_t in_height,
+                                  uint16_t out_width, uint16_t out_height,
+                                  const uint8_t *bitmap, uint16_t draw_mode)
 {
-	uint8_t *pts,*ots;
-	//根据源字模及目标字模大小，设定运算比例因子，左移16是为了把浮点运算转成定点运算
-	unsigned int xrIntFloat_16=(in_width<<16)/out_width+1; 
-  unsigned int yrIntFloat_16=(in_heig<<16)/out_heig+1;
-	
-	unsigned int srcy_16=0;
-	unsigned int y,x;
-	uint8_t *pSrcLine;
-	
-	uint16_t byteCount,bitCount;
-	
-	//检查参数是否合法
-	if(in_width > 48) return;												//字库不允许超过48像素
-	if(in_width * in_heig == 0) return;	
-	if(in_width * in_heig > 48*48 ) return; 					//限制输入最大 48*48
-	
-	if(out_width * out_heig == 0) return;	
-	if(out_width * out_heig >= ZOOMMAXBUFF ) return; //限制最大缩放 128*128
-	pts = (uint8_t*)&zoomTempBuff;
-	
-	//为方便运算，字库的数据由1 pixel/1bit 映射到1pixel/8bit
-	//0x01表示笔迹，0x00表示空白区
-	if(en_cn == 0x00)//英文
-	{
-		//英文和中文字库上下边界不对，可在此处调整。需要注意tempBuff防止溢出
-			for(byteCount=0;byteCount<in_heig*in_width/8;byteCount++)	
-			{
-				for(bitCount=0;bitCount<8;bitCount++)
-					{						
-						//把源字模数据由位映射到字节
-						//in_ptr里bitX为1，则pts里整个字节值为1
-						//in_ptr里bitX为0，则pts里整个字节值为0
-						*pts++ = (in_ptr[byteCount] & (0x80>>bitCount))?1:0; 
-					}
-			}				
-	}
-	else //中文
-	{			
-			for(byteCount=0;byteCount<in_heig*in_width/8;byteCount++)	
-			{
-				for(bitCount=0;bitCount<8;bitCount++)
-					{						
-						//把源字模数据由位映射到字节
-						//in_ptr里bitX为1，则pts里整个字节值为1
-						//in_ptr里bitX为0，则pts里整个字节值为0
-						*pts++ = (in_ptr[byteCount] & (0x80>>bitCount))?1:0; 
-					}
-			}		
-	}
-
-	//zoom过程
-	pts = (uint8_t*)&zoomTempBuff;	//映射后的源数据指针
-	ots = (uint8_t*)&zoomBuff;	//输出数据的指针
-	for (y=0;y<out_heig;y++)	/*行遍历*/
-    {
-				unsigned int srcx_16=0;
-        pSrcLine=pts+in_width*(srcy_16>>16);				
-        for (x=0;x<out_width;x++) /*行内像素遍历*/
-        {
-            ots[x]=pSrcLine[srcx_16>>16]; //把源字模数据复制到目标指针中
-            srcx_16+=xrIntFloat_16;			//按比例偏移源像素点
+    static uint16_t source_colors[48];
+    uint16_t clear_color = draw_mode == 0U ? CurrentBackColor : CurrentTextColor;
+    uint16_t ink_color = draw_mode == 1U ? CurrentBackColor : CurrentTextColor;
+    uint32_t x_step, y_step, source_y = 0U, cached_row = 0xffffffffUL;
+    uint16_t row, column, visible_width, visible_height;
+    if(bitmap == 0 || in_width == 0U || in_height == 0U ||
+       in_width > 48U || (uint32_t)in_width * in_height > 48U * 48U ||
+       out_width == 0U || out_height == 0U ||
+       (uint32_t)out_width * out_height > 16384U ||
+       x >= LCD_X_LENGTH || y >= LCD_Y_LENGTH) return;
+    x_step = ((uint32_t)in_width << 16) / out_width + 1U;
+    y_step = ((uint32_t)in_height << 16) / out_height + 1U;
+    visible_width = out_width;
+    visible_height = out_height;
+    if(visible_width > LCD_X_LENGTH - x) visible_width = LCD_X_LENGTH - x;
+    if(visible_height > LCD_Y_LENGTH - y) visible_height = LCD_Y_LENGTH - y;
+    ILI9806G_OpenWindow(x,y,visible_width,visible_height);
+    lcd_begin_pixels();
+    for(row = 0U; row < visible_height; row++) {
+        uint32_t source_x = 0U;
+        uint32_t source_row = source_y >> 16;
+        if(source_row >= in_height) source_row = in_height - 1U;
+        if(source_row != cached_row) {
+            uint32_t bit = source_row * in_width;
+            if((in_width & 7U) == 0U) {
+                const uint8_t *packed = bitmap + (bit >> 3);
+                /* 字库宽度均为整字节：一次读取展开八个像素。 */
+                for(column = 0U; column < in_width; column += 8U) {
+                    uint8_t bits = *packed++;
+                    source_colors[column] = (bits & 0x80U) ? ink_color : clear_color;
+                    source_colors[column+1U] = (bits & 0x40U) ? ink_color : clear_color;
+                    source_colors[column+2U] = (bits & 0x20U) ? ink_color : clear_color;
+                    source_colors[column+3U] = (bits & 0x10U) ? ink_color : clear_color;
+                    source_colors[column+4U] = (bits & 0x08U) ? ink_color : clear_color;
+                    source_colors[column+5U] = (bits & 0x04U) ? ink_color : clear_color;
+                    source_colors[column+6U] = (bits & 0x02U) ? ink_color : clear_color;
+                    source_colors[column+7U] = (bits & 0x01U) ? ink_color : clear_color;
+                }
+            } else {
+                /* 非整字节行仍兼容连续打包的位图。 */
+                for(column = 0U; column < in_width; column++, bit++)
+                    source_colors[column] = (bitmap[bit >> 3] & (0x80U >> (bit & 7U))) ? ink_color : clear_color;
+            }
+            cached_row = source_row;
         }
-        srcy_16+=yrIntFloat_16;				  //按比例偏移源像素点
-        ots+=out_width;						
+        for(column = 0U; column < visible_width; column++) {
+            uint32_t source_column = source_x >> 16;
+            if(source_column >= in_width) source_column = in_width - 1U;
+            lcd_write_pixel(source_colors[source_column]);
+            source_x += x_step;
+        }
+        source_y += y_step;
     }
-	/*！！！缩放后的字模数据直接存储到全局指针zoomBuff里了*/
-	out_ptr = (uint8_t*)&zoomBuff;	//out_ptr没有正确传出，后面调用直接改成了全局变量指针！
-	
-	/*实际中如果使用out_ptr不需要下面这一句！！！
-		只是因为out_ptr没有使用，会导致warning。强迫症*/
-	out_ptr++; 
-}			
-
-
-/**
- * @brief  利用缩放后的字模显示字符
- * @param  Xpos ：字符显示位置x
- * @param  Ypos ：字符显示位置y
- * @param  Font_width ：字符宽度
- * @param  Font_Heig：字符高度
- * @param  c ：要显示的字模数据
- * @param  DrawModel ：是否反色显示 
- * @retval 无
- */
-void ILI9806G_DrawChar_Ex(uint16_t usX, //字符显示位置x
-												uint16_t usY, //字符显示位置y
-												uint16_t Font_width, //字符宽度
-												uint16_t Font_Height,  //字符高度 
-												uint8_t *c,						//字模数据
-												uint16_t DrawModel)		//是否反色显示
-{
-  uint32_t index = 0, counter = 0;
-
-	//设置显示窗口
-	ILI9806G_OpenWindow ( usX, usY, Font_width, Font_Height);
-	
-	lcd_begin_pixels();
-	
-	//按字节读取字模数据
-	//由于前面直接设置了显示窗口，显示数据会自动换行
-	for ( index = 0; index < Font_Height; index++ )
-	{
-			//一位一位处理要显示的颜色
-			for ( counter = 0; counter < Font_width; counter++ )
-			{
-					//缩放后的字模数据，以一个字节表示一个像素位
-					//整个字节值为1表示该像素为笔迹
-					//整个字节值为0表示该像素为背景
-					if ( *c++ == DrawModel )
-						lcd_write_pixel(CurrentBackColor);
-					else
-						lcd_write_pixel(CurrentTextColor);
-			}	
-	}	
 }
 
 
@@ -2268,13 +2192,16 @@ void ILI9806G_DisplayStringEx(uint16_t x, 		//字符显示位置x
 
 {
 	uint16_t Charwidth = Font_width; //默认为Font_width，英文宽度为中文宽度的一半
-	uint8_t *psr = 0;
 	uint8_t Ascii;	//英文
 	uint16_t usCh;  //中文
 	
 	//占用空间太大，改成全局变量	
 	//	uint8_t ucBuffer [ WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8 ];	
 	
+    /* 非法字号直接忽略，避免除零、越界或读取上次字形。 */
+    if(ptr == 0 || Font_width == 0U || Font_Height == 0U ||
+       (uint32_t)Font_width * Font_Height > 16384U) return;
+
 	while ( *ptr != '\0')
 	{
 			/****处理换行*****/
@@ -2292,6 +2219,7 @@ void ILI9806G_DisplayStringEx(uint16_t x, 		//字符显示位置x
 			
 		if(*ptr > 0x80) //如果是中文
 		{			
+			if(ptr[1] == 0U) return;
 			Charwidth = Font_width;
 			usCh = * ( uint16_t * ) ptr;				
 			usCh = ( usCh << 8 ) + ( usCh >> 8 );
@@ -2305,16 +2233,14 @@ void ILI9806G_DisplayStringEx(uint16_t x, 		//字符显示位置x
             }
 			GetGBKCode ( ucBuffer, usCh );	//取字模数据
 			//缩放字模数据，源字模为32*32
-			ILI9806G_zoomChar(WIDTH_CH_CHAR,HEIGHT_CH_CHAR,Charwidth,Font_Height,(uint8_t *)&ucBuffer,psr,1); 
-			//显示单个字符
-			ILI9806G_DrawChar_Ex(x,y,Charwidth,Font_Height,(uint8_t*)&zoomBuff,DrawModel);
+			lcd_draw_scaled_glyph(x,y,WIDTH_CH_CHAR,HEIGHT_CH_CHAR,Charwidth,Font_Height,(uint8_t *)&ucBuffer,DrawModel);
 			x+=Charwidth;
 			ptr+=2;
 		}
 		else
 		{
 				Charwidth = Font_width / 2;
-				Ascii = *ptr - 32;
+				Ascii = (*ptr >= 32U && *ptr <= 126U ? *ptr : '?') - 32U;
                 if(Font_width == Font_Height && DrawModel <= 1U &&
                    LCD_DrawFontGlyph(x,y,*ptr,Font_Height,0U,
                         DrawModel ? CurrentBackColor : CurrentTextColor,
@@ -2324,9 +2250,7 @@ void ILI9806G_DisplayStringEx(uint16_t x, 		//字符显示位置x
                     continue;
                 }
 				//使用16*32字体缩放字模数据
-				ILI9806G_zoomChar(16,32,Charwidth,Font_Height,(uint8_t *)&Font16x32.table[Ascii * Font16x32.Height*Font16x32.Width/8],psr,0);
-			  //显示单个字符
-				ILI9806G_DrawChar_Ex(x,y,Charwidth,Font_Height,(uint8_t*)&zoomBuff,DrawModel);
+				lcd_draw_scaled_glyph(x,y,16,32,Charwidth,Font_Height,(uint8_t *)&Font16x32.table[Ascii * Font16x32.Height*Font16x32.Width/8],DrawModel);
 				x+=Charwidth;
 				ptr++;
 		}
@@ -2352,11 +2276,14 @@ void ILI9806G_DisplayStringEx_YDir(uint16_t x, 		//字符显示位置x
 																		 uint16_t DrawModel)  //是否反色显示
 {
 	uint16_t Charwidth = Font_width; //默认为Font_width，英文宽度为中文宽度的一半
-	uint8_t *psr = 0;
 	uint8_t Ascii;	//英文
 	uint16_t usCh;  //中文
 	uint8_t ucBuffer [ WIDTH_CH_CHAR*HEIGHT_CH_CHAR/8 ];	
 	
+    /* 非法字号直接忽略，避免除零、越界或读取上次字形。 */
+    if(ptr == 0 || Font_width == 0U || Font_Height == 0U ||
+       (uint32_t)Font_width * Font_Height > 16384U) return;
+
 	while ( *ptr != '\0')
 	{			
 			//统一使用汉字的宽高来计算换行
@@ -2374,6 +2301,7 @@ void ILI9806G_DisplayStringEx_YDir(uint16_t x, 		//字符显示位置x
 			
 		if(*ptr > 0x80) //如果是中文
 		{			
+			if(ptr[1] == 0U) return;
 			Charwidth = Font_width;
 			usCh = * ( uint16_t * ) ptr;				
 			usCh = ( usCh << 8 ) + ( usCh >> 8 );
@@ -2387,16 +2315,14 @@ void ILI9806G_DisplayStringEx_YDir(uint16_t x, 		//字符显示位置x
             }
 			GetGBKCode ( ucBuffer, usCh );	//取字模数据
 			//缩放字模数据，源字模为16*16
-			ILI9806G_zoomChar(WIDTH_CH_CHAR,HEIGHT_CH_CHAR,Charwidth,Font_Height,(uint8_t *)&ucBuffer,psr,1); 
-			//显示单个字符
-			ILI9806G_DrawChar_Ex(x,y,Charwidth,Font_Height,(uint8_t*)&zoomBuff,DrawModel);
+			lcd_draw_scaled_glyph(x,y,WIDTH_CH_CHAR,HEIGHT_CH_CHAR,Charwidth,Font_Height,(uint8_t *)&ucBuffer,DrawModel);
 			y+=Font_Height;
 			ptr+=2;
 		}
 		else
 		{
 				Charwidth = Font_width / 2;
-				Ascii = *ptr - 32;
+				Ascii = (*ptr >= 32U && *ptr <= 126U ? *ptr : '?') - 32U;
                 if(Font_width == Font_Height && DrawModel <= 1U &&
                    LCD_DrawFontGlyph(x,y,*ptr,Font_Height,0U,
                         DrawModel ? CurrentBackColor : CurrentTextColor,
@@ -2406,9 +2332,7 @@ void ILI9806G_DisplayStringEx_YDir(uint16_t x, 		//字符显示位置x
                     continue;
                 }
 				//使用16*24字体缩放字模数据
-				ILI9806G_zoomChar(16,24,Charwidth,Font_Height,(uint8_t *)&Font16x32.table[Ascii * Font16x32.Height*Font16x32.Width/8],psr,0);
-			  //显示单个字符
-				ILI9806G_DrawChar_Ex(x,y,Charwidth,Font_Height,(uint8_t*)&zoomBuff,DrawModel);
+				lcd_draw_scaled_glyph(x,y,16,24,Charwidth,Font_Height,(uint8_t *)&Font16x32.table[Ascii * Font16x32.Height*Font16x32.Width/8],DrawModel);
 				y+=Font_Height;
 				ptr++;
 		}

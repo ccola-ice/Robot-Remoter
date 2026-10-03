@@ -34,7 +34,7 @@ FF = """
 #define IMAGE_TEST_FF
 #include "types.h"
 #include <stdio.h>
-typedef struct { FILE *stream; DWORD size, offset; } FIL;
+typedef struct { FILE *stream; DWORD size, offset; unsigned char sector[4096]; } FIL;
 typedef enum { FR_OK = 0, FR_DISK_ERR } FRESULT;
 #define FA_READ 1U
 #define FA_OPEN_EXISTING 0U
@@ -113,6 +113,7 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
                     *app_include_args(), "-I", str(root / "5_Middleware/tjpgd/src"),
                     str(host / "file_image_test.c"), str(root / "1_App/files/image_viewer.c"),
                     str(root / "1_App/files/image_png.c"),
+                    str(root / "1_App/files/image_gif.c"),
                     str(root / "5_Middleware/tjpgd/src/tjpgd.c"), "-o", str(exe)], check=True)
     idct_exe = folder / "idct-test.exe"
     subprocess.run([compiler, "-std=c99", "-O2", "-ftrapv", "-Wall", "-Wextra", "-Werror",
@@ -175,7 +176,9 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
     for name, width, height, encoded in JPEG_FIXTURES:
         data = zlib.decompress(base64.b64decode(encoded))
         expected = 1 if name in ("progressive", "grayscale") else 0
-        for viewport in ((24, 136, 752, 280), (791, 473, 9, 7)):
+        for viewport in ((24, 136, 752, 280), (791, 473, 9, 7),
+                         (0, 0, 16, 16), (0, 0, 17, 17), (0, 0, 1, 1),
+                         (0, 0, 800, 1), (0, 0, 1, 480)):
             info, frame = run(name + ".jpg", data, expected, viewport)
             if expected == 0:
                 assert info[:2] == (width, height) and info[4] == 2
@@ -203,7 +206,17 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
     follow_bmp, follow_jpeg = folder / "following.bmp", folder / "following.jpg"
     follow_bmp.write_bytes(bmp(17, 11))
     follow_jpeg.write_bytes(baseline)
-    following = (follow_bmp, follow_jpeg)
+    follow_png, follow_gif = folder / "following.png", folder / "following.gif"
+    follow_png.write_bytes(rgba_png(17, 11))
+    # 单像素 GIF：两个全局调色板条目，LZW 依次为清除码、像素 1、结束码。
+    follow_gif.write_bytes(b"GIF89a" + struct.pack("<HHBBB", 1, 1, 0x80, 0, 0) +
+                          b"\x00\x00\x00\xff\xff\xff" + b"," +
+                          struct.pack("<HHHHB", 0, 0, 1, 1, 0) + b"\x02\x02\x4c\x01\x00;")
+    following = (follow_bmp, follow_jpeg, follow_png, follow_gif)
+    for name, data in (("recover.bmp", bmp(17, 11)), ("recover.jpg", baseline)):
+        run(name, data, 5, cancel=3, workspace=280576, following=following)
+        run(name, data, 3, fail_read=1, workspace=280576, following=following)
+        run(name, data, 3, fail_close=1, workspace=280576, following=following)
     for width, height in ((17, 11), (901, 411)):
         data = rgba_png(width, height)
         info, frame = run("png-route.bin", data, workspace=280576, following=following)
@@ -250,4 +263,4 @@ with tempfile.TemporaryDirectory(prefix="remoter-file-image-") as temporary:
             bad[at] ^= 1 << random_source.randrange(8)
         info, _ = run("mutated.jpg", bad, 99)
         assert info[6] == 1
-    print(f"File image: {count} cases passed; real BMP/JPEG/PNG routing, transparency, scaling, workspace, file closure, format switching and cancellation.")
+    print(f"File image: {count} cases passed; real BMP/JPEG/PNG routing, GIF format switching, transparency, MCU line bounds, scaling, workspace, file closure and cancellation recovery.")
