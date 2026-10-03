@@ -4,6 +4,8 @@
 #include "bsp_i2c_eeprom.h"
 #include "bsp_Systick.h"
 #include "ff.h"
+#include "diskio.h"
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -100,51 +102,150 @@ HwResult hardware_eeprom_write_test(void)
     return result;
 }
 
-HwResult hardware_sd_write_test(void)
+/* 屏幕复用调用方缓冲，串口保留完整信息；只在结果或错误产生时输出。 */
+static void sd_test_detail(char *detail, uint16_t capacity, HwResult result,
+                           const char *format, ...)
+{
+    va_list args;
+    const DiskSdError *error = disk_sd_get_error();
+    if(detail != NULL && capacity != 0U) {
+        va_start(args, format);
+        vsnprintf(detail, capacity, format, args);
+        va_end(args);
+        detail[capacity - 1U] = '\0';
+        /* 请求拒绝时 SD 错误码为零，必须按操作标记判断快照是否有效。 */
+        if(result == HW_FAIL) {
+            size_t used = strlen(detail);
+            if(error->operation != 0U)
+                snprintf(detail + used, capacity - used, " %c%u D%u SD%u L%lu",
+                         error->operation, (unsigned)error->phase, (unsigned)error->result,
+                         (unsigned)error->code, (unsigned long)error->sector);
+            else
+                snprintf(detail + used, capacity - used, " IO=none");
+            detail[capacity - 1U] = '\0';
+        }
+    }
+    printf("[DIAG] ");
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+    if(result == HW_FAIL) {
+        if(error->operation != 0U)
+            printf(" disk=%c/%u D=%u SD=%u LBA=%lu", error->operation,
+                   (unsigned)error->phase, (unsigned)error->result,
+                   (unsigned)error->code, (unsigned long)error->sector);
+        else
+            printf(" IO=none");
+    }
+    printf("\r\n");
+}
+
+HwResult hardware_sd_write_test_detail(char *detail, uint16_t capacity)
 {
     char path[24];
+    const char *close_stage = "close-write";
     FRESULT code;
     UINT transferred;
     uint16_t name, block, i;
     uint8_t opened = 0U;
     HwResult result = HW_FAIL;
+    if(detail != NULL && capacity != 0U) detail[0] = '\0';
+    /* 只在新测试开始时清除，后续关闭/删除失败不得覆盖首次底层错误。 */
+    disk_sd_clear_error();
     /* 必须使用 CREATE_NEW，绝不能截断已有文件。 */
     for(name = 0; name < 1000U; name++) {
         sprintf(path, "0:/D%03u.TMP", name);
         code = f_open(&test_file, path, FA_WRITE | FA_CREATE_NEW);
         if(code == FR_OK) break;
-        if(code != FR_EXIST) return HW_FAIL;
+        if(code != FR_EXIST) {
+            sd_test_detail(detail, capacity, HW_FAIL, "SD create FR=%u: %s", (unsigned)code, path);
+            return HW_FAIL;
+        }
     }
-    if(name == 1000U) return HW_BLOCKED;
+    if(name == 1000U) {
+        sd_test_detail(detail, capacity, HW_BLOCKED, "SD create blocked: D000-D999.TMP all exist");
+        return HW_BLOCKED;
+    }
     opened = 1U;
     for(block = 0; block < 16U; block++) {
         for(i = 0; i < sizeof(test_buffer.io.sample); i++)
             test_buffer.io.sample[i] = (uint8_t)(i ^ block ^ 0x5aU);
-        if(f_write(&test_file, test_buffer.io.sample, sizeof(test_buffer.io.sample), &transferred) != FR_OK ||
-           transferred != sizeof(test_buffer.io.sample)) goto cleanup;
+        transferred = 0U;
+        code = f_write(&test_file, test_buffer.io.sample, sizeof(test_buffer.io.sample), &transferred);
+        if(code != FR_OK || transferred != sizeof(test_buffer.io.sample)) {
+            sd_test_detail(detail, capacity, HW_FAIL, "SD write FR=%u offset=%lu bytes=%u/%u",
+                           (unsigned)code, (unsigned long)(block * sizeof(test_buffer.io.sample)),
+                           (unsigned)transferred, (unsigned)sizeof(test_buffer.io.sample));
+            goto cleanup;
+        }
     }
-    if(f_sync(&test_file) != FR_OK) goto cleanup;
+    code = f_sync(&test_file);
+    if(code != FR_OK) {
+        sd_test_detail(detail, capacity, HW_FAIL, "SD sync FR=%u", (unsigned)code);
+        goto cleanup;
+    }
     code = f_close(&test_file);
     opened = 0U;
-    if(code != FR_OK) goto cleanup;
-    if(f_open(&test_file, path, FA_READ) != FR_OK) goto cleanup;
+    if(code != FR_OK) {
+        sd_test_detail(detail, capacity, HW_FAIL, "SD close-write FR=%u", (unsigned)code);
+        goto cleanup;
+    }
+    code = f_open(&test_file, path, FA_READ);
+    if(code != FR_OK) {
+        sd_test_detail(detail, capacity, HW_FAIL, "SD reopen FR=%u", (unsigned)code);
+        goto cleanup;
+    }
     opened = 1U;
-    if(f_size(&test_file) != 4096U) goto cleanup;
+    close_stage = "close-read";
+    if(f_size(&test_file) != 4096U) {
+        sd_test_detail(detail, capacity, HW_FAIL, "SD size bytes=%lu/4096", (unsigned long)f_size(&test_file));
+        goto cleanup;
+    }
     for(block = 0; block < 16U; block++) {
-        if(f_read(&test_file, test_buffer.io.verify, sizeof(test_buffer.io.verify), &transferred) != FR_OK ||
-           transferred != sizeof(test_buffer.io.verify)) goto cleanup;
-        for(i = 0; i < sizeof(test_buffer.io.verify); i++)
-            if(test_buffer.io.verify[i] != (uint8_t)(i ^ block ^ 0x5aU)) goto cleanup;
+        transferred = 0U;
+        code = f_read(&test_file, test_buffer.io.verify, sizeof(test_buffer.io.verify), &transferred);
+        if(code != FR_OK || transferred != sizeof(test_buffer.io.verify)) {
+            sd_test_detail(detail, capacity, HW_FAIL, "SD read FR=%u offset=%lu bytes=%u/%u",
+                           (unsigned)code, (unsigned long)(block * sizeof(test_buffer.io.verify)),
+                           (unsigned)transferred, (unsigned)sizeof(test_buffer.io.verify));
+            goto cleanup;
+        }
+        for(i = 0; i < sizeof(test_buffer.io.verify); i++) {
+            uint8_t expected = (uint8_t)(i ^ block ^ 0x5aU);
+            if(test_buffer.io.verify[i] != expected) {
+                sd_test_detail(detail, capacity, HW_FAIL, "SD verify offset=%lu byte=%02X/%02X",
+                               (unsigned long)(block * sizeof(test_buffer.io.verify) + i),
+                               (unsigned)test_buffer.io.verify[i], (unsigned)expected);
+                goto cleanup;
+            }
+        }
     }
     result = HW_PASS;
 cleanup:
-    if(opened && f_close(&test_file) != FR_OK) result = HW_FAIL;
+    /* 清理失败必须记录；已经发生的主错误优先保留在屏幕详情中。 */
+    if(opened) {
+        code = f_close(&test_file);
+        if(code != FR_OK) {
+            sd_test_detail(result == HW_PASS ? detail : NULL, capacity, HW_FAIL,
+                           "SD %s FR=%u: %s", close_stage, (unsigned)code, path);
+            result = HW_FAIL;
+        }
+    }
     /* 只有 CREATE_NEW 成功后，path 才属于本次测试创建的文件。 */
-    if(f_unlink(path) != FR_OK) {
-        printf("[DIAG] SD cleanup failed, temporary file: %s\r\n", path);
+    code = f_unlink(path);
+    if(code != FR_OK) {
+        sd_test_detail(result == HW_PASS ? detail : NULL, capacity, HW_FAIL,
+                       "SD delete FR=%u: %s", (unsigned)code, path);
         result = HW_FAIL;
     }
+    if(result == HW_PASS)
+        sd_test_detail(detail, capacity, HW_PASS, "SD 4KiB verified and deleted");
     return result;
+}
+
+HwResult hardware_sd_write_test(void)
+{
+    return hardware_sd_write_test_detail(NULL, 0U);
 }
 
 static uint8_t uart_wait(uint16_t flag)

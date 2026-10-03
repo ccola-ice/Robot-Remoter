@@ -13,3 +13,4 @@ with tempfile.TemporaryDirectory(prefix='remoter-boot-') as folder:
     subprocess.run([str(exe)], check=True)
 subprocess.run([sys.executable, str(host/'run_storage_probe_tests.py'), compiler], check=True)
 subprocess.run([sys.executable, str(host/'run_diagnostic_tests.py'), compiler], check=True)
+subprocess.run([sys.executable, str(host/'run_boot_result_display_tests.py'), compiler], check=True)

@@ -21,6 +21,30 @@
 #define SD_BLOCKSIZE     512
 extern  SD_CardInfo SDCardInfo;
 static DSTATUS sd_disk_status = STA_NOINIT;
+static DiskSdError sd_first_error;
+
+void disk_sd_clear_error(void)
+{
+    memset(&sd_first_error, 0, sizeof(sd_first_error));
+}
+
+const DiskSdError *disk_sd_get_error(void)
+{
+    return &sd_first_error;
+}
+
+/* 参数检查失败时尚未调用 SD 驱动，SD_OK 表示没有底层错误码，不代表请求成功。 */
+static void disk_sd_record_error(DRESULT result, SD_Error error, BYTE operation,
+                                 BYTE phase, DWORD sector)
+{
+    if (result != RES_OK && sd_first_error.operation == 0U) {
+        sd_first_error.sector = sector;
+        sd_first_error.code = (WORD)error;
+        sd_first_error.operation = operation;
+        sd_first_error.phase = phase;
+        sd_first_error.result = (BYTE)result;
+    }
+}
 
 /* Validate before address arithmetic; FatFs must not reach reserved flash. */
 static DRESULT disk_check_request(BYTE pdrv, const void *buff, DWORD sector, UINT count)
@@ -39,9 +63,11 @@ static DRESULT disk_check_request(BYTE pdrv, const void *buff, DWORD sector, UIN
     return RES_OK;
 }
 
-static DRESULT disk_sd_result(SD_Error error)
+static DRESULT disk_sd_result(SD_Error error, BYTE operation, BYTE phase, DWORD sector)
 {
     if (error == SD_OK) return RES_OK;
+    /* 清理和重新挂载可能触发后续操作，保留最早的故障以定位根因。 */
+    disk_sd_record_error(RES_ERROR, error, operation, phase, sector);
     SD_AbortTransfer();
     sd_disk_status = STA_NOINIT;
     return RES_ERROR;
@@ -62,8 +88,11 @@ DSTATUS disk_status (
 		case SD_CARD :
 			//SD 卡状态返回分支
 			// translate the reslut code here
-            if (sd_disk_status == 0U && SD_GetStatus() == SD_TRANSFER_ERROR)
+            if (sd_disk_status == 0U && SD_GetStatus() == SD_TRANSFER_ERROR) {
+                disk_sd_record_error(RES_NOTRDY, SD_ERROR, 'Q',
+                                     DISK_SD_PHASE_STATUS, 0U);
                 sd_disk_status = STA_NOINIT;
+            }
             stat = sd_disk_status;
 			break;
 
@@ -104,14 +133,16 @@ DSTATUS disk_initialize (
 	{
 		case SD_CARD :
 		{
+			SD_Error error = SD_Init();
 			//SD 初始化分支
-			if(SD_Init()==SD_OK)
+			if(error==SD_OK)
 			{
 				stat = 0U;
 			}
 			else 
 			{
 				stat = STA_NOINIT;
+                disk_sd_record_error(RES_NOTRDY, error, 'I', DISK_SD_PHASE_INIT, 0U);
                 SD_AbortTransfer();
 			}
             sd_disk_status = stat;
@@ -147,8 +178,13 @@ DRESULT disk_read (
 {
 	DRESULT stat = RES_PARERR;
 	SD_Error SD_state = SD_OK;
+    BYTE phase = DISK_SD_PHASE_START;
     DRESULT request = disk_check_request(pdrv, buff, sector, count);
-    if (request != RES_OK) return request;
+    if (request != RES_OK) {
+        if (pdrv == SD_CARD)
+            disk_sd_record_error(request, SD_OK, 'R', DISK_SD_PHASE_CHECK, sector);
+        return request;
+    }
 	
 	switch (pdrv) 
 	{
@@ -179,11 +215,15 @@ DRESULT disk_read (
 			if(SD_state==SD_OK)
 			{
 				/* Check if the Transfer is finished */
+				phase = DISK_SD_PHASE_TRANSFER;
 				SD_state=SD_WaitReadOperation();
-				if (SD_state == SD_OK) SD_state = SD_WaitReady();
+				if (SD_state == SD_OK) {
+					phase = DISK_SD_PHASE_READY;
+					SD_state = SD_WaitReady();
+				}
 			}
 			
-			stat = disk_sd_result(SD_state);
+			stat = disk_sd_result(SD_state, 'R', phase, sector);
 
 			break;
 		}
@@ -229,8 +269,13 @@ DRESULT disk_write (
 {
 	DRESULT stat = RES_PARERR;
 	SD_Error SD_state = SD_OK;
+    BYTE phase = DISK_SD_PHASE_START;
     DRESULT request = disk_check_request(pdrv, buff, sector, count);
-    if (request != RES_OK) return request;
+    if (request != RES_OK) {
+        if (pdrv == SD_CARD)
+            disk_sd_record_error(request, SD_OK, 'W', DISK_SD_PHASE_CHECK, sector);
+        return request;
+    }
 	
 	if (!count) 
 	{
@@ -265,13 +310,17 @@ DRESULT disk_write (
 			if(SD_state==SD_OK)
 			{
 				/* Check if the Transfer is finished */
+				phase = DISK_SD_PHASE_TRANSFER;
 				SD_state=SD_WaitWriteOperation();
 
 				/* Wait until end of DMA transfer */
-				if (SD_state == SD_OK) SD_state = SD_WaitReady();
+				if (SD_state == SD_OK) {
+					phase = DISK_SD_PHASE_READY;
+					SD_state = SD_WaitReady();
+				}
 			}
 			
-			stat = disk_sd_result(SD_state);
+			stat = disk_sd_result(SD_state, 'W', phase, sector);
 			
 			break;
 		}
@@ -319,17 +368,27 @@ DRESULT disk_ioctl (
 )
 {
     if (pdrv != SD_CARD && pdrv != SPI_FLASH) return RES_PARERR;
-    if (cmd != CTRL_SYNC && buff == 0) return RES_PARERR;
+    if (cmd != CTRL_SYNC && buff == 0) {
+        if (pdrv == SD_CARD)
+            disk_sd_record_error(RES_PARERR, SD_OK, 'Q', DISK_SD_PHASE_CHECK, 0U);
+        return RES_PARERR;
+    }
     if (pdrv == SD_CARD) {
-        if (sd_disk_status & STA_NOINIT) return RES_NOTRDY;
+        if (sd_disk_status & STA_NOINIT) {
+            disk_sd_record_error(RES_NOTRDY, SD_OK, cmd == CTRL_SYNC ? 'S' : 'Q',
+                                 DISK_SD_PHASE_CHECK, 0U);
+            return RES_NOTRDY;
+        }
         switch (cmd) {
         case GET_SECTOR_SIZE: *(WORD *)buff = SD_BLOCKSIZE; return RES_OK;
         case GET_BLOCK_SIZE: *(DWORD *)buff = 1U; return RES_OK;
         case GET_SECTOR_COUNT:
             *(DWORD *)buff = (DWORD)(SDCardInfo.CardCapacity / SD_BLOCKSIZE);
             return RES_OK;
-        case CTRL_SYNC: return disk_sd_result(SD_WaitReady());
-        default: return RES_PARERR;
+        case CTRL_SYNC: return disk_sd_result(SD_WaitReady(), 'S', DISK_SD_PHASE_READY, 0U);
+        default:
+            disk_sd_record_error(RES_PARERR, SD_OK, 'Q', DISK_SD_PHASE_CHECK, 0U);
+            return RES_PARERR;
         }
     }
     if (FLASH_GetIoError() != 0U) return RES_ERROR;

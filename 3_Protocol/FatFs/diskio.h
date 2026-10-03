@@ -27,6 +27,27 @@ typedef enum {
 	RES_PARERR		/* 4: Invalid Parameter */
 } DRESULT;
 
+/* SD 底层错误快照；仅显式清除后记录首个错误，保留到调用者读取。 */
+typedef struct {
+	DWORD sector;       /* 失败请求的 LBA；非扇区操作为零。 */
+	WORD code;          /* SD_Error；请求检查阶段为 SD_OK，需结合 result。 */
+	BYTE operation;     /* R/W/S/Q/I：读/写/同步/查询/初始化；零表示无记录。 */
+	BYTE phase;
+	BYTE result;        /* DRESULT：底层 I/O 错误或请求拒绝原因。 */
+} DiskSdError;
+
+enum {
+	DISK_SD_PHASE_CHECK = 0,
+	DISK_SD_PHASE_START = 1,
+	DISK_SD_PHASE_TRANSFER = 2,
+	DISK_SD_PHASE_READY = 3,
+	DISK_SD_PHASE_STATUS = 4,
+	DISK_SD_PHASE_INIT = 5
+};
+
+void disk_sd_clear_error(void);
+const DiskSdError *disk_sd_get_error(void);
+
 
 /*---------------------------------------*/
 /* Prototypes for disk control functions */

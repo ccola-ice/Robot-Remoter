@@ -12,6 +12,8 @@ with tempfile.TemporaryDirectory(prefix='remoter-diag-') as folder:
     (tmp/'diag_hardware.c').write_bytes((root/'1_App/diagnostics/diag_hardware.c').read_bytes())
     (tmp/'diag_hardware.h').write_bytes((root/'1_App/diagnostics/diag_hardware.h').read_bytes())
     (tmp/'spi_flash_layout.h').write_bytes((root/'5_ModuleDrivers/spi_flash_layout.h').read_bytes())
+    (tmp/'diskio.h').write_bytes((root/'3_Protocol/FatFs/diskio.h').read_bytes().replace(
+        b'#include "integer.h"', b''))
     exe = tmp/'diagnostic-test.exe'
     subprocess.run([compiler, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
                     '-I', str(tmp), str(Path(__file__).with_name('diagnostic_test.c')),

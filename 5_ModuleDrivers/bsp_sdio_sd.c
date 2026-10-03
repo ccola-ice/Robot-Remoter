@@ -2301,17 +2301,25 @@ SD_Error SD_ProcessIRQSrc(void)
   */
 void SD_ProcessDMAIRQ(void)
 {
-  if (DMA2->LISR & (SD_SDIO_DMA_FLAG_TEIF | SD_SDIO_DMA_FLAG_DMEIF | SD_SDIO_DMA_FLAG_FEIF))
+  uint32_t flags = DMA2->LISR;
+
+  /* RM0090 10.3.18：外设流控时，DMA FIFO 瞬时欠载不代表数据丢失。
+   * 当前 Word/INCR4/Full 配置合法；清除 FEIF 后继续等待真实完成。
+   * 若流停止而未完成，等待函数仍会超时，不能误报成功。 */
+  if (flags & SD_SDIO_DMA_FLAG_FEIF)
+    DMA_ClearFlag(SD_SDIO_DMA_STREAM, SD_SDIO_DMA_FLAG_FEIF);
+
+  /* 总线/直接模式错误优先于完成；SDIO CRC、欠载及超时检查保持有效。 */
+  if (flags & (SD_SDIO_DMA_FLAG_TEIF | SD_SDIO_DMA_FLAG_DMEIF))
   {
     TransferError = SD_ERROR;
     DMA_ClearFlag(SD_SDIO_DMA_STREAM, SD_SDIO_DMA_FLAG_TEIF |
-                  SD_SDIO_DMA_FLAG_DMEIF | SD_SDIO_DMA_FLAG_FEIF |
-                  SD_SDIO_DMA_FLAG_TCIF);
+                  SD_SDIO_DMA_FLAG_DMEIF | SD_SDIO_DMA_FLAG_TCIF);
   }
-  else if(DMA2->LISR & SD_SDIO_DMA_FLAG_TCIF)
+  else if (flags & SD_SDIO_DMA_FLAG_TCIF)
   {
-    DMAEndOfTransfer = 0x01;
-    DMA_ClearFlag(SD_SDIO_DMA_STREAM, SD_SDIO_DMA_FLAG_TCIF|SD_SDIO_DMA_FLAG_FEIF);
+    DMAEndOfTransfer = 1U;
+    DMA_ClearFlag(SD_SDIO_DMA_STREAM, SD_SDIO_DMA_FLAG_TCIF);
   }
 }
 

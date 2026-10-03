@@ -61,11 +61,19 @@ static unsigned status_calls, start_calls, stop_calls, dma_enabled, dma_requests
 static unsigned read_complete, data_complete;
 static uint64_t last_address;
 static uint32_t irq_pending;
+static uint32_t dma_cleared_flags;
+static unsigned dma_clear_calls;
 
 static void SDIO_ITConfig(uint32_t flags, unsigned enable) {(void)flags;(void)enable;}
 static void SDIO_DMACmd(unsigned enabled) {dma_requests = enabled;}
 static void DMA_Cmd(unsigned stream, unsigned enabled) {(void)stream;dma_enabled = enabled;}
-static void DMA_ClearFlag(unsigned stream, uint32_t flags) {(void)stream;(void)flags;}
+static void DMA_ClearFlag(unsigned stream, uint32_t flags)
+{
+    (void)stream;
+    dma_cleared_flags |= flags;
+    dma_clear_calls++;
+    dma.LISR &= ~flags;
+}
 static void SDIO_ClearFlag(uint32_t flags) {sdio.STA &= ~flags;}
 static void SDIO_ClearITPendingBit(uint32_t flags) {irq_pending &= ~flags;}
 static unsigned SDIO_GetITStatus(uint32_t flags) {return irq_pending & flags;}
@@ -133,14 +141,207 @@ static void reset(void)
     SDCardInfo.CardCapacity = 32ULL * 1024ULL * 1024ULL * 1024ULL;
     SDCardInfo.CardBlockSize = 512U;
     sd_disk_status = STA_NOINIT;
+    disk_sd_clear_error();
     sdio.STA = sdio.DCTRL = 0U;
     dma_enabled = dma_requests = 0U;
     irq_pending = 0U;
     dma.LISR = 0U;
+    dma_cleared_flags = 0U;
+    dma_clear_calls = 0U;
     flash_error = 0U;
     flash_read_calls = flash_erase_calls = flash_write_calls = 0U;
     fail_read = fail_erase = fail_write = 0U;
     memset(&cycles,0,sizeof(cycles));
+}
+
+static void test_dma_fifo_flags(void)
+{
+    unsigned i;
+    const uint32_t fatal_flags[] = {SD_SDIO_DMA_FLAG_TEIF, SD_SDIO_DMA_FLAG_DMEIF};
+
+    /* 单独的 FIFO 标志只清除自身，不能提前宣布 DMA 传输完成。 */
+    reset();
+    dma.LISR = SD_SDIO_DMA_FLAG_FEIF | SD_SDIO_DMA_FLAG_HTIF;
+    SD_ProcessDMAIRQ();
+    assert(TransferError == SD_OK && DMAEndOfTransfer == 0U);
+    assert(dma.LISR == SD_SDIO_DMA_FLAG_HTIF);
+    assert(dma_cleared_flags == SD_SDIO_DMA_FLAG_FEIF && dma_clear_calls == 1U);
+    dma.LISR |= SD_SDIO_DMA_FLAG_TCIF;
+    SD_ProcessDMAIRQ();
+    assert(TransferError == SD_OK && DMAEndOfTransfer == 1U);
+    assert((dma.LISR & SD_SDIO_DMA_FLAG_TCIF) == 0U);
+    assert((dma_cleared_flags & SD_SDIO_DMA_FLAG_TCIF) != 0U);
+    TransferEnd = 1U;
+    StopCondition = 1U;
+    assert(SD_WaitWriteOperation() == SD_OK && stop_calls == 1U);
+
+    /* FIFO 标志与完成标志同时到达时，仍须正常记录完成。 */
+    reset();
+    dma.LISR = SD_SDIO_DMA_FLAG_FEIF | SD_SDIO_DMA_FLAG_TCIF;
+    SD_ProcessDMAIRQ();
+    assert(TransferError == SD_OK && DMAEndOfTransfer == 1U);
+    assert(dma.LISR == 0U);
+    assert((dma_cleared_flags & (SD_SDIO_DMA_FLAG_FEIF | SD_SDIO_DMA_FLAG_TCIF)) ==
+           (SD_SDIO_DMA_FLAG_FEIF | SD_SDIO_DMA_FLAG_TCIF));
+    TransferEnd = 1U;
+    assert(SD_WaitWriteOperation() == SD_OK);
+
+    /* 传输错误或直接模式错误优先，即使同时出现完成标志也必须失败。 */
+    for(i = 0U; i < sizeof(fatal_flags) / sizeof(fatal_flags[0]); i++) {
+        reset();
+        dma.LISR = SD_SDIO_DMA_FLAG_FEIF | SD_SDIO_DMA_FLAG_TCIF | fatal_flags[i];
+        SD_ProcessDMAIRQ();
+        assert(TransferError == SD_ERROR && DMAEndOfTransfer == 0U);
+        assert(dma.LISR == 0U);
+        assert((dma_cleared_flags & fatal_flags[i]) != 0U);
+        TransferEnd = 1U;
+        assert(SD_WaitWriteOperation() == SD_ERROR && stop_calls == 0U);
+    }
+
+    /* 两类中断无论先后，忽略 FIFO 标志都不能覆盖真实的 SDIO 欠载错误。 */
+    for(i = 0U; i < 2U; i++) {
+        reset();
+        irq_pending = SDIO_IT_TXUNDERR;
+        dma.LISR = SD_SDIO_DMA_FLAG_FEIF;
+        if(i == 0U) assert(SD_ProcessIRQSrc() == SD_TX_UNDERRUN);
+        SD_ProcessDMAIRQ();
+        if(i != 0U) assert(SD_ProcessIRQSrc() == SD_TX_UNDERRUN);
+        assert(TransferError == SD_TX_UNDERRUN && DMAEndOfTransfer == 0U);
+        assert(dma.LISR == 0U);
+        assert(SD_WaitWriteOperation() == SD_TX_UNDERRUN);
+    }
+
+    /* 只有 FIFO 标志而始终没有 DMA 完成，即使 SDIO 已结束也必须超时。 */
+    reset();
+    dma_enabled = dma_requests = 1U;
+    dma.LISR = SD_SDIO_DMA_FLAG_FEIF;
+    SD_ProcessDMAIRQ();
+    TransferEnd = 1U;
+    StopCondition = 1U;
+    assert(SD_WaitWriteOperation() == SD_DATA_TIMEOUT);
+    assert(stop_calls == 0U && dma_enabled == 0U && dma_requests == 0U);
+}
+
+static void assert_sd_error(BYTE operation, BYTE phase, SD_Error code, DWORD sector,
+                            DRESULT result)
+{
+    const DiskSdError *error = disk_sd_get_error();
+    assert(error != NULL);
+    assert(error->operation == operation && error->phase == phase);
+    assert(error->code == code && error->sector == sector);
+    assert(error->result == result);
+}
+
+static void test_sd_error_detail(BYTE *data)
+{
+    reset();
+    assert(disk_initialize(0) == 0U);
+    start_error = SD_CMD_RSP_TIMEOUT;
+    assert(disk_read(0, data, 11U, 1U) == RES_ERROR);
+    assert_sd_error('R', DISK_SD_PHASE_START, SD_CMD_RSP_TIMEOUT, 11U, RES_ERROR);
+
+    /* 参数校验、失败后的清理以及重新初始化成功都不能改写首次错误。 */
+    assert(disk_read(0, data, 0U, 0U) == RES_PARERR);
+    assert(disk_ioctl(0, CTRL_SYNC, NULL) == RES_NOTRDY);
+    SD_AbortTransfer();
+    start_error = SD_OK;
+    assert(disk_initialize(0) == 0U);
+    assert(disk_read(0, data, 13U, 1U) == RES_OK);
+    assert_sd_error('R', DISK_SD_PHASE_START, SD_CMD_RSP_TIMEOUT, 11U, RES_ERROR);
+
+    /* 后续写入故障仍保留首因，显式清除后才允许记录新故障。 */
+    transfer_error = SD_DATA_CRC_FAIL;
+    assert(disk_write(0, data, 29U, 1U) == RES_ERROR);
+    assert_sd_error('R', DISK_SD_PHASE_START, SD_CMD_RSP_TIMEOUT, 11U, RES_ERROR);
+    disk_sd_clear_error();
+    assert_sd_error(0U, 0U, SD_OK, 0U, RES_OK);
+    assert(disk_initialize(0) == 0U);
+    assert(disk_write(0, data, 31U, 1U) == RES_ERROR);
+    assert_sd_error('W', DISK_SD_PHASE_TRANSFER, SD_DATA_CRC_FAIL, 31U, RES_ERROR);
+
+    reset();
+    assert(disk_initialize(0) == 0U);
+    ready_status = SD_TRANSFER_BUSY;
+    assert(disk_write(0, data, 47U, 1U) == RES_ERROR);
+    assert_sd_error('W', DISK_SD_PHASE_READY, SD_DATA_TIMEOUT, 47U, RES_ERROR);
+
+    reset();
+    assert(disk_initialize(0) == 0U);
+    ready_status = SD_TRANSFER_ERROR;
+    assert(disk_ioctl(0, CTRL_SYNC, NULL) == RES_ERROR);
+    assert_sd_error('S', DISK_SD_PHASE_READY, SD_ERROR, 0U, RES_ERROR);
+}
+
+static void test_sd_rejected_requests(BYTE *data)
+{
+    DWORD value;
+
+    /* 首次请求在驱动调用前被拒绝，也必须保留方向、LBA 和磁盘层结果。 */
+    reset();
+    assert(disk_read(0, data, 17U, 1U) == RES_NOTRDY);
+    assert_sd_error('R', DISK_SD_PHASE_CHECK, SD_OK, 17U, RES_NOTRDY);
+    assert(disk_initialize(0) == 0U);
+    assert(disk_write(0, data, 19U, 1U) == RES_OK);
+    assert_sd_error('R', DISK_SD_PHASE_CHECK, SD_OK, 17U, RES_NOTRDY);
+    reset();
+    assert(disk_write(0, data, 23U, 1U) == RES_NOTRDY);
+    assert_sd_error('W', DISK_SD_PHASE_CHECK, SD_OK, 23U, RES_NOTRDY);
+    assert(start_calls == 0U && status_calls == 0U);
+
+    /* 越过卡容量或请求范围溢出时，不应启动 DMA，也不能误记为底层 SD 故障。 */
+    reset(); assert(disk_initialize(0) == 0U);
+    assert(disk_read(0, data, 67108864UL, 1U) == RES_PARERR);
+    assert_sd_error('R', DISK_SD_PHASE_CHECK, SD_OK, 67108864UL, RES_PARERR);
+    assert(disk_status(0) == 0U);
+    assert(disk_write(0, data, 67108863UL, 2U) == RES_PARERR);
+    assert_sd_error('R', DISK_SD_PHASE_CHECK, SD_OK, 67108864UL, RES_PARERR);
+    disk_sd_clear_error();
+    assert(disk_write(0, data, 67108863UL, 2U) == RES_PARERR);
+    assert_sd_error('W', DISK_SD_PHASE_CHECK, SD_OK, 67108863UL, RES_PARERR);
+    assert(start_calls == 0U);
+    disk_sd_clear_error();
+    assert(disk_read(0, NULL, 31U, 1U) == RES_PARERR);
+    assert_sd_error('R', DISK_SD_PHASE_CHECK, SD_OK, 31U, RES_PARERR);
+    disk_sd_clear_error();
+    assert(disk_write(0, data, 37U, 0U) == RES_PARERR);
+    assert_sd_error('W', DISK_SD_PHASE_CHECK, SD_OK, 37U, RES_PARERR);
+
+    /* 状态查询和初始化失败保存首因；初始化成功不自动清除历史快照。 */
+    reset(); assert(disk_initialize(0) == 0U);
+    ready_status = SD_TRANSFER_ERROR;
+    assert(disk_status(0) == STA_NOINIT);
+    assert_sd_error('Q', DISK_SD_PHASE_STATUS, SD_ERROR, 0U, RES_NOTRDY);
+    init_error = SD_CMD_RSP_TIMEOUT;
+    assert(disk_initialize(0) == STA_NOINIT);
+    assert_sd_error('Q', DISK_SD_PHASE_STATUS, SD_ERROR, 0U, RES_NOTRDY);
+    disk_sd_clear_error();
+    assert(disk_initialize(0) == STA_NOINIT);
+    assert_sd_error('I', DISK_SD_PHASE_INIT, SD_CMD_RSP_TIMEOUT, 0U, RES_NOTRDY);
+    init_error = SD_OK; ready_status = SD_TRANSFER_OK;
+    assert(disk_initialize(0) == 0U && disk_status(0) == 0U);
+    assert_sd_error('I', DISK_SD_PHASE_INIT, SD_CMD_RSP_TIMEOUT, 0U, RES_NOTRDY);
+
+    /* 同步、查询参数和未知控制请求被拒绝时同样可追踪。 */
+    reset();
+    assert(disk_ioctl(0, CTRL_SYNC, NULL) == RES_NOTRDY);
+    assert_sd_error('S', DISK_SD_PHASE_CHECK, SD_OK, 0U, RES_NOTRDY);
+    disk_sd_clear_error();
+    assert(disk_ioctl(0, GET_SECTOR_SIZE, NULL) == RES_PARERR);
+    assert_sd_error('Q', DISK_SD_PHASE_CHECK, SD_OK, 0U, RES_PARERR);
+    disk_sd_clear_error(); assert(disk_initialize(0) == 0U);
+    assert(disk_ioctl(0, 99U, &value) == RES_PARERR);
+    assert_sd_error('Q', DISK_SD_PHASE_CHECK, SD_OK, 0U, RES_PARERR);
+
+    /* SPI Flash 和非法盘号的错误不得污染 SD 诊断。 */
+    reset();
+    assert(disk_read(1, data, SPI_FLASH_FATFS_SECTOR_COUNT, 1U) == RES_PARERR);
+    assert(disk_write(1, NULL, 0U, 1U) == RES_PARERR);
+    assert(disk_ioctl(1, GET_SECTOR_SIZE, NULL) == RES_PARERR);
+    assert(disk_read(2, data, 0U, 1U) == RES_PARERR);
+    assert(disk_ioctl(2, CTRL_SYNC, NULL) == RES_PARERR);
+    fail_read = 1U;
+    assert(disk_read(1, data, 0U, 1U) == RES_ERROR);
+    assert_sd_error(0U, 0U, SD_OK, 0U, RES_OK);
 }
 
 int main(void)
@@ -216,6 +417,9 @@ int main(void)
     reset();dma.LISR = SD_SDIO_DMA_FLAG_TCIF;
     SD_ProcessDMAIRQ();
     assert(DMAEndOfTransfer == 1U && TransferError == SD_OK);
+    test_dma_fifo_flags();
+    test_sd_error_detail(data);
+    test_sd_rejected_requests(data);
 
     reset();
     assert(disk_initialize(1) == 0U);

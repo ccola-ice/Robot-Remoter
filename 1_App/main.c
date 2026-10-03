@@ -365,11 +365,9 @@ void setup(void)
         boot_done(BOOT_SD_FS, mount_result == FR_OK ? BOOT_PASS : BOOT_FAIL, detail);
         if(mount_result == FR_OK) {
             boot_start(BOOT_SD_WRITE);
-            hw_result = hardware_sd_write_test();
+            hw_result = hardware_sd_write_test_detail(detail, sizeof(detail));
             boot_done(BOOT_SD_WRITE, hw_result == HW_PASS ? BOOT_PASS : BOOT_FAIL,
-                      hw_result == HW_BLOCKED ? "No unused diagnostic filename available" :
-                      hw_result == HW_PASS ? "Temporary 4 KiB file write/read/delete verified" :
-                                             "Temporary file write/read/delete failed");
+                      detail);
         } else boot_skip(BOOT_SD_WRITE, "Blocked: SD filesystem mount failed");
     } else {
         boot_skip(BOOT_SD_FS, "Blocked: SD card initialization failed");

@@ -238,7 +238,18 @@ void gui_boot_finish(const BootReport *report)
             report->completed, (unsigned)BOOT_ITEM_COUNT, boot_report_percent(report),
             report->passed, report->failed, report->not_tested);
     ILI9806G_DispString_EN(20U, 370U, displayBuffer);
-    ILI9806G_DispString_EN(20U, 398U, "Open Hardware Tests for operator / external-fixture tests.");
+    /* 结果页保留首个失败的明细，后续成功项不能覆盖故障原因。 */
+    for(item = 0U; item < BOOT_ITEM_COUNT; item++) {
+        if(report->items[item].state == BOOT_FAIL) break;
+    }
+    if(item < BOOT_ITEM_COUNT) {
+        LCD_SetTextColor(RED);
+        snprintf(displayBuffer, sizeof(displayBuffer), "Failed: %s", boot_item_names[item]);
+        ILI9806G_DispString_EN(20U, 394U, displayBuffer);
+        ILI9806G_DispString_EN(20U, 414U, (char *)report->items[item].detail);
+    } else {
+        ILI9806G_DispString_EN(20U, 398U, "Open Hardware Tests for operator / external-fixture tests.");
+    }
     boot_last_report = report;
     LCD_SetFont(&Font8x16);
     LCD_SetBackColor(BLACK);
