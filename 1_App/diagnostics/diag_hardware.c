@@ -26,6 +26,7 @@ const char *hardware_result_name(HwResult result)
     return result <= HW_CANCELLED ? names[result] : "FAIL";
 }
 
+/* ROM 常量验证只读访问，RAM 使用逐位与反码模式；发现首个不一致立即返回失败。 */
 HwResult hardware_memory_test(void)
 {
     static const uint32_t rom[] = {0x01234567UL, 0x89abcdefUL,
@@ -34,6 +35,7 @@ HwResult hardware_memory_test(void)
     uint32_t i, bit, pattern;
     if(probe[0] != 0x01234567UL || probe[1] != 0x89abcdefUL ||
        probe[2] != 0x55aa55aaUL || probe[3] != 0xaa55aa55UL) return HW_FAIL;
+    /* 仅测试模块自有 RAM；逐位模式叠加索引，覆盖数据位翻转与样本内寻址。 */
     for(bit = 0; bit < 32U; bit++) {
         pattern = 1UL << bit;
         for(i = 0; i < 256U; i++) test_buffer.ram[i] = pattern ^ i;
@@ -44,6 +46,7 @@ HwResult hardware_memory_test(void)
     return HW_PASS;
 }
 
+/* 先逐块确认整个诊断扇区空白，再按物理页写入和回读；结束时统一擦除并检查清理结果。 */
 HwResult hardware_flash_write_test(void)
 {
     uint32_t id, offset;
@@ -88,6 +91,7 @@ HwResult hardware_eeprom_write_test(void)
 {
     uint8_t value, i, patterns[] = {0x55U, 0xaaU};
     HwResult result = HW_PASS;
+    /* 仅占用空白的诊断保留字节；测试写入失败时也尝试写回并验证 0xFF。 */
     if(EEPROM_Random_Read(HW_EEPROM_TEST_BYTE, &value)) return HW_FAIL;
     if(value != 0xffU) return HW_BLOCKED;
     for(i = 0U; i < sizeof(patterns); i++) {
@@ -140,6 +144,8 @@ static void sd_test_detail(char *detail, uint16_t capacity, HwResult result,
     printf("\r\n");
 }
 
+/* 创建临时文件后，所有读写错误都转到 cleanup；opened 标记句柄是否还需关闭，
+ * close_stage 区分写后关闭和读后关闭，便于串口定位失败阶段。 */
 HwResult hardware_sd_write_test_detail(char *detail, uint16_t capacity)
 {
     char path[24];
@@ -179,6 +185,7 @@ HwResult hardware_sd_write_test_detail(char *detail, uint16_t capacity)
             goto cleanup;
         }
     }
+    /* 写入完成后同步并关闭，再重新打开逐块核对，覆盖文件写入与读取流程。 */
     code = f_sync(&test_file);
     if(code != FR_OK) {
         sd_test_detail(detail, capacity, HW_FAIL, "SD sync FR=%u", (unsigned)code);
@@ -248,6 +255,7 @@ HwResult hardware_sd_write_test(void)
     return hardware_sd_write_test_detail(NULL, 0U);
 }
 
+/* 轮询指定 UART4 标志，每次等待最多约 100 ms；断线或硬件异常不会永久阻塞菜单。 */
 static uint8_t uart_wait(uint16_t flag)
 {
     uint16_t ms;
@@ -258,6 +266,7 @@ static uint8_t uart_wait(uint16_t flag)
     return 0U;
 }
 
+/* 发送 32 个变化的字节并逐个核对回环结果，同时将奇偶/帧/噪声/溢出错误判为失败。 */
 HwResult hardware_uart_loopback_test(void)
 {
     uint32_t saved = UART4->CR1 & USART_CR1_RXNEIE;
@@ -276,6 +285,7 @@ HwResult hardware_uart_loopback_test(void)
     }
     result = HW_PASS;
 cleanup:
+    /* 所有退出路径都等发送结束、清除残留接收状态，再恢复原来的接收中断设置。 */
     if(!uart_wait(USART_FLAG_TC)) result = HW_FAIL;
     Delay_ms(2U);
     discard = UART4->SR; discard = UART4->DR; (void)discard;

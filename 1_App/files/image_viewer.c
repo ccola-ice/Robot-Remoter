@@ -1,3 +1,5 @@
+/* 静态图片入口按文件签名分派 BMP、JPEG 或 PNG，并统一返回格式、尺寸和错误。
+ * BMP/JPEG 共用内部固定工作区，PNG 使用注册的外部工作区；所有显示均可协作取消。 */
 #include "image_viewer.h"
 #include "image_png.h"
 #include "ff.h"
@@ -45,12 +47,14 @@ static struct {
             uint16_t pixels[IMAGE_JPEG_MCU_PIXELS];
         } jpeg;
     } workspace;
+    /* 回调和错误状态独立于复用的解码区，预检切换为正式解码时继续有效。 */
     uint8_t (*service)(void *);
     void *context;
     FileImageResult status;
     uint32_t size;
     uint32_t cache_start;
     UINT cache_count;
+    /* 初始为调用者的目标矩形，尺寸校验后改为实际居中绘制区域。 */
     uint16_t x, y, width, height;
     uint16_t jpeg_width, jpeg_height;
     uint8_t busy;
@@ -72,6 +76,7 @@ static uint16_t image_be16(const uint8_t *p)
     return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
 }
 
+/* 读取和像素输出共用取消检查；一旦出错，不再调用后台或继续解码。 */
 static uint8_t image_service(void)
 {
     if(image.status != FILE_IMAGE_OK) return 0U;
@@ -82,6 +87,7 @@ static uint8_t image_service(void)
     return 1U;
 }
 
+/* 有界定位并核对实际位置；格式越界与 FatFs 定位失败分别报告为损坏和 I/O 错误。 */
 static uint8_t image_seek(uint32_t offset)
 {
     if(offset > image.size) {
@@ -95,6 +101,7 @@ static uint8_t image_seek(uint32_t offset)
     return 1U;
 }
 
+/* 必须读满指定长度才成功，短读视为文件内容不完整，底层读取失败另报 I/O 错误。 */
 static uint8_t image_read(void *buffer, UINT size)
 {
     UINT count = 0U;
@@ -104,6 +111,7 @@ static uint8_t image_read(void *buffer, UINT size)
     return image.status == FILE_IMAGE_OK;
 }
 
+/* 用整数交叉乘积比较宽高比，按受限的一边等比缩小，再在目标区域居中。 */
 static uint8_t image_dimensions(uint32_t width, uint32_t height, FileImageInfo *info)
 {
     uint32_t dw, dh;
@@ -159,6 +167,8 @@ static uint8_t image_byte(uint32_t offset, uint8_t *value)
     return 1U;
 }
 
+/* 校验 BMP 文件头及像素区边界后，按目标扫描行采样未压缩的 24/32 位像素。
+ * 输入是 BGR 排列，转换为 RGB565 后逐行写屏；32 位格式的额外字节不参与显示。 */
 static void image_bmp(FileImageInfo *info)
 {
     uint32_t dib, width, height, offset, stride, row, position, declared_size;
@@ -189,6 +199,7 @@ static void image_bmp(FileImageInfo *info)
         return;
     }
     if(!image_dimensions(width, height, info)) return;
+    /* BMP 每行按四字节补齐；用除法验证像素区长度，避免行数乘步长溢出。 */
     stride = (width * (bpp / 8U) + 3U) & ~3UL;
     if(height > (image.size - offset) / stride ||
        (declared_size != 0U && height > (declared_size - offset) / stride)) {
@@ -198,6 +209,7 @@ static void image_bmp(FileImageInfo *info)
     image.cache_count = 0U;
     for(y = 0U; y < image.height; y++) {
         if(!image_service()) return;
+        /* 最近邻采样映射到源图行，正高度 BMP 还需反转自底向上的存储顺序。 */
         row = (uint32_t)y * height / image.height;
         if(!top_down) row = height - 1U - row;
         for(x = 0U; x < image.width; x++) {
@@ -255,6 +267,8 @@ invalid:
     return 0U;
 }
 
+/* 在交给 TJpgD 前遍历 JPEG 段，验证其支持的基线三分量布局和采样方式。
+ * 同时取得原图尺寸、限制 MCU 大小并检查扫描数据尾部；不兼容和损坏分别记录状态。 */
 static uint8_t image_jpeg_validate(FileImageInfo *info)
 {
     uint32_t offset = 2U;
@@ -334,6 +348,7 @@ static uint8_t image_jpeg_validate(FileImageInfo *info)
     return 0U;
 }
 
+/* TJpgD 的空目标缓冲表示跳过数据，此时只移动文件位置，不额外读取。 */
 static UINT image_jpeg_input(JDEC *decoder, BYTE *buffer, UINT size)
 {
     UINT count = 0U;
@@ -352,6 +367,8 @@ static UINT image_jpeg_input(JDEC *decoder, BYTE *buffer, UINT size)
     return image_seek(offset + size) ? size : 0U;
 }
 
+/* TJpgD 每次提供一个已解码的 MCU 矩形，回调将其中命中目标采样点的像素逐行输出。
+ * 返回非零继续解码；取消或越界时返回零，并通过 image.status 保留具体原因。 */
 static UINT image_jpeg_output(JDEC *decoder, void *bitmap, JRECT *rect)
 {
     const uint16_t *source = (const uint16_t *)bitmap;
@@ -382,6 +399,8 @@ static UINT image_jpeg_output(JDEC *decoder, void *bitmap, JRECT *rect)
     return 1U;
 }
 
+/* 完成预检后重置文件位置并启动 TJpgD；结束时将库错误映射为应用层图片结果。
+ * 回调已记录的 I/O 或取消状态优先保留，避免被解码器的通用错误覆盖。 */
 static void image_jpeg(FileImageInfo *info)
 {
     JRESULT result;
@@ -392,6 +411,7 @@ static void image_jpeg(FileImageInfo *info)
     result = jd_prepare(&image.workspace.jpeg.decoder, image_jpeg_input, image.workspace.jpeg.pool,
                         sizeof(image.workspace.jpeg.pool), 0);
     if(result == JDR_OK && image.status == FILE_IMAGE_OK) {
+        /* 先使用解码器的 1/2、1/4 或 1/8 缩放减小计算量，再由输出回调精确采样。 */
         while(scale < 3U && (info->width >> (scale + 1U)) >= image.width &&
               (info->height >> (scale + 1U)) >= image.height) scale++;
         image.jpeg_width = (uint16_t)(info->width >> scale);
@@ -404,6 +424,8 @@ static void image_jpeg(FileImageInfo *info)
     else image.status = FILE_IMAGE_CORRUPT;
 }
 
+/* 管理一次静态图片显示的完整生命周期：校验区域、打开、识别、解码和关闭。
+ * busy 防止后台回调重入；各退出路径释放该标志，PNG 分派前关闭识别阶段的文件对象。 */
 FileImageResult file_image_draw(const char *path, uint16_t x, uint16_t y,
                                uint16_t w, uint16_t h, FileImageInfo *info,
                                uint8_t (*service)(void *), void *context)

@@ -1,9 +1,12 @@
+/* 文件浏览分为目录扫描、可见窗口和路径导航三层。
+ * 列表名称用于显示，实际访问始终使用短文件名；耗时扫描通过回调服务后台任务。 */
 #include "file_browser.h"
 #include <string.h>
 
 #define FILE_BROWSER_LFN_LENGTH 512U
 #define FILE_BROWSER_ALIAS_LENGTH 13U
 
+/* 每深入一级目录保存一个导航记录，只记路径长度，不复制整条父路径。 */
 typedef struct {
     uint32_t selected;
     uint32_t first;
@@ -14,6 +17,7 @@ static FileBrowserState browser;
 static char aliases[FILE_BROWSER_VISIBLE_ROWS][FILE_BROWSER_ALIAS_LENGTH];
 static FileBrowserParent parents[FILE_BROWSER_MAX_DEPTH];
 static uint8_t depth;
+/* 选中项与窗口起点使用目录内的绝对索引，selected_row 仅表示屏幕中的行号。 */
 static uint32_t selected_index;
 static uint32_t window_first;
 static FileBrowserService service_callback;
@@ -29,6 +33,7 @@ static uint8_t browser_service(void)
     return !service_callback || service_callback(service_context);
 }
 
+/* 发布本次操作状态，并递增版本号，供界面识别目录内容或状态的更新。 */
 static void browser_status(FileBrowserStatus status, FRESULT result)
 {
     browser.status = status;
@@ -47,12 +52,15 @@ static void browser_failed(FileBrowserStatus status, FRESULT result)
     browser_status(status, result);
 }
 
+/* 检查 FatFs 本地编码中的双字节边界；这里只验证字节范围，不查询字符映射表。 */
 static uint8_t dbcs_pair(const unsigned char *text)
 {
     return text[0] >= 0x81U && text[0] <= 0xFEU &&
            text[1] >= 0x40U && text[1] <= 0xFEU && text[1] != 0x7FU;
 }
 
+/* 将显示名称限制在目标缓冲内，保留完整双字节字符并补字符串结束符。
+ * 超长名称优先保留可识别的短扩展名；生成的显示文本不能用作打开路径。 */
 static void copy_display_name(char *target, size_t capacity, const char *source)
 {
     size_t used = 0U;
@@ -99,6 +107,8 @@ static void copy_display_name(char *target, size_t capacity, const char *source)
     target[used] = '\0';
 }
 
+/* 只接受有结束符的短文件名单项，过滤 .、.. 和路径分隔符。
+ * 扫描时跳过无效项，使保存的别名可以安全拼接到当前目录后。 */
 static uint8_t alias_valid(const char *name)
 {
     size_t index = 0U;
@@ -114,6 +124,7 @@ static uint8_t alias_valid(const char *name)
     return index < FILE_BROWSER_ALIAS_LENGTH;
 }
 
+/* 虚拟根只展示 SD 入口；进入后才以 FatFs 的 0: 作为实际文件系统根目录。 */
 static void browser_virtual_root(void)
 {
     memset(browser.entries, 0, sizeof(browser.entries));
@@ -213,6 +224,7 @@ scan_again:
         goto scan_again;
     }
     if(!count) selected_index = window_first = 0U;
+    /* 扫描并关闭目录成功后统一提交窗口，避免界面读取到只更新了一半的列表。 */
     memcpy(browser.entries, scan_entries, sizeof(browser.entries));
     memcpy(aliases, scan_aliases, sizeof(aliases));
     browser.visible_count = visible;
@@ -221,6 +233,7 @@ scan_again:
     browser_status(visible ? FILE_BROWSER_OK : FILE_BROWSER_EMPTY, FR_OK);
 }
 
+/* 注册协作回调并重置到虚拟根；本模块只保存单个浏览会话。 */
 void file_browser_init(FileBrowserService service, void *context)
 {
     memset(&browser, 0, sizeof(browser));
@@ -234,12 +247,14 @@ const FileBrowserState *file_browser_state(void)
     return &browser;
 }
 
+/* 重扫当前目录并重新统计总数；若删除文件导致选择越界，扫描过程会修正窗口。 */
 void file_browser_refresh(void)
 {
     if(browser.virtual_root) browser_virtual_root();
     else browser_scan(1U);
 }
 
+/* 根据方向符号移动一项，首尾循环；只有选中项离开可见窗口时才重读目录。 */
 void file_browser_move(int direction)
 {
     if(browser.virtual_root || !browser.visible_count || !direction) return;
@@ -263,6 +278,8 @@ void file_browser_move(int direction)
     }
 }
 
+/* 文件项通过 path 输出完整短文件名路径，目录项则推进内部导航并扫描新目录。
+ * 拼接前检查缓冲容量及导航深度；失败原因保存在 browser 的状态和 FatFs 结果中。 */
 FileBrowserEnterResult file_browser_enter(char *path, size_t capacity)
 {
     const GuiFileEntry *entry;
@@ -305,6 +322,7 @@ FileBrowserEnterResult file_browser_enter(char *path, size_t capacity)
         browser_status(FILE_BROWSER_PATH_LIMIT, FR_OK);
         return FILE_BROWSER_ENTER_ERROR;
     }
+    /* 入栈保存父目录的路径截断点与浏览位置，返回时可恢复原选中项和滚动窗口。 */
     parents[depth].selected = selected_index;
     parents[depth].first = window_first;
     parents[depth].path_length = (uint16_t)path_length;
@@ -318,6 +336,8 @@ FileBrowserEnterResult file_browser_enter(char *path, size_t capacity)
            FILE_BROWSER_ENTER_ERROR : FILE_BROWSER_ENTER_DIRECTORY;
 }
 
+/* 从子目录弹出导航记录并重新扫描父目录，从 SD 根返回虚拟根。
+ * 仅在调用前已经处于虚拟根时返回 1，表示浏览页面可以退出。 */
 uint8_t file_browser_back(void)
 {
     if(browser.virtual_root) return 1U;

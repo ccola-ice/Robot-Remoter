@@ -50,6 +50,7 @@ static uint8_t clock_force_redraw = 1U;
 static uint8_t clock_last_seconds = 0xffU;
 static uint16_t boot_progress_width;
 
+/* 切页入口：开启整页离屏合成，并通知下一个页面调用重建静态布局与显示缓存。 */
 void gui_prepare_page(void)
 {
 	/* 先在离屏缓冲中合成整页，menu_process 绘完时钟后统一提交。 */
@@ -74,6 +75,7 @@ static const char *gui_control_status_text(const char *status)
     return status;
 }
 
+/* 绘制公共顶栏中的本机电池、无线 ACK 与 RTC 时间，调用方负责最终提交画面。 */
 void gui_clock_overlay(void)
 {
     static char last_clock[64];
@@ -92,6 +94,7 @@ void gui_clock_overlay(void)
             now.weekday >= 1U && now.weekday <= 7U ? weekdays[now.weekday-1U] : "?",
             valid ? "" : " \316\264\320\243\312\261");
     } else strcpy(clock_text,"\310\325\306\332\266\301\310\241\312\247\260\334 --:--:--");
+    /* 秒值和显示文本均未变化时复用顶栏；切页后强制绘制，避免沿用旧页面的缓存。 */
     if(!clock_force_redraw && clock_last_seconds == now.second &&
        strcmp(last_clock,clock_text) == 0) return;
     clock_force_redraw = 0U;
@@ -113,6 +116,7 @@ void gui_clock_overlay(void)
     LCD_SetFont(&Font16x32); LCD_SetBackColor(WHITE); LCD_SetTextColor(BLACK);
 }
 
+/* 结果页保存报告引用供系统信息页查看，因此报告对象须在菜单运行期间持续有效。 */
 static const BootReport *boot_last_report;
 
 static uint16_t gui_boot_color(BootState state)
@@ -145,6 +149,7 @@ static void gui_boot_not_tested_label(uint16_t x, uint16_t y)
     }
 }
 
+/* 启动检查按两列排列，每行同时显示项目名称和状态；未测试项另补中文标识。 */
 static void gui_boot_row(const BootReport *report, uint8_t item)
 {
     uint16_t rows = (BOOT_ITEM_COUNT + 1U) / 2U;
@@ -160,6 +165,7 @@ static void gui_boot_row(const BootReport *report, uint8_t item)
     if(state == BOOT_NOT_TESTED) gui_boot_not_tested_label(x + 280U, y);
 }
 
+/* 硬件检查开始前绘制启动画面和空进度条；短动画仅作提示，不代表检查已完成。 */
 void gui_boot_begin(void)
 {
     uint8_t frame, dot;
@@ -189,6 +195,7 @@ void gui_boot_begin(void)
     ILI9806G_DrawRectangle(20U, 362U, 760U, 20U, 0U);
 }
 
+/* 显示当前检查项、完成比例和明细；失败后将进度条改为红色，并保持真实完成计数。 */
 void gui_boot_update(const BootReport *report, uint8_t item)
 {
     uint16_t next_width;
@@ -220,6 +227,7 @@ void gui_boot_update(const BootReport *report, uint8_t item)
     /* 进度条仅按实际完成的硬件检查更新。 */
 }
 
+/* 汇总全部启动检查并保留首个故障原因；是否等待用户确认由启动流程控制。 */
 void gui_boot_finish(const BootReport *report)
 {
     BootOutcome outcome = boot_report_outcome(report);
@@ -266,6 +274,7 @@ void gui_boot_finish(const BootReport *report)
     ILI9806G_DispString_EN(20U, 446U, (char *)summary);
 }
 
+/* row 是可见窗口内行号，number 是列表总序号；选中与编辑状态分别用不同底色区分。 */
 static void gui_settings_row(uint8_t row, uint16_t number,
                              const char *label, const char *value,
                              uint8_t selected, uint8_t editing)
@@ -284,6 +293,7 @@ static void gui_settings_row(uint8_t row, uint16_t number,
             selected ? foreground : UI_MUTED, background, 3U);
 }
 
+/* 按可见条目比例绘制滚动块；设置最小高度，并把首项位置映射到剩余可滚动距离。 */
 static void gui_settings_scroll(uint8_t first_visible, uint8_t visible_count,
                                 uint8_t total_items)
 {
@@ -327,6 +337,7 @@ static void gui_monitor_tabs(uint8_t output)
         output ? UI_ACCENT : UI_SURFACE,0U);
 }
 
+/* 用字节数生成容量卡片；capacity 必须非零，超出容量时条形封顶但文字保留实际占用。 */
 static void gui_tools_capacity(uint16_t x, uint16_t y, const char *label,
                                uint32_t used, uint32_t capacity, uint16_t color)
 {
@@ -345,6 +356,7 @@ static void gui_tools_capacity(uint16_t x, uint16_t y, const char *label,
     ui_text(x + 280U, y + 12U, 9U, text, color, UI_SURFACE, 0U);
 }
 
+/* 遥测浮点数先排除 NaN/无穷，再限制显示宽度；无效值显示 --，溢出显示 OVR。 */
 static void gui_robot_format_value(char *field, size_t size, uint8_t columns,
     const char *format, double value)
 {
@@ -358,6 +370,7 @@ static void gui_robot_format_value(char *field, size_t size, uint8_t columns,
         snprintf(field,size,"OVR");
 }
 
+/* 展示固件版本、链接器统计的静态内存占用及启动结果；容量不是实时堆栈使用量。 */
 void system_basic_information(void)
 {
     static uint8_t last_boot[5];
@@ -467,6 +480,7 @@ static void gui_dashboard_status(uint8_t first)
     }
 }
 
+/* 首页显示三个功能分类；分类卡片只重画焦点边框，状态面板按自身节奏更新。 */
 void menu_group_page(uint8_t selected_group)
 {
     static const char * const titles[] = {"\322\243\277\330", "\311\350\326\303", "\271\244\276\337"};
@@ -510,6 +524,7 @@ void menu_group_page(uint8_t selected_group)
     previous=selected_group;
 }
 
+/* selected_item 是全局入口编号，由编号确定分类；同分类内移动时卡片仅修改新旧焦点边框。 */
 void main_menu(uint8_t selected_item)
 {
 #define MENU_LABEL(page,label,hint) label,
@@ -569,6 +584,7 @@ void main_menu(uint8_t selected_item)
 }
 
 
+/* 并列显示六路原始与消抖电平；稳定值决定卡片状态，原始值变化只刷新底部数字。 */
 void digital_channel_monitor_page(const uint8_t *raw_values, const uint8_t *stable_values)
 {
     static const char *pins[6] = {"PD6", "PD3", "PA8", "PD7", "PE3", "PE2"};
@@ -617,6 +633,7 @@ void digital_channel_monitor_page(const uint8_t *raw_values, const uint8_t *stab
     }
 }
 
+/* 解码一个多字节 UTF-8 字符，成功返回 1 并给出码点及消耗字节数；拒绝超长编码和代理区。 */
 static uint8_t gui_file_decode_utf8(const uint8_t *source,
 									uint32_t *codepoint,
 									uint8_t *source_advance)
@@ -675,6 +692,7 @@ static uint8_t gui_file_decode_utf8(const uint8_t *source,
 	return 0U;
 }
 
+/* 仅当全部多字节序列都合法时按 UTF-8 处理，否则交给后续 CP936 显示路径。 */
 static uint8_t gui_file_source_is_utf8(const char *source)
 {
 	uint16_t index = 0U;
@@ -701,6 +719,7 @@ static uint8_t gui_file_source_is_utf8(const char *source)
 	return has_multibyte;
 }
 
+/* 按 ASCII/GB2312 编码范围检查整个文件名，不读取实际字模；不支持的字符返回 0。 */
 uint8_t gui_file_name_can_render(const char *name)
 {
 	uint16_t index = 0U;
@@ -749,6 +768,7 @@ uint8_t gui_file_name_can_render(const char *name)
 	return 1U;
 }
 
+/* 文件名先转换到字库支持的编码，并同时按像素宽度和缓冲容量截断完整字符。 */
 static void gui_file_display_text(char *destination, uint16_t destination_size,
 								  const char *source, uint16_t maximum_width)
 {
@@ -844,6 +864,7 @@ static void gui_file_display_text(char *destination, uint16_t destination_size,
 	destination[destination_index] = '\0';
 }
 
+/* 按大小选择 B、KB 或 MB；MB 用整数计算一位小数，避免文件列表依赖浮点格式化。 */
 static void gui_file_size_text(uint32_t size, char *text)
 {
 	if(size < 1024UL)
@@ -861,6 +882,7 @@ static void gui_file_size_text(uint32_t size, char *text)
 	}
 }
 
+/* 绘制传入列表中的六行窗口，revision 表示内容版本；缓存路径、状态及焦点以减少重绘。 */
 void file_browser_page(const char *path, const GuiFileEntry *entries,
                        uint8_t item_count, uint8_t selected_item,
                        uint8_t first_visible, uint16_t revision,
@@ -886,6 +908,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
     }
     gui_file_display_text(safe_path, sizeof(safe_path), path ? path : "", 656U);
     gui_file_display_text(safe_status, sizeof(safe_status), status_text ? status_text : "", 752U);
+    /* 目录内容或窗口变化时重绘列表；仅移动光标时只更新新旧选中行。 */
     content_changed = first_draw || revision != last_revision || first_visible != last_first_visible ||
                       item_count != last_count || strcmp(safe_path, last_path) != 0;
     selection_changed = selected_item != last_selected;
@@ -946,6 +969,7 @@ void file_browser_page(const char *path, const GuiFileEntry *entries,
     last_revision = revision;
 }
 
+/* 补充整个目录的全局位置；分页浏览时不能用当前窗口条目数代替目录总数。 */
 void file_browser_position(uint32_t selected, uint32_t total, uint8_t retry)
 {
     char position[40];
@@ -973,6 +997,7 @@ static void gui_file_text_line(uint16_t x, uint16_t y, const char *text)
     }
 }
 
+/* 复用预览标题、内容区和页脚；保留图片时 clear_content 为 0，文本按 stride 逐行访问。 */
 void file_preview_page(const char *name, const char *kind, const char *lines,
                        uint16_t stride, uint8_t line_count, const char *status,
                        const char *position, uint8_t clear_content, uint8_t text_mode)
@@ -1004,6 +1029,7 @@ void file_preview_page(const char *name, const char *kind, const char *lines,
 }
 
 
+/* 固定五行设置使用上次行内容与选中状态判断重绘，编辑提示与保存状态由菜单层提供。 */
 void system_settings_page(const GuiParamRow *rows, uint8_t selected,
                           uint8_t editing, uint8_t dirty, const char *status)
 {
@@ -1032,6 +1058,7 @@ void system_settings_page(const GuiParamRow *rows, uint8_t selected,
     previous_selected = selected; previous_editing = editing;
 }
 
+/* 渲染参数草稿的可见窗口；比较行文本而非只看修订号，使未改变的数值不重复绘制。 */
 void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
                              uint8_t selected_row, uint8_t first_visible,
                              uint8_t total_items, uint8_t editing,
@@ -1096,6 +1123,7 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
         ui_text(32U, 308U, 8U, text, UI_INK, UI_SURFACE, 1U);
     }
 
+    /* 滚动时清理整个可见窗口；窗口不变时按行比较文本和焦点，减少 LCD 写入。 */
     if(window_changed) ui_fill(192U, 104U, 580U, 284U, UI_BG);
     for(row = 0U; row < GUI_PARAM_VISIBLE_ROWS; row++) {
         if(row >= visible_count) {
@@ -1135,6 +1163,7 @@ void parameter_settings_page(const GuiParamRow *rows, uint8_t visible_count,
     memcpy(last_status, status, sizeof(last_status));
 }
 
+/* 左栏显示硬件回读，右栏显示编辑草稿；两者不一致时提示未应用，读失败时隐藏旧回读值。 */
 void nrf_settings_page(uint8_t selected_item, uint8_t editing,
                        uint8_t enabled, uint8_t channel,
                        uint8_t power_index, uint8_t data_rate,
@@ -1229,6 +1258,7 @@ void nrf_settings_page(uint8_t selected_item, uint8_t editing,
     last_editing = editing;
 }
 
+/* GPS 显示快照包含数值和有效性信息，统一比较可跳过完全没有变化的刷新。 */
 typedef struct
 {
 	int sig;
@@ -1253,6 +1283,7 @@ typedef struct
 	double pdop;
 } gui_gps_snapshot_t;
 
+/* 读取 GPS 服务已有结果生成显示快照，不在页面内解析串口数据或写入 RTC。 */
 void system_data_read_and_set(void)
 {
     static gui_gps_snapshot_t previous;
@@ -1266,6 +1297,7 @@ void system_data_read_and_set(void)
     double latitude, longitude;
 
     memset(&current, 0, sizeof(current));
+    /* 数据过期时撤销定位和卫星状态；时间另用独立时效判断，避免显示陈旧定位为有效。 */
     current.sig = fresh ? info.sig : 0;
     current.fix = fresh ? info.fix : 1;
     current.mode = info.mode;
@@ -1354,6 +1386,7 @@ void system_data_read_and_set(void)
     }
 }
 
+/* 对本机 ADC 值进行显示滤波，绘制八路模拟输入及独立的摇杆按键、电池读数。 */
 void channel_monitor_page(void)
 {
     /* 电池和摇杆按键单独显示，不放入摇杆轴值表。 */
@@ -1435,6 +1468,7 @@ void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
     const char *state;
     if(!snapshot) return;
     get_tick_count(&ticks);
+    /* 数字每 100 ms 更新便于读取，通道条仍随每次页面刷新实时变化。 */
     update_text = first || (uint32_t)((uint32_t)ticks - text_ms) >= 100U;
     if(first) {
         display_flag = 0U;
@@ -1522,6 +1556,7 @@ void channel_output_monitor_page(const ControlLinkSnapshot *snapshot)
     LCD_SetFont(&Font16x32); LCD_SetBackColor(UI_BG); LCD_SetTextColor(UI_INK);
 }
 
+/* 读取后台维护的姿态与原始传感器数据；正常每 100 ms 刷新，有效性变化立即清除旧显示。 */
 void imu6050_information(void)
 {
     static const char *names[3] = {"\270\251\321\366 PITCH", "\272\341\271\366 ROLL", "\272\275\317\362 YAW"};
@@ -1612,6 +1647,7 @@ void imu6050_information(void)
 #define ROBOT_RIGHT_X_ADC_INDEX 5U
 #define ROBOT_RIGHT_Y_ADC_INDEX 4U
 
+/* 将显示用 ADC 值按校准点、微调和反向换算为 ±1000，加入中位死区；不改控制任务输出。 */
 static int16_t gui_robot_stick_value(uint16_t raw, uint8_t channel)
 {
     uint16_t lower = param.chLower[channel];
@@ -1660,6 +1696,7 @@ static void gui_robot_dot_patch(uint16_t center_x, uint16_t center_y,
     LCD_BlitRGB565(patch_x,patch_y,17U,17U,pixels);
 }
 
+/* 将归一化轴值映射到圆形仪表，并以新旧圆点区域修补画面；数字与圆点使用独立更新条件。 */
 static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
     uint16_t raw_x, uint16_t raw_y, int16_t control_x, int16_t control_y,
     uint16_t color, uint16_t *old_x, uint16_t *old_y,
@@ -1672,6 +1709,7 @@ static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
     uint16_t norm = 45U, dot_x, dot_y, text_x = center_x - 88U;
     int32_t move_x, move_y;
     uint8_t centered;
+    /* 对角线满量程会超出圆形表盘，按向量长度缩回边界，保留方向而限制显示半径。 */
     if(radius2 > 44L * 44L) {
         while((int32_t)norm * norm < radius2) norm++;
         dx = dx * 44L / norm; dy = dy * 44L / norm;
@@ -1692,6 +1730,7 @@ static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
         ILI9806G_DrawLine(center_x,center_y - 62U,center_x,center_y - 57U);
         ILI9806G_DrawLine(center_x,center_y + 57U,center_x,center_y + 62U);
     }
+    /* 标记至少移动两个像素才重绘以抑制抖动；回中时立即归位，不受此阈值限制。 */
     if(first_draw || move_x >= 2L || move_x <= -2L || move_y >= 2L || move_y <= -2L ||
         (centered && (move_x || move_y))) {
         gui_robot_dot_patch(center_x,center_y,dot_x - 8U,dot_y - 8U,dot_x,dot_y,color);
@@ -1707,6 +1746,7 @@ static void gui_robot_draw_stick(uint16_t center_x, uint16_t center_y,
     *old_raw_x = raw_x; *old_raw_y = raw_y;
 }
 
+/* 本机摇杆、控制使能状态与远端遥测各自更新；在线状态决定遥测是否显示为有效值。 */
 void robot_control_page(const GuiRobotTelemetry *telemetry)
 {
     static GuiRobotTelemetry previous;
@@ -1748,6 +1788,7 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
     /* 保留按实际经过时间控制刷新的机制，以及仅用于显示的摇杆滤波。 */
     draw_text = first_draw || (uint32_t)(now - last_numeric_ms) >= 250U;
     if(draw_text) last_numeric_ms = now;
+    /* 遥测数值随数字刷新节奏更新，在线状态切换则立即绘制，及时清除失效数据。 */
     telemetry_changed = !snapshot_valid || previous.link_online != telemetry->link_online ||
         (telemetry->link_online && draw_text && memcmp(&previous,telemetry,sizeof(previous)) != 0);
     if(telemetry_changed) {
@@ -1825,6 +1866,7 @@ void robot_control_page(const GuiRobotTelemetry *telemetry)
     LCD_SetFont(&Font16x32); LCD_SetBackColor(UI_BG); LCD_SetTextColor(UI_INK);
 }
 
+/* 根据日历状态渲染浏览、操作和编辑视图；页面只读取状态，日期调整及写 RTC 由菜单层负责。 */
 void calendar_page(const GuiCalendarState *state)
 {
     static GuiCalendarState previous;
@@ -1844,6 +1886,7 @@ void calendar_page(const GuiCalendarState *state)
     old_month = previous.mode == CALENDAR_EDIT ? previous.draft.month : previous.month;
     days = RTC_CalendarDaysInMonth(year,month);
     if(!days) return;
+    /* 月历网格与右侧时间栏分别判断变化，秒钟跳动时无需重绘整个月历。 */
     grid_changed = first || year != old_year || month != old_month ||
         state->mode != previous.mode || state->draft.day != previous.draft.day ||
         state->now.year != previous.now.year || state->now.month != previous.now.month ||

@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
+/* 缓存上次绘制状态，用于差量更新；实际编辑状态保存在 eeprom_menu 的局部变量中。
+ * 首次进入清除 valid，确保旧页缓存不会抑制新页面绘制。 */
 static uint8_t eeprom_ui_valid;
 static uint8_t eeprom_ui_address;
 static uint8_t eeprom_ui_editing;
@@ -14,6 +16,7 @@ static uint8_t eeprom_ui_value;
 static uint8_t eeprom_ui_read_ok;
 static char eeprom_ui_status[96];
 
+/* 按本页使用的双字节中文字库估算像素宽度，英文占半字宽，用于擦除旧文本尾部。 */
 static uint16_t eeprom_text_width(const char *text, uint16_t size)
 {
     const uint8_t *scan = (const uint8_t *)text;
@@ -25,6 +28,7 @@ static uint16_t eeprom_text_width(const char *text, uint16_t size)
     return width;
 }
 
+/* 绘制固定标题、列头和背景；数据表与状态栏随后覆盖，避免先清全屏造成闪白。 */
 static void eeprom_draw_shell(void)
 {
     uint8_t col;
@@ -58,6 +62,7 @@ static void eeprom_draw_shell(void)
     diag_ui_fill(4U, 468U, 792U, 12U, DIAG_UI_WHITE);
 }
 
+/* 普通单元格显示实时读数，选中的编辑单元格显示暂存值；读取失败显示双横线。 */
 static void eeprom_draw_cell(uint8_t cell_address, uint8_t selected_address,
                              uint8_t editing, uint8_t value)
 {
@@ -80,6 +85,7 @@ static void eeprom_draw_cell(uint8_t cell_address, uint8_t selected_address,
                  selected ? selection_color : DIAG_UI_WHITE, text);
 }
 
+/* 地址按 32 字节对齐为一页，以 4 行 8 列展示；页内位置由地址低 5 位确定。 */
 static void eeprom_draw_table(uint8_t address, uint8_t editing, uint8_t value)
 {
     uint8_t row, col;
@@ -100,6 +106,7 @@ static void eeprom_draw_table(uint8_t address, uint8_t editing, uint8_t value)
     diag_ui_frame(4U, 112U, 792U, 224U, DIAG_UI_BLUE);
 }
 
+/* 显示当前地址、值和编辑阶段，digit=0/1/2 分别表示高四位、低四位与写入确认。 */
 static void eeprom_draw_selected(uint8_t address, uint8_t editing,
                                  uint8_t digit, uint8_t read_ok, uint8_t value)
 {
@@ -117,6 +124,7 @@ static void eeprom_draw_selected(uint8_t address, uint8_t editing,
         diag_ui_fill(20U + width, 348U, 768U - width, 32U, DIAG_UI_GREY);
 }
 
+/* 组织局部重绘并更新页面快照；read_ok/value 通过指针返回浏览状态下的最新读取结果。 */
 static void eeprom_draw_page(uint8_t address, uint8_t editing, uint8_t digit,
                              uint8_t *read_ok, uint8_t *value,
                              const char *status)
@@ -124,6 +132,7 @@ static void eeprom_draw_page(uint8_t address, uint8_t editing, uint8_t digit,
     uint8_t page_changed;
     uint8_t cell_changed;
 
+    /* 浏览时读取硬件，编辑时保留暂存值；跨 32 字节页才重画整表，否则只更新变动单元。 */
     if(!editing) *read_ok = EEPROM_Random_Read(address, value) == 0U;
     page_changed = !eeprom_ui_valid ||
                    ((address & 0xe0U) != (eeprom_ui_address & 0xe0U));
@@ -172,6 +181,7 @@ static void eeprom_draw_page(uint8_t address, uint8_t editing, uint8_t digit,
     eeprom_ui_status[sizeof(eeprom_ui_status) - 1U] = '\0';
 }
 
+/* 编辑依次经过高四位、低四位和写入确认；确认前只改 RAM 中的暂存值，返回可放弃。 */
 void eeprom_menu(void)
 {
     uint8_t address = 0U, value = 0U, editing = 0U, digit = 0U, read_ok = 0U;
@@ -212,6 +222,7 @@ void eeprom_menu(void)
                 digit++;
                 if(digit == 2U) sprintf(status, "写 0x%02X 到 0x%02X？OK 确认", value, address);
             } else {
+                /* 确认后才写入，并立即回读比对，防止仅凭写操作返回值判定成功。 */
                 error = EEPROM_Byte_Write(address, value);
                 if(!error) error = EEPROM_Random_Read(address, &byte);
                 if(!error && byte != value) error = 9U;

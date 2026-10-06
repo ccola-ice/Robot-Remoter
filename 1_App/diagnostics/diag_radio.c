@@ -7,6 +7,7 @@
 
 /* 诊断操作读取状态时保持 CE 不变。旧版 ReadReg 会拉低 CE，
  * 等待接收数据包时不得调用。所有 SPI 等待都必须设置超时。 */
+/* 本次诊断的 SPI 错误锁存；底层超时后保持置位，直到下次测试开始才清除。 */
 static uint8_t io_error;
 static uint8_t transfer(uint8_t byte)
 {
@@ -20,6 +21,8 @@ static uint8_t transfer(uint8_t byte)
     return (uint8_t)SPI_I2S_ReceiveData(NRF_SPI);
 }
 
+/* 一次 CSN 片选包围命令与数据阶段；write 为零时发空字节并把返回值存入 data。
+ * size 为零可发送纯命令，传输异常由 io_error 汇总，调用者在阶段边界检查。 */
 static void transaction(uint8_t command, uint8_t *data, uint8_t size, uint8_t write)
 {
     uint8_t i;
@@ -42,6 +45,7 @@ static void reg_write(uint8_t reg, uint8_t value)
     transaction(NRF_WRITE_REG | reg, &value, 1U, 1U);
 }
 
+/* 固定标识、序号和确定性载荷组成测试帧，使接收端可校验顺序及全部 32 字节内容。 */
 static void packet_fill(uint8_t *packet, uint8_t sequence)
 {
     uint8_t i;
@@ -51,6 +55,8 @@ static void packet_fill(uint8_t *packet, uint8_t sequence)
         packet[i] = (uint8_t)(0x6dU ^ (i * 17U) ^ sequence);
 }
 
+/* 完整测试依次经过空闲检查、配置备份、临时通信和恢复回读；收发双方需人工配对。
+ * 接收最长等待约 20 s，发送最长等待约 5 s，SPI 传输与重发同样有独立上限。 */
 HwResult hardware_radio_test(uint8_t receive)
 {
     static const uint8_t regs[] = {CONFIG, EN_AA, EN_RXADDR, SETUP_AW, SETUP_RETR,
@@ -58,6 +64,7 @@ HwResult hardware_radio_test(uint8_t receive)
     uint8_t old[sizeof(regs)], tx[5], rx[5], packet[32], received[32];
     uint8_t address[5] = {0xd7U, 0x43U, 0x44U, 0x47U, 0x31U};
     uint8_t i, count = 0U, status, fifo, old_ce, retry = 0U;
+    /* old_ce 保存进入状态；restore_ce 在确认设备可用后置位，恢复校验失败则清零。 */
     uint8_t restore_ce = 0U;
     uint16_t ms = 0U;
     HwResult result = HW_FAIL;
@@ -72,6 +79,7 @@ HwResult hardware_radio_test(uint8_t receive)
     if(io_error || i < 1U || i > 3U) goto no_change;
     restore_ce = 1U;
     if((status & 0x11U) != 0x11U) { result = HW_BLOCKED; goto no_change; }
+    /* 保存业务通信寄存器和收发地址，诊断结束后统一恢复，避免改变正常链路配置。 */
     for(i = 0; i < sizeof(regs); i++) old[i] = reg_read(regs[i]);
     transaction(TX_ADDR, tx, 5U, 0U);
     transaction(RX_ADDR_P0, rx, 5U, 0U);
@@ -99,6 +107,7 @@ HwResult hardware_radio_test(uint8_t receive)
         transaction(WR_TX_PLOAD, packet, 32U, 1U);
         NRF_CE_HIGH(); Delay_us(20U); NRF_CE_LOW();
     }
+    /* 接收端核对 8 个递增序号的数据包；发送端按自动 ACK 计数，遇 MAX_RT 时有限次重发同一包。 */
     for(ms = 0; ms < 20000U; ms++) {
         status = reg_read(STATUS);
         fifo = reg_read(FIFO_STATUS);
@@ -141,6 +150,7 @@ cleanup:
     for(i = 1U; i < sizeof(regs); i++) reg_write(regs[i], old[i]);
     reg_write(CONFIG, old[0]);
     Delay_ms(2U);
+    /* 恢复后回读验证；任何差异都禁止重新拉高 CE，避免用异常配置继续通信。 */
     for(i = 0; i < sizeof(regs); i++) if(reg_read(regs[i]) != old[i]) {
         result = HW_FAIL; restore_ce = 0U;
     }

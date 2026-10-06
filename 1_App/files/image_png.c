@@ -17,19 +17,24 @@
 #define PNG_IDAT 0x49444154UL
 #define PNG_IEND 0x49454E44UL
 
+/* 规范 Huffman 码表：按码长统计数量，并将符号按码长及原符号顺序紧凑排列。 */
 typedef struct {
     uint16_t count[16];
     uint16_t symbol[288];
 } PngHuffman;
 
+/* 一次 PNG 解码的完整上下文，处理链为文件字节、PNG 块、DEFLATE、扫描行和像素。
+ * 结构体后紧接两条原图行缓冲，共用调用方工作区；函数返回后不保留文件或指针引用。 */
 typedef struct {
     FIL file;
     FileImageResult status;
     uint8_t (*service)(void *);
     void *context;
     uint8_t *row, *previous;
+    /* 文件位置与当前块剩余长度分别计数，CRC 仅覆盖块类型和该块的数据。 */
     uint32_t size, position, remain, chunk_type, crc;
     uint32_t width, height, row_bytes, row_at, pass_width, pass_height, pass_row;
+    /* 压缩流状态跨 IDAT 块延续；expected 限制展开总量，window_limit 限制回溯距离。 */
     uint32_t bit_buffer, produced, adler_a, adler_b, expected, window_limit;
     uint16_t input_at, input_count, x, y, draw_width, draw_height;
     uint16_t palette_count, transparent[3];
@@ -45,6 +50,7 @@ typedef struct {
 
 static uint8_t png_busy;
 
+/* 保留最先发生的错误，后续清理或格式检查不能掩盖 I/O 失败与取消原因。 */
 static uint8_t png_fail(Png *p, FileImageResult status)
 {
     if(p->status == FILE_IMAGE_OK) p->status = status;
@@ -58,6 +64,7 @@ static uint8_t png_service(Png *p)
     return 1U;
 }
 
+/* 最底层文件读取，只负责扇区缓存、边界及 I/O 状态，不修改块级 CRC 和剩余长度。 */
 static uint8_t png_raw(Png *p, uint8_t *value)
 {
     UINT count = 0U, request;
@@ -97,6 +104,8 @@ static uint8_t png_u32(Png *p, uint32_t *value)
     return 1U;
 }
 
+/* 读取块长度及四字节类型，预留尾部 CRC 空间并验证类型字符。
+ * 成功后 remain 指向数据长度，crc 已包含类型字段，数据尚未消费。 */
 static uint8_t png_header(Png *p)
 {
     uint8_t i, value;
@@ -115,6 +124,7 @@ static uint8_t png_header(Png *p)
     return 1U;
 }
 
+/* 消费当前块的一字节有效载荷，同时推进剩余长度和 CRC；不能跨块读取。 */
 static uint8_t png_data(Png *p, uint8_t *value)
 {
     if(!p->remain) return png_fail(p, FILE_IMAGE_CORRUPT);
@@ -124,6 +134,7 @@ static uint8_t png_data(Png *p, uint8_t *value)
     return 1U;
 }
 
+/* 数据必须已恰好消费完，再读取并核对块尾 CRC；返回成功后才可读取下一块。 */
 static uint8_t png_finish(Png *p)
 {
     uint32_t expected;
@@ -132,6 +143,7 @@ static uint8_t png_finish(Png *p)
     return 1U;
 }
 
+/* 即使忽略辅助块内容，也完整读取并校验 CRC，避免悄悄接受损坏的文件。 */
 static uint8_t png_skip(Png *p)
 {
     uint8_t value;
@@ -139,6 +151,7 @@ static uint8_t png_skip(Png *p)
     return png_finish(p);
 }
 
+/* 连续 IDAT 块拼成同一压缩流；跨块时校验各自 CRC，但保留 DEFLATE 位缓存。 */
 static uint8_t png_compressed(Png *p, uint8_t *value)
 {
     while(!p->remain) {
@@ -148,6 +161,7 @@ static uint8_t png_compressed(Png *p, uint8_t *value)
     return png_data(p, value);
 }
 
+/* DEFLATE 按低位优先装入位缓存；只消费请求位数，其余位留给后续字段或码字。 */
 static uint8_t png_bits(Png *p, uint8_t count, uint32_t *value)
 {
     uint8_t byte;
@@ -187,6 +201,8 @@ static uint8_t png_tree(Png *p, PngHuffman *tree, const uint8_t *lengths,
     return 1U;
 }
 
+/* 逐位扩展码字，利用各码长的首码与数量定位符号，不建立额外的指针树。
+ * 超过最长 15 位仍无法匹配时，判定压缩流损坏。 */
 static uint8_t png_symbol(Png *p, const PngHuffman *tree, uint16_t *symbol)
 {
     uint32_t bit, code = 0U, first = 0U, at = 0U;
@@ -205,6 +221,7 @@ static uint8_t png_symbol(Png *p, const PngHuffman *tree, uint16_t *symbol)
     return png_fail(p, FILE_IMAGE_CORRUPT);
 }
 
+/* 动态码表先解出码长表，再展开重复码长，最终构造字面量/长度与距离两棵树。 */
 static uint8_t png_dynamic(Png *p)
 {
     static const uint8_t order[19] = {16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15};
@@ -248,6 +265,7 @@ static uint8_t png_dynamic(Png *p)
            png_tree(p, &p->distance, p->lengths + literal_count, (uint16_t)distance_count, 1U, 1U);
 }
 
+/* Adam7 将图像分成七个稀疏子图；跳过空子图，并清零每轮首行的上行预测数据。 */
 static uint8_t png_pass(Png *p)
 {
     static const uint8_t start_x[7] = {0,4,0,2,0,1,0};
@@ -274,6 +292,7 @@ static uint8_t png_pass(Png *p)
     return 0U;
 }
 
+/* Paeth 从左、上、左上三个已恢复字节中选择最接近 a+b-c 的预测值。 */
 static uint8_t png_paeth(uint8_t a, uint8_t b, uint8_t c)
 {
     int value = (int)a + b - c;
@@ -284,6 +303,7 @@ static uint8_t png_paeth(uint8_t a, uint8_t b, uint8_t c)
     return da <= db && da <= dc ? a : (db <= dc ? b : c);
 }
 
+/* 按样本索引提取原始通道值：低位深样本从字节高位起打包，16 位样本使用大端序。 */
 static uint16_t png_sample(const uint8_t *row, uint32_t index, uint8_t depth)
 {
     uint32_t bit;
@@ -293,6 +313,8 @@ static uint16_t png_sample(const uint8_t *row, uint32_t index, uint8_t depth)
     return (uint16_t)((row[bit / 8U] >> (8U - depth - bit % 8U)) & ((1U << depth) - 1U));
 }
 
+/* 将当前行的一个像素从灰度、索引色或 RGB(A) 统一转换为 RGB565。
+ * 透明色比较使用未缩放的原始样本值，避免量化后错误地命中透明颜色。 */
 static uint8_t png_pixel(Png *p, uint32_t index, uint16_t *pixel)
 {
     uint16_t raw[4];
@@ -316,6 +338,7 @@ static uint8_t png_pixel(Png *p, uint32_t index, uint16_t *pixel)
                     raw[1] == p->transparent[1] && raw[2] == p->transparent[2]) alpha = 0U;
         }
     }
+    /* LCD 输出不带透明通道，统一合成到白底后再量化为 RGB565。 */
     r = (r * alpha + 255U * (255U - alpha) + 127U) / 255U;
     g = (g * alpha + 255U * (255U - alpha) + 127U) / 255U;
     b = (b * alpha + 255U * (255U - alpha) + 127U) / 255U;
@@ -323,11 +346,14 @@ static uint8_t png_pixel(Png *p, uint32_t index, uint16_t *pixel)
     return 1U;
 }
 
+/* 完成逆滤波后，将当前子图中命中缩放采样的像素输出到 LCD。
+ * Adam7 子图的目标像素可能不连续，因此只将相邻像素合并为一次行块传输。 */
 static uint8_t png_draw_row(Png *p)
 {
     uint32_t at, sy, sx, target_y, left, above, diagonal;
     uint16_t x, run_start = 0U, run_length = 0U;
     uint8_t *swap;
+    /* 逐字节逆滤波依赖已恢复的左侧像素和上一行，不能在缩放前跳过未显示的数据。 */
     for(at = 0U; at < p->row_bytes; at++) {
         left = at < p->pixel_bytes ? 0U : p->row[at - p->pixel_bytes];
         above = p->previous[at];
@@ -358,15 +384,19 @@ static uint8_t png_draw_row(Png *p)
         }
         if(run_length) LCD_BlitRGB565((uint16_t)(p->x + run_start), (uint16_t)(p->y + target_y), run_length, 1U, p->pixels);
     }
+    /* 交换两行缓冲保存预测所需的上一行，无需复制整行或保留完整图像。 */
     swap = p->previous; p->previous = p->row; p->row = swap;
     p->row_at = 0U;
     if(++p->pass_row == p->pass_height) { p->pass++; (void)png_pass(p); }
     return png_service(p);
 }
 
+/* 接收一个 DEFLATE 输出字节，更新滑动字典和校验，再送入行过滤/显示阶段。
+ * 每行第一个字节是滤波类型；超过预期展开长度时立即停止，避免写出行缓冲。 */
 static uint8_t png_emit(Png *p, uint8_t value)
 {
     if(p->produced >= p->expected) return png_fail(p, FILE_IMAGE_CORRUPT);
+    /* 字典和 Adler 校验保留原始解压字节；扫描行缓冲随后才执行逆滤波。 */
     p->dictionary[p->produced & (PNG_WINDOW - 1U)] = value;
     p->produced++;
     p->adler_a += value;
@@ -381,6 +411,8 @@ static uint8_t png_emit(Png *p, uint8_t value)
     return (p->produced & 1023U) || png_service(p);
 }
 
+/* 解析 zlib 封装，依次展开未压缩、固定 Huffman 或动态 Huffman 数据块。
+ * 最后核对输出总量、Adler 校验和当前 IDAT 尾部，任一不符都不能算解码成功。 */
 static uint8_t png_inflate(Png *p)
 {
     static const uint16_t length_base[29] = {3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258};
@@ -425,6 +457,7 @@ static uint8_t png_inflate(Png *p)
             if(symbol > 29U || !png_bits(p, distance_bits[symbol], &value)) return png_fail(p, FILE_IMAGE_CORRUPT);
             distance = distance_base[symbol] + value;
             if(distance > p->window_limit || distance > p->produced) return png_fail(p, FILE_IMAGE_CORRUPT);
+            /* 逐字节回拷允许源与目标重叠，新输出的字节可继续作为同一段的来源。 */
             while(length--) if(!png_emit(p, p->dictionary[(p->produced - distance) & (PNG_WINDOW - 1U)])) return 0U;
         }
     } while(!final);
@@ -444,6 +477,8 @@ static uint32_t png_be32(const uint8_t *data)
     return ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) | ((uint32_t)data[2] << 8) | data[3];
 }
 
+/* IHDR 决定色型、通道数和位深；据此划分两条原图行缓冲并检查工作区容量。
+ * 随后计算等比显示区域及各隔行子图的展开字节总量，为流式解码建立边界。 */
 static uint8_t png_info(Png *p, FileImageInfo *info, uint32_t capacity)
 {
     uint8_t header[13], i;
@@ -480,12 +515,14 @@ static uint8_t png_info(Png *p, FileImageInfo *info, uint32_t capacity)
     if(!dh) dh = 1U;
     p->x += (uint16_t)((p->draw_width - dw) / 2U); p->y += (uint16_t)((p->draw_height - dh) / 2U);
     p->draw_width = info->drawn_width = (uint16_t)dw; p->draw_height = info->drawn_height = (uint16_t)dh;
+    /* 每行另含一个滤波字节，预计算总输出量以拒绝截断或超出图像大小的压缩流。 */
     while(png_pass(p)) { p->expected += (p->row_bytes + 1U) * p->pass_height; p->pass++; }
     p->pass = 0U;
     (void)png_pass(p);
     return 1U;
 }
 
+/* 读取 PLTE 并默认设为不透明；索引色条目数必须适配位深，且不能在透明表之后重建。 */
 static uint8_t png_palette(Png *p)
 {
     uint16_t i;
@@ -501,6 +538,8 @@ static uint8_t png_palette(Png *p)
     return png_finish(p);
 }
 
+/* tRNS 对索引色提供逐项 alpha，对灰度/RGB 提供一个完全透明的原始颜色键。
+ * 自带 alpha 的色型无需且不允许再附加该块，长度和样本范围也必须匹配色型。 */
 static uint8_t png_transparency(Png *p)
 {
     uint16_t i, count;
@@ -524,6 +563,8 @@ static uint8_t png_transparency(Png *p)
     return png_finish(p);
 }
 
+/* 验证签名后按 PNG 块顺序解码，强制 IHDR 在前、IDAT 连续、IEND 正确收尾。
+ * 未识别的关键块不能忽略；所有已打开文件的退出路径统一关闭，并释放重入保护。 */
 FileImageResult file_png_draw(const char *path, uint16_t x, uint16_t y,
                               uint16_t w, uint16_t h, FileImageInfo *info,
                               uint8_t (*service)(void *), void *context,

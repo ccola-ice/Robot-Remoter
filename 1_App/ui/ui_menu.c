@@ -33,6 +33,7 @@ extern nmeaTIME beiJingTime;
 #define NRF_MENU_ITEM_COUNT   6U
 #define NRF_SETTING_COUNT     4U
 #define PARAM_VISIBLE_ROWS    GUI_PARAM_VISIBLE_ROWS
+/* 参数列表按“全局项、各通道五个校准字段、末尾操作项”连续编号，导航和格式化共用此布局。 */
 #define PARAM_GLOBAL_COUNT    7U
 #define PARAM_CALIBRATION_CHANNELS 6U
 #define PARAM_CHANNEL_START   PARAM_GLOBAL_COUNT
@@ -40,6 +41,7 @@ extern nmeaTIME beiJingTime;
 #define PARAM_ACTION_START    (PARAM_CHANNEL_START + PARAM_CALIBRATION_CHANNELS * PARAM_CHANNEL_FIELDS)
 #define PARAM_ITEM_COUNT      (PARAM_ACTION_START + 3U)
 
+/* 页面状态只记录当前所在层级；各设置页另有独立的选择、编辑和草稿状态。 */
 typedef enum
 {
     MENU_PAGE_HOME = 0,
@@ -79,10 +81,13 @@ static const char * const nrf_status_text[] =
     "\xb1\xa3\xb4\xe6\xd0\xa3\xd1\xe9\xca\xa7\xb0\xdc\xa3\xac\xd4\xcb\xd0\xd0\xc9\xe8\xd6\xc3\xd2\xd1\xbb\xd6\xb8\xb4"
 };
 
+/* 实体按键使用环形队列；长按连发只保留一个待处理方向，避免快速输入积压。 */
 static MenuKey repeat_key;
 static uint8_t repeat_pending;
+/* 日历可从分类页或系统设置进入，单独保存返回位置，不随浏览月份变化。 */
 static GuiCalendarState calendar_state;
 static MenuPage calendar_return_page = MENU_PAGE_CATEGORY;
+/* 亮度和声音保存为页面草稿；system_backup 是进入单项编辑时的值，用于 BACK 撤销。 */
 static uint8_t system_selected, system_editing, system_brightness, system_sound, system_backup;
 static char system_status[96];
 static MenuKey event_queue[MENU_EVENT_QUEUE_SIZE];
@@ -95,10 +100,13 @@ static uint8_t monitor_output_view;
 static uint8_t refresh_tick_count;
 static uint8_t clock_refresh_tick_count;
 static uint8_t clock_refresh_due;
+/* page_dirty 请求重绘当前内容，page_changed 额外重建整页；
+ * refresh_due 只触发动态数据刷新，由主循环统一提交 LCD。 */
 static uint8_t page_dirty;
 static uint8_t page_changed;
 static uint8_t refresh_due;
 static MenuPage current_page;
+/* 无线页区分用户草稿与模块回读值；回读有效性单独记录，读失败不能显示为已应用。 */
 static uint8_t nrf_selected_item;
 static uint8_t nrf_editing;
 static uint8_t nrf_enabled;
@@ -112,17 +120,20 @@ static uint8_t nrf_runtime_channel;
 static uint8_t nrf_runtime_power_index;
 static uint8_t nrf_runtime_data_rate;
 enum { FILE_VIEW_UNSUPPORTED, FILE_VIEW_IMAGE, FILE_VIEW_TEXT, FILE_VIEW_GIF };
+/* 文件解码期间借助回调继续处理后台任务；取消标志锁存到本次文件操作结束。 */
 static void (*file_background_service)(void);
 static uint8_t file_operation_cancelled;
 static char file_view_path[FILE_BROWSER_PATH_LENGTH];
 static char file_view_name[GUI_FILE_NAME_LENGTH];
 static char file_view_status[128];
 static uint8_t file_view_kind, file_image_pending;
+/* GIF 分离暂停状态、到期换帧请求和解码期间收到的暂停请求，避免在解码栈内切换页面。 */
 static uint8_t gif_paused, gif_step_pending, gif_toggle_pending;
 static uint32_t gif_due_ms;
 static FileImageInfo gif_info;
 static FileImageResult gif_result;
 static file_text_result_t file_text_result;
+/* 草稿与单项备份分离：确认单项不等于持久化，dirty 记录是否仍有未保存内容。 */
 static param_Config param_edit;
 static param_Config param_edit_backup;
 static GuiParamRow param_rows[PARAM_VISIBLE_ROWS];
@@ -138,6 +149,7 @@ static GuiRobotTelemetry robot_telemetry;
 static unsigned long robot_last_receive_ms;
 static uint8_t robot_telemetry_received;
 
+/* 接收方发布完整显示快照并记录接收时刻；传入空指针时保持原状态。 */
 void menu_robot_telemetry_update(const GuiRobotTelemetry *telemetry)
 {
     if(telemetry != 0) {
@@ -147,6 +159,7 @@ void menu_robot_telemetry_update(const GuiRobotTelemetry *telemetry)
     }
 }
 
+/* 启动时清空遥测内容，并以最大帧龄表示尚未收到有效数据。 */
 static void menu_robot_telemetry_reset(void)
 {
     memset(&robot_telemetry, 0, sizeof(robot_telemetry));
@@ -154,6 +167,7 @@ static void menu_robot_telemetry_reset(void)
     robot_telemetry_received = 0U;
 }
 
+/* 在主循环中计算接收帧龄，在线状态变化时请求刷新；界面不会自行推断机器人运动结果。 */
 static void menu_robot_telemetry_service(void)
 {
     unsigned long now;
@@ -161,12 +175,14 @@ static void menu_robot_telemetry_service(void)
     uint8_t was_online = robot_telemetry.link_online;
     get_tick_count(&now);
     age = (uint32_t)(now - robot_last_receive_ms);
+    /* 未收到遥测时用最大值表示未知帧龄；帧龄达到 1 秒即离线，并请求刷新状态。 */
     if(!robot_telemetry_received) age = 65535U;
     robot_telemetry.packet_age_ms = age > 65535U ? 65535U : (uint16_t)age;
     if(age >= 1000U) robot_telemetry.link_online = 0U;
     if(was_online != robot_telemetry.link_online) refresh_due = 1U;
 }
 
+/* 只比较 RF 功率位，将寄存器值映射到四档菜单索引，忽略寄存器内其他配置位。 */
 static uint8_t menu_nrf_power_index(uint8_t power_register)
 {
     uint8_t i;
@@ -181,6 +197,7 @@ static uint8_t menu_nrf_power_index(uint8_t power_register)
     return 0U;
 }
 
+/* 回读模块当前配置供界面对照；失败仅撤销回读有效标志，不覆盖用户正在编辑的草稿。 */
 static void menu_nrf_refresh_runtime(void)
 {
     uint8_t runtime_power;
@@ -197,6 +214,7 @@ static void menu_nrf_refresh_runtime(void)
     }
 }
 
+/* 进入无线页时从运行配置建立草稿，修正显示索引范围，并同步一次硬件回读值。 */
 static void menu_nrf_load_settings(void)
 {
     nrf_selected_item = 0U;
@@ -209,6 +227,7 @@ static void menu_nrf_load_settings(void)
     menu_nrf_refresh_runtime();
 }
 
+/* 按方向修改选中的无线草稿项，枚举和频道采用首尾循环；此阶段不写 Flash 或模块。 */
 static void menu_nrf_adjust(int8_t direction)
 {
     switch(nrf_selected_item)
@@ -257,6 +276,7 @@ static void menu_nrf_adjust(int8_t direction)
     nrf_status = 5U;
 }
 
+/* 选择态负责导航和执行操作，编辑态负责改值；OK/BACK 均只结束单项编辑，应用保存另行执行。 */
 static void menu_handle_nrf_key(MenuKey key)
 {
     param_Config runtime_backup;
@@ -299,6 +319,7 @@ static void menu_handle_nrf_key(MenuKey key)
             }
             else if(nrf_selected_item == 4U)
             {
+                /* 先保存并校验参数，再下发无线模块；保存失败时恢复运行配置。 */
                 memcpy(&runtime_backup, (const void *)&param,
                        sizeof(runtime_backup));
                 param.NRF_Mode = nrf_enabled;
@@ -349,6 +370,7 @@ static void menu_param_set_status(const char *text)
     param_status[sizeof(param_status) - 1U] = '\0';
 }
 
+/* 参数页维护独立草稿，调整和恢复默认值都要经过保存操作才作用于运行参数。 */
 static void menu_param_copy_from_runtime(void)
 {
     memcpy(&param_edit, (const void *)&param, sizeof(param_edit));
@@ -357,6 +379,7 @@ static void menu_param_copy_from_runtime(void)
     param_edit.version_time = FM_TIME;
 }
 
+/* 每次进入参数页重新载入运行参数并清除编辑状态，先前未保存的草稿不跨页面保留。 */
 static void menu_param_load(void)
 {
     menu_param_copy_from_runtime();
@@ -368,6 +391,7 @@ static void menu_param_load(void)
     menu_param_set_status("\xd2\xd1\xd4\xd8\xc8\xeb\xb5\xb1\xc7\xb0\xb2\xce\xca\xfd\xa3\xac\xbd\xf6\xcf\xd4\xca\xbe\xd2\xd1\xca\xb5\xcf\xd6\xcf\xee\xc4\xbf");
 }
 
+/* 只在选择越过可见范围时滚动，使当前项始终落在六行显示窗口内。 */
 static void menu_param_adjust_window(void)
 {
     if(param_selected_item < param_first_visible)
@@ -389,6 +413,7 @@ static uint8_t menu_param_supported(uint8_t item)
     return item < PARAM_ITEM_COUNT;
 }
 
+/* 将全局编号转换为标签和值；通道区按通道号与字段号拆分，操作项显示执行提示。 */
 static void menu_param_format_item(uint8_t item_index, GuiParamRow *row)
 {
     static const char * const on_off_text[2] = {"\xb9\xd8\xb1\xd5", "\xbf\xaa\xc6\xf4"};
@@ -517,6 +542,7 @@ static void menu_param_adjust_float(void *packed_field, int8_t direction,
     }
 }
 
+/* 根据字段类型限幅或切换草稿值；达到边界且数值未变时仅更新提示，不新增未保存修改。 */
 static void menu_param_adjust(int8_t direction)
 {
     param_Config before;
@@ -604,6 +630,7 @@ static void menu_param_adjust(int8_t direction)
     menu_param_set_status("\xb2\xce\xca\xfd\xd2\xd1\xd0\xde\xb8\xc4\xa3\xac\xcd\xea\xb3\xc9\xba\xf3\xc7\xeb\xd1\xa1\xd4\xf1\xb1\xa3\xb4\xe6\xc8\xab\xb2\xbf\xb2\xce\xca\xfd");
 }
 
+/* 单项编辑保存进入时的草稿快照，BACK 只撤销本项编辑，保留此前未保存的修改。 */
 static void menu_handle_param_key(MenuKey key)
 {
     param_Config runtime_backup;
@@ -676,6 +703,8 @@ static void menu_handle_param_key(MenuKey key)
             }
             else if(param_selected_item == PARAM_ACTION_START)
             {
+                /* 写入失败恢复运行参数，草稿继续保留，方便用户重试保存。 */
+                /* 校验若修复了草稿，先返回界面供用户查看；再次保存才提交修复后的参数。 */
                 if(param_sanitize(&param_edit)) {
                     menu_param_set_status("\xd2\xd1\xd0\xde\xb8\xb4\xce\xde\xd0\xa7\xca\xfd\xd6\xb5\xa3\xac\xc7\xeb\xbc\xec\xb2\xe9\xba\xf3\xd4\xd9\xb4\xce\xb1\xa3\xb4\xe6");
                     param_revision++;
@@ -751,12 +780,14 @@ static uint8_t menu_file_service(void *context)
     return file_operation_cancelled == 0U;
 }
 
+/* 开始一次新的读取/翻页操作时清除上次取消和连发请求，避免旧事件取消新任务。 */
 static void menu_file_begin(void)
 {
     file_operation_cancelled = 0U;
     repeat_pending = 0U;
 }
 
+/* 进入存储浏览前关闭旧预览，注册磁盘和协作回调，再显示虚拟驱动器根目录。 */
 static void menu_browser_load_drives(void)
 {
     file_text_close();
@@ -768,6 +799,7 @@ static void menu_browser_load_drives(void)
     file_text_set_service(menu_file_service, NULL);
 }
 
+/* 比较最后一个点后的扩展名时忽略大小写；extension 使用带点的小写字符串，不修改原路径。 */
 static uint8_t menu_file_extension_is(const char *path, const char *extension)
 {
     const char *dot = strrchr(path, '.');
@@ -781,6 +813,7 @@ static uint8_t menu_file_extension_is(const char *path, const char *extension)
     return 1U;
 }
 
+/* 扩展名只决定选择哪种预览器，实际内容是否合法仍由对应解码器检查。 */
 static uint8_t menu_file_kind(const char *path)
 {
     static const char * const text_extensions[] = {
@@ -797,6 +830,7 @@ static uint8_t menu_file_kind(const char *path)
     return FILE_VIEW_UNSUPPORTED;
 }
 
+/* 把文本读取结果和当前字节位置转换为页面提示，同时保留结果供 OK 重试或切换编码。 */
 static void menu_file_text_status(file_text_result_t result)
 {
     const file_text_page_t *text = file_text_get_page();
@@ -819,6 +853,7 @@ static void menu_file_text_status(file_text_result_t result)
     file_text_result = result;
 }
 
+/* 退出预览时释放文本/GIF 文件并撤销待绘制请求，返回原文件列表位置。 */
 static void menu_file_return(void)
 {
     file_text_close();
@@ -829,6 +864,7 @@ static void menu_file_return(void)
     page_dirty = page_changed = 1U;
 }
 
+/* 左右移动条目，BACK 上移目录；确认普通文件后按类型进入预览，空目录允许重新读取。 */
 static void menu_handle_browser_key(MenuKey key)
 {
     const FileBrowserState *browser = file_browser_state();
@@ -871,6 +907,7 @@ static void menu_handle_browser_key(MenuKey key)
     page_dirty = 1U;
 }
 
+/* 共用 BACK 关闭预览；OK 对图片重载、对 GIF 暂停/重播、对文本重试或轮换编码。 */
 static void menu_handle_file_viewer_key(MenuKey key)
 {
     const file_text_page_t *text;
@@ -910,6 +947,7 @@ static void menu_handle_file_viewer_key(MenuKey key)
     page_dirty = 1U;
 }
 
+/* 把文件服务的窗口、错误状态和全目录位置映射到界面，显示索引与磁盘索引分别传入。 */
 static void menu_draw_browser(void)
 {
     const FileBrowserState *browser = file_browser_state();
@@ -929,6 +967,7 @@ static void menu_draw_browser(void)
 }
 
 
+/* 将解码错误归类为可读提示；预览页保留文件路径，用户可在故障排除后按 OK 重试。 */
 static void menu_image_error(FileImageResult result)
 {
     if(result == FILE_IMAGE_IO) strcpy(file_view_status, "\xb6\xc1\xc8\xa1\xca\xa7\xb0\xdc\xa3\xac\xc7\xeb\xbc\xec\xb2\xe9 SD \xbf\xa8\xa3\xbbOK \xd6\xd8\xca\xd4");
@@ -951,6 +990,7 @@ static void menu_gif_tick(void)
     }
 }
 
+/* 首帧打开 GIF 并取得共享解码工作区，后续只在换帧请求到达时解码；取消则返回列表。 */
 static void menu_draw_gif(void)
 {
     FileImageResult result = FILE_IMAGE_OK;
@@ -979,6 +1019,7 @@ static void menu_draw_gif(void)
             return;
         }
         get_tick_count(&now);
+        /* 从解码完成时刻安排下一帧，慢速存储只降低播放速度，不连续追赶积压帧。 */
         gif_due_ms = (uint32_t)now + file_gif_delay_ms();
         gif_result = result;
         if(result != FILE_IMAGE_OK) menu_image_error(result);
@@ -993,6 +1034,7 @@ static void menu_draw_gif(void)
                       file_view_status, "", 0U, 2U);
 }
 
+/* 统一绘制文本、静态图片和动画预览；静态图片只在首次进入或手动重试时读取。 */
 static void menu_draw_file_viewer(void)
 {
     const file_text_page_t *text;
@@ -1068,6 +1110,7 @@ static uint8_t menu_get_key(MenuKey *key)
     return 1;
 }
 
+/* 只更新 RTC 实时快照和 GPS 可用性，保留浏览月份及用户正在编辑的日期草稿。 */
 static void menu_calendar_refresh(void)
 {
     memset(&calendar_state.now,0,sizeof(calendar_state.now));
@@ -1077,6 +1120,7 @@ static void menu_calendar_refresh(void)
     calendar_state.gps_available=gps_time_is_fresh();
 }
 
+/* 进入日历时用 RTC 初始化浏览与编辑日期；读不到 RTC 时以 2000-01-01 作为可编辑起点。 */
 static void menu_calendar_load(void)
 {
     memset(&calendar_state,0,sizeof(calendar_state));
@@ -1096,6 +1140,7 @@ static void menu_draw_calendar(void)
     calendar_page(&calendar_state);
 }
 
+/* 日历分为浏览、操作菜单和时间编辑三种状态；手动时间只在最后的保存项写入 RTC。 */
 static void menu_handle_calendar_key(MenuKey key)
 {
     RtcCalendar date;
@@ -1132,6 +1177,7 @@ static void menu_handle_calendar_key(MenuKey key)
             } else {
                 memset(&date,0,sizeof(date));
                 year=beiJingTime.year+1900;
+                /* GPS 校时同时检查接收时效和日期范围，避免把陈旧或无效时间写入 RTC。 */
                 if(gps_time_is_fresh() && year>=2000 && year<=2099 &&
                    beiJingTime.mon>=1 && beiJingTime.mon<=12 && beiJingTime.day>=1 && beiJingTime.day<=31 &&
                    beiJingTime.hour>=0 && beiJingTime.hour<24 && beiJingTime.min>=0 && beiJingTime.min<60 &&
@@ -1179,6 +1225,7 @@ static void menu_system_load(void)
     strcpy(system_status, "\xc1\xc1\xb6\xc8\xbc\xb4\xca\xb1\xd4\xa4\xc0\xc0\xa3\xac\xb1\xa3\xb4\xe6\xba\xf3\xbf\xaa\xbb\xfa\xc9\xfa\xd0\xa7");
 }
 
+/* 亮度修改立即预览，BACK 编辑时撤销本项、离页时恢复已保存亮度；声音草稿在保存后生效。 */
 static void menu_handle_system_key(MenuKey key)
 {
     uint8_t old_brightness, old_sound;
@@ -1235,6 +1282,7 @@ static void menu_handle_system_key(MenuKey key)
     page_dirty = 1U;
 }
 
+/* 将系统设置草稿生成五行视图，未保存状态通过草稿与运行配置比较得出。 */
 static void menu_draw_system(void)
 {
     GuiParamRow rows[5];
@@ -1251,6 +1299,7 @@ static void menu_draw_system(void)
         system_brightness != param.screenBrightness || system_sound != param.keySound, system_status);
 }
 
+/* 每个分类分别记住上次选中项，从首页重新进入时恢复原位置。 */
 static void menu_handle_home_key(MenuKey key)
 {
     if(key == MENU_KEY_LEFT)
@@ -1265,6 +1314,7 @@ static void menu_handle_home_key(MenuKey key)
     page_dirty = 1U;
 }
 
+/* 分类内循环导航；进入功能前初始化其状态，独占式诊断返回后重新接管按键和页面。 */
 static void menu_handle_category_key(MenuKey key)
 {
     uint8_t first = menu_group_first(selected_group);
@@ -1330,6 +1380,7 @@ static void menu_handle_category_key(MenuKey key)
     }
 }
 
+/* 先把按键交给具有独立状态机的页面，其余只读页面统一用 BACK 返回所属分类。 */
 static void menu_handle_page_key(MenuKey key)
 {
     if(current_page == MENU_PAGE_CATEGORY) {
@@ -1386,6 +1437,7 @@ static void menu_handle_page_key(MenuKey key)
     }
 }
 
+/* 输出视图读取控制任务的完整快照，原始视图直接显示 ADC；两种视图使用各自的绘制缓存。 */
 static void menu_draw_monitor(void)
 {
     ControlLinkSnapshot snapshot;
@@ -1395,6 +1447,7 @@ static void menu_draw_monitor(void)
     } else channel_monitor_page();
 }
 
+/* 切换页面时使静态布局和绘制缓存重新初始化，同页操作沿用已有画面做局部更新。 */
 static void menu_draw_current_page(void)
 {
     if(page_changed)
@@ -1496,6 +1549,7 @@ static void menu_draw_current_page(void)
     }
 }
 
+/* 周期刷新只访问含实时数据的页面，设置页和文件页保持到用户操作或换帧请求才更新。 */
 static void menu_refresh_dynamic_page(void)
 {
     if(current_page == MENU_PAGE_HOME)
@@ -1531,6 +1585,7 @@ static void menu_refresh_dynamic_page(void)
     }
 }
 
+/* 建立首页、分类选择和首次重绘状态；调用前 LCD 应已完成初始化。 */
 void menu_init(void)
 {
     repeat_pending = 0U;
@@ -1556,6 +1611,7 @@ void menu_post_key(MenuKey key)
 {
     uint8_t next_index = (uint8_t)((event_write_index + 1U) % MENU_EVENT_QUEUE_SIZE);
 
+    /* 环形队列预留一个空位区分空与满；满时丢弃新事件，避免覆盖尚未处理的按键。 */
     if(next_index == event_read_index)
     {
         return;
@@ -1566,6 +1622,7 @@ void menu_post_key(MenuKey key)
     event_write_index = next_index;
 }
 
+/* 定时入口只置刷新标志：通道监视和机器人控制页每 20 ms 更新，其他动态页每 50 ms 更新。 */
 void menu_tick_10ms(void)
 {
     if(++refresh_tick_count >=
@@ -1597,6 +1654,7 @@ void menu_post_repeat(MenuKey key)
     repeat_pending = 1U;
 }
 
+/* 压缩决定方向键含义的页面、编辑模式和字段位置，用于检测连发是否跨越了操作上下文。 */
 static uint32_t menu_key_context(void)
 {
     return (uint32_t)current_page | ((uint32_t)param_editing << 8U) |
@@ -1604,6 +1662,7 @@ static uint32_t menu_key_context(void)
         ((uint32_t)calendar_state.field << 12U) | ((uint32_t)system_editing << 16U);
 }
 
+/* 集中路由按键；机器人控制页上的菜单操作先撤销运动使能，再处理导航。 */
 static void menu_dispatch_key(MenuKey key)
 {
     uint32_t context = menu_key_context();
@@ -1612,17 +1671,20 @@ static void menu_dispatch_key(MenuKey key)
         if(current_page == MENU_PAGE_ROBOT_CONTROL) control_link_inhibit();
         menu_handle_page_key(key);
     }
+    /* 页面或编辑字段变化后取消旧连发，防止一次长按继续操作新页面或下一字段。 */
     if(menu_key_context() != context) {
         repeat_pending = 0U;
         user_BUTTON_cancel_repeat();
     }
 }
 
+/* 主循环入口：依次推进输入、动画和重绘；所有常规页面绘制在此统一结束并提交。 */
 void menu_process(void)
 {
     MenuKey key;
 
     menu_robot_telemetry_service();
+    /* 优先消费实体按键，再检查仍被按住的连发键，避免积压的连发拖延返回操作。 */
     if(event_read_index != event_write_index) repeat_pending = 0U;
     while(menu_get_key(&key)) menu_dispatch_key(key);
     if(repeat_pending) {
@@ -1636,6 +1698,7 @@ void menu_process(void)
     }
     menu_gif_tick();
 
+    /* 显式页面变更优先于周期刷新；绘制内容和顶栏时钟后，一次提交完整更新。 */
     if(page_dirty)
     {
         page_dirty = 0;
@@ -1655,6 +1718,7 @@ void menu_process(void)
         LCD_EndPage();
     }
 
+    /* 静态页面也需要走独立的时钟更新路径，避免没有页面变更时顶栏停止走时。 */
     if(clock_refresh_due != 0U)
     {
         clock_refresh_due = 0U;

@@ -1,3 +1,5 @@
+/* 流式阅读链路：字节缓存 -> 编码识别与码点解码 -> LCD 字符转换 -> 固定行列分页。
+ * 当前页与待提交页分离，翻页只保存定位书签，不把全文或所有页面常驻内存。 */
 #include "text_reader.h"
 #include "ff.h"
 #include <string.h>
@@ -7,11 +9,13 @@
 #define TEXT_HISTORY 64u
 #define TEXT_EOF 0xffffffffu
 
+/* 分页位置除文件偏移外还保存未输出的制表符空格，避免跨页时丢失缩进。 */
 typedef struct {
     uint32_t offset;
     uint8_t spaces;
 } text_position_t;
 
+/* 环形书签槽同时记录页号，避免取模覆盖后把旧槽误认成目标页的位置。 */
 typedef struct {
     uint32_t number;
     text_position_t position;
@@ -23,6 +27,7 @@ static file_text_page_t text_page;
 static file_text_page_t text_pending;
 static uint8_t text_buffer[TEXT_READ_BYTES];
 static text_bookmark_t text_history[TEXT_HISTORY];
+/* 缓存范围描述文件中的实际字节；逻辑游标可以在该范围内回退而无需重新读卡。 */
 static uint32_t text_buffer_offset;
 static uint32_t text_buffer_length;
 static uint32_t text_size;
@@ -41,6 +46,7 @@ static void *text_service_context;
 typedef char text_memory_budget[(sizeof(text_file) + sizeof(text_page) +
     sizeof(text_pending) + sizeof(text_buffer) + sizeof(text_history) + 128u <= 8192u) ? 1 : -1];
 
+/* 已有错误时立即停下；否则调用后台服务，并将主动退出转换为取消状态。 */
 static uint8_t text_poll(void)
 {
     if (text_status != FILE_TEXT_OK)
@@ -52,6 +58,7 @@ static uint8_t text_poll(void)
     return 1;
 }
 
+/* 每次独立阅读操作重新建立错误状态，使取消或上次翻页失败后仍可再次尝试。 */
 static void text_begin(void)
 {
     text_status = FILE_TEXT_OK;
@@ -60,6 +67,7 @@ static void text_begin(void)
     (void)text_poll();
 }
 
+/* 只更新当前页的错误信息，保留上一次成功提交的正文、页号及翻页位置。 */
 static file_text_result_t text_failure(void)
 {
     text_page.error = text_status;
@@ -67,6 +75,8 @@ static file_text_result_t text_failure(void)
     return text_status;
 }
 
+/* 返回逻辑游标处的下一字节，缓存未命中时按需定位并补读。
+ * TEXT_EOF 同时表示正常文件尾和读取失败，调用方需结合 text_status 区分。 */
 static uint32_t text_byte(void)
 {
     UINT count;
@@ -146,6 +156,7 @@ static uint32_t text_utf8(uint8_t *valid)
     return value;
 }
 
+/* 按已选字节序读取一个 UTF-16 码元；奇数字节尾部以问号表示残缺码元。 */
 static uint32_t text_utf16_unit(void)
 {
     uint32_t first = text_byte();
@@ -159,12 +170,15 @@ static uint32_t text_utf16_unit(void)
         first | (second << 8) : (first << 8) | second;
 }
 
+/* 将当前编码统一解码为 Unicode 码点，GBK 借用 FatFs 码表，UTF-16 合并代理对。
+ * 非法续字节或无效代理对不会吞掉后续可独立解码的字符。 */
 static uint32_t text_codepoint(void)
 {
     uint32_t value;
     uint32_t second;
     uint32_t after_first;
     uint8_t valid;
+    /* 命中读取缓存时同样定期服务后台，长时间解码不会阻塞输入和控制通信。 */
     if (++text_service_ticks == 128u) {
         text_service_ticks = 0;
         if (!text_poll())
@@ -212,6 +226,7 @@ static uint32_t text_nonzero_codepoint(void)
     return value;
 }
 
+/* 将 CR、CRLF 统一为换行；预读到普通字符时回退游标，留给下次处理。 */
 static uint32_t text_character(void)
 {
     uint32_t value = text_nonzero_codepoint();
@@ -291,6 +306,8 @@ static uint8_t text_detect_utf16(uint32_t limit)
     return 0;
 }
 
+/* 优先识别 BOM；无 BOM 时在有界样本中依次检查 UTF-16 特征和 UTF-8 合法性，
+ * 不满足 UTF-8 的样本回退为 GBK。检测只选择编码，实际分页从 BOM 后重新开始。 */
 static file_text_result_t text_detect(void)
 {
     uint32_t a;
@@ -330,6 +347,8 @@ static file_text_result_t text_detect(void)
     return text_status;
 }
 
+/* 按显示列数分页：中文占两列、制表符补齐到四列边界；
+ * 行尾放不下的完整字符回退到原字节位置，下一行重新解码。 */
 static file_text_result_t text_render(text_position_t start, uint32_t page_number,
                                      text_position_t *end)
 {
@@ -406,12 +425,14 @@ finished:
     return text_status;
 }
 
+/* 页号取模覆盖旧书签，保持定位内存固定；缓存外的旧页由向前重扫恢复。 */
 static void text_remember(uint32_t number, text_position_t position)
 {
     text_history[number % TEXT_HISTORY].number = number;
     text_history[number % TEXT_HISTORY].position = position;
 }
 
+/* 仅在整页渲染成功后替换当前页及定位信息，取消或读盘失败不会提交残页。 */
 static void text_commit(text_position_t start, text_position_t end)
 {
     text_page = text_pending;
@@ -427,6 +448,7 @@ void file_text_set_service(file_text_service_t service, void *context)
     text_service_context = context;
 }
 
+/* 释放当前文件并清空页面、缓存和书签；重复关闭也可用于重置阅读会话。 */
 void file_text_close(void)
 {
     if (text_opened)
@@ -438,6 +460,8 @@ void file_text_close(void)
     text_page.error = FILE_TEXT_NOT_OPEN;
 }
 
+/* 先结束旧会话，再打开文件、探测编码并渲染首页。
+ * 只有首页完整生成后才建立可翻页状态；任一步失败都会关闭新文件。 */
 file_text_result_t file_text_open(const char *path)
 {
     FRESULT result;
@@ -472,6 +496,8 @@ file_text_result_t file_text_open(const char *path)
     return text_failure();
 }
 
+/* 从上次提交的页尾续读，包括尚未展开完的制表符空格。
+ * 无下一页时返回 FILE_TEXT_END；失败时仍可基于原页面再次发起翻页。 */
 file_text_result_t file_text_next(void)
 {
     text_position_t start = text_next_position;
@@ -489,6 +515,8 @@ file_text_result_t file_text_next(void)
     return text_failure();
 }
 
+/* 查找不晚于目标页的最近书签，再逐页推进到上一页。
+ * 被环形缓存淘汰的页从可用书签或正文起点重建，因此回翻不依赖整页缓存。 */
 file_text_result_t file_text_previous(void)
 {
     text_position_t start;
@@ -532,6 +560,7 @@ file_text_result_t file_text_previous(void)
     return text_failure();
 }
 
+/* 使用指定编码重新试读首页；失败则恢复原编码，成功才替换页面和书签。 */
 file_text_result_t file_text_set_encoding(file_text_encoding_t encoding)
 {
     file_text_encoding_t previous = text_encoding;
@@ -543,6 +572,7 @@ file_text_result_t file_text_set_encoding(file_text_encoding_t encoding)
         return FILE_TEXT_INVALID;
     start.offset = text_bom_bytes;
     start.spaces = 0;
+    /* 编码会改变字符边界和分页位置，先试读首页，成功后再清除旧编码的书签。 */
     text_encoding = encoding;
     text_begin();
     if (text_status == FILE_TEXT_OK && text_render(start, 1, &end) == FILE_TEXT_OK) {

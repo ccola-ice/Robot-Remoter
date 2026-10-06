@@ -1,3 +1,5 @@
+/* GIF 会话跨多次调用保留文件、字典与合成画布；一次 next 最多提交一帧。
+ * 显示时序由调用者依据 delay_ms 调度，本模块只负责解析、缩放及帧间合成。 */
 #include "image_gif.h"
 #include "ff.h"
 #include "bsp_fsmc_lcd.h"
@@ -22,12 +24,14 @@ typedef struct {
     uint8_t bytes[GIF_IO_BYTES];
 } GifWorkspace;
 
+/* 一帧的逻辑屏幕矩形和图形控制信息；frame 属于待绘帧，last 用于处置已绘帧。 */
 typedef struct {
     uint16_t left, top, width, height;
     uint16_t delay;
     uint8_t disposal, transparent, transparent_index;
 } GifFrame;
 
+/* 单实例播放状态：源坐标用于文件解码，目标坐标用于缩小后的 RGB565 画布。 */
 static struct {
     GifWorkspace *work;
     uint16_t *canvas, *previous, *palette;
@@ -35,8 +39,10 @@ static struct {
     void *context;
     FileImageResult result;
     GifFrame frame, last;
+    /* position 是缓存内消费后的逻辑位置，image_start 指向全局颜色表后的重播起点。 */
     uint32_t file_size, position, image_start, canvas_pixels;
     uint32_t loops_done, frames_in_pass, delay_ms;
+    /* LZW 位缓存可跨数据子块；已解码像素数必须与当前帧声明的面积一致。 */
     uint32_t bits, decoded, total_pixels;
     uint16_t x, y, width, height, source_width, source_height;
     uint16_t io_index, io_count, palette_count, global_count;
@@ -60,6 +66,7 @@ static uint8_t gif_service(void)
     return 1U;
 }
 
+/* 仅关闭已打开的文件；关闭失败不能覆盖此前的解析错误或主动取消原因。 */
 static void gif_close_file(void)
 {
     if(gif.opened) {
@@ -69,6 +76,7 @@ static void gif_close_file(void)
     }
 }
 
+/* 循环重播时重新定位，并清空读取缓存，避免继续消费上一轮尾部的字节。 */
 static uint8_t gif_seek(uint32_t position)
 {
     if(position > gif.file_size) return gif_fail(FILE_IMAGE_CORRUPT);
@@ -80,6 +88,7 @@ static uint8_t gif_seek(uint32_t position)
     return 1U;
 }
 
+/* 从扇区缓存顺序取一字节并推进逻辑位置；读取越过已知文件尾表示内容损坏。 */
 static uint8_t gif_byte(uint8_t *value)
 {
     UINT read_count = 0U, requested;
@@ -111,6 +120,7 @@ static uint16_t gif_le16(const uint8_t *p)
     return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
 }
 
+/* 读取指定数量的 RGB 三字节颜色，预先转成 LCD 格式供后续颜色索引直接查表。 */
 static uint8_t gif_palette(uint16_t *palette, uint16_t count)
 {
     uint16_t i;
@@ -123,6 +133,7 @@ static uint8_t gif_palette(uint16_t *palette, uint16_t count)
     return 1U;
 }
 
+/* 跳过按“长度 + 内容”组织的子块直到零长度结束符，供扩展和图像数据收尾复用。 */
 static uint8_t gif_extension_blocks(void)
 {
     uint8_t count, ignored;
@@ -134,12 +145,15 @@ static uint8_t gif_extension_blocks(void)
     }
 }
 
+/* 图形控制扩展仅作用于下一帧；提交后恢复无透明/无处置和默认 100 ms 延时。 */
 static void gif_control_reset(void)
 {
     memset(&gif.frame, 0, sizeof(gif.frame));
     gif.frame.delay = 10U;
 }
 
+/* 解析图形控制与循环扩展，其他可跳过的扩展按子块消费。
+ * 纯文本扩展和未支持的处置方式无法正确合成，因此明确报告不支持。 */
 static uint8_t gif_extension(void)
 {
     uint8_t label, size, data[11], end;
@@ -192,6 +206,7 @@ static uint8_t gif_data_byte(uint8_t *value)
     return 1U;
 }
 
+/* 按 GIF 的低位优先顺序抽取当前位宽的 LZW 码，剩余位留给下一次调用。 */
 static uint8_t gif_code(uint8_t width, uint16_t *code)
 {
     uint8_t byte;
@@ -212,6 +227,7 @@ static uint16_t gif_scale_ceil(uint16_t source, uint16_t target, uint16_t full)
     return (uint16_t)(((uint32_t)source * target + full - 1U) / full);
 }
 
+/* 从当前源行找到可能采样到它的目标行；不被采样的源行使用画布高度作为哨兵。 */
 static void gif_row_start(void)
 {
     uint16_t source_y = gif.frame.top + gif.pixel_y;
@@ -222,6 +238,8 @@ static void gif_row_start(void)
     gif.output_x = gif_scale_ceil(gif.frame.left, gif.width, gif.source_width);
 }
 
+/* 所有源像素均参与解码和校验，只有命中缩小后采样点的像素才写入画布；
+ * 透明索引保留已有颜色，隔行图像按四轮行序恢复真实坐标。 */
 static uint8_t gif_pixel(uint8_t value)
 {
     static const uint8_t starts[4] = {0U, 4U, 2U, 1U};
@@ -250,6 +268,8 @@ static uint8_t gif_pixel(uint8_t value)
     return 1U;
 }
 
+/* 解压一帧的颜色索引流：清除码重置字典，普通码扩展前缀链，字典增长带动位宽。
+ * 输出直接交给 gif_pixel 做坐标恢复和采样，结束码必须与声明像素数同时匹配。 */
 static uint8_t gif_lzw(void)
 {
     uint8_t minimum, width, first = 0U, ignored;
@@ -293,6 +313,7 @@ static uint8_t gif_lzw(void)
         }
         input = code;
         count = 0U;
+        /* LZW 允许引用正在创建的新词条，其内容为上一词条再追加其首字符。 */
         if(code == next) {
             if(next >= GIF_CODES) return gif_fail(FILE_IMAGE_CORRUPT);
             gif.work->stack[count++] = first;
@@ -309,6 +330,7 @@ static uint8_t gif_lzw(void)
         first = (uint8_t)code;
         if(count >= GIF_CODES) return gif_fail(FILE_IMAGE_CORRUPT);
         gif.work->stack[count++] = first;
+        /* 前缀链按尾到头展开，逆序弹栈后才是实际像素顺序。 */
         while(count) if(!gif_pixel(gif.work->stack[--count])) return 0U;
         if(next < GIF_CODES) {
             gif.work->prefix[next] = old;
@@ -326,6 +348,7 @@ static void gif_fill(uint16_t color)
     for(i = 0U; i < gif.canvas_pixels; ++i) gif.canvas[i] = color;
 }
 
+/* 新帧合成前处理上一帧：方式 3 恢复绘制前快照，方式 2 仅清除其覆盖区域。 */
 static void gif_dispose(void)
 {
     uint16_t x, y, left, top, right, bottom, color;
@@ -342,6 +365,8 @@ static void gif_dispose(void)
     }
 }
 
+/* 处理图像描述符及局部调色板，先处置上一帧，再保存快照并解压当前帧。
+ * 全帧成功后才写入 LCD，记录新帧的处置信息和延时，供下一次推进使用。 */
 static uint8_t gif_image(void)
 {
     uint8_t data[9];
@@ -368,6 +393,7 @@ static uint8_t gif_image(void)
         return gif_fail(FILE_IMAGE_CORRUPT);
     if(!gif.has_last) gif_fill(gif.frame.transparent ? gif.screen_background : gif.background);
     else gif_dispose();
+    /* 快照必须在当前帧绘制前保存，供下一帧开始时执行恢复操作。 */
     if(gif.frame.disposal == 3U)
         memcpy(gif.previous, gif.canvas, gif.canvas_pixels * sizeof(uint16_t));
     if(!gif_lzw() || !gif_service()) return 0U;
@@ -381,6 +407,8 @@ static uint8_t gif_image(void)
     return 1U;
 }
 
+/* 消费扩展直到解出下一帧或遇到动画结束；需要循环时回到 image_start 继续。
+ * 正常播完也返回 FILE_IMAGE_OK，调用者通过 finished 区分“新帧”与“已结束”。 */
 FileImageResult file_gif_next(void)
 {
     uint8_t marker;
@@ -399,6 +427,7 @@ FileImageResult file_gif_next(void)
             gif_fail(FILE_IMAGE_CORRUPT);
             break;
         }
+        /* 无循环扩展只播一遍；扩展中的零表示无限循环，非零表示额外重复次数。 */
         if(!gif.loop_known || (gif.loop_count && gif.loops_done >= gif.loop_count)) break;
         ++gif.loops_done;
         gif.frames_in_pass = 0U;
@@ -411,6 +440,8 @@ FileImageResult file_gif_next(void)
     return gif.result;
 }
 
+/* 结束旧会话，对齐并划分外部工作区，校验逻辑屏幕和全局调色板后解出首帧。
+ * 工作区容量按缩小后的双画布计算；打开失败会关闭文件并标记播放结束。 */
 FileImageResult file_gif_open(const char *path, uint16_t x, uint16_t y,
                               uint16_t w, uint16_t h, uint16_t background,
                               FileImageInfo *info, void *scratch,
@@ -464,6 +495,7 @@ FileImageResult file_gif_open(const char *path, uint16_t x, uint16_t y,
                 if(dw == 0U) dw = 1U;
                 if(dh == 0U) dh = 1U;
                 gif.canvas_pixels = dw * dh;
+                /* 外部工作区依次容纳解码状态、RGB565 当前画布和恢复快照。 */
                 needed = sizeof(GifWorkspace) + gif.canvas_pixels * 4U;
                 if(capacity - padding < needed) gif_fail(FILE_IMAGE_NO_MEMORY);
                 else {
@@ -492,6 +524,7 @@ FileImageResult file_gif_open(const char *path, uint16_t x, uint16_t y,
     return gif.result;
 }
 
+/* 停止播放、关闭文件并解除工作区引用；外部内存仍由调用方管理，可随后复用。 */
 void file_gif_close(void)
 {
     gif_close_file();

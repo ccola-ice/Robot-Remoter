@@ -18,11 +18,13 @@
     X(DIAGNOSTICS, "\323\262\274\376\262\342\312\324", "Operator tests / hardware diagnostics") \
     X(EEPROM, "EEPROM \262\342\312\324", "AT24C08 diagnostic window")
 
+/* 同一入口表展开生成编号、页面目标和标签；新增入口时须同步维护下方分类边界。 */
 #define MENU_ENTRY_ENUM(page, label, hint) MENU_ENTRY_##page,
 typedef enum { MENU_ENTRY_LIST(MENU_ENTRY_ENUM) MENU_ENTRY_COUNT } MenuEntry;
 #undef MENU_ENTRY_ENUM
 #define MENU_GROUP_COUNT 3U
 
+/* 分类中的入口必须连续排列；以下转换用于全局入口号与分类内位置之间换算。 */
 static __inline uint8_t menu_group_first(uint8_t group)
 {
     return group == 0U ? 0U : group == 1U ? 3U : 7U;

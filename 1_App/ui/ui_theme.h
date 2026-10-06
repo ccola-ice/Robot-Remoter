@@ -74,6 +74,7 @@ static __inline uint8_t ui_chinese_bit(const uint8_t *bitmap, uint16_t x, uint16
     return (bitmap[y * 4U + x / 8U] & (uint8_t)(0x80U >> (x & 7U))) != 0U;
 }
 
+/* 优先使用显示驱动提供的原生字形，缺失时再读取外置 32×32 字模并缩放、加粗。 */
 static void ui_chinese_glyph_styled(uint16_t x, uint16_t y, uint16_t size,
     uint16_t code, uint16_t fg, uint16_t bg, uint8_t bold)
 {
@@ -120,6 +121,8 @@ static __inline void ui_chinese_glyph(uint16_t x, uint16_t y, uint16_t size,
     ui_chinese_glyph_styled(x,y,size,code,fg,bg,0U);
 }
 
+/* columns 按 ASCII 半角字格计数，短文本补空格覆盖旧内容，汉字占两个字格。
+ * large 取 0/1/2 分别对应 8×16、16×32、24×48，取 3 使用 16×32 加粗。 */
 static __inline void ui_text(uint16_t x, uint16_t y, uint8_t columns,
     const char *text, uint16_t fg, uint16_t bg, uint8_t large)
 {
@@ -184,6 +187,7 @@ static __inline void ui_text(uint16_t x, uint16_t y, uint8_t columns,
     }
 }
 
+/* 圆角半径限制在宽高的一半内；中间矩形与两端扫描线共同构成实心圆角区域。 */
 static __inline void ui_round_rect(uint16_t x, uint16_t y, uint16_t w,
     uint16_t h, uint16_t radius, uint16_t color)
 {
@@ -208,6 +212,7 @@ static __inline void ui_round_rect(uint16_t x, uint16_t y, uint16_t w,
     }
 }
 
+/* 返回圆角矩形某行应从左右缩进的像素数，上下对称计算，供边框内外轮廓共用。 */
 static __inline uint16_t ui_round_inset(uint16_t row, uint16_t h, uint16_t radius)
 {
     uint16_t edge_row = row < h - row - 1U ? row : h - row - 1U;
@@ -237,6 +242,7 @@ static __inline void ui_round_outline(uint16_t x, uint16_t y, uint16_t w,
     }
     inner_radius = 0U;
     if(radius > thickness) inner_radius = (uint16_t)(radius-thickness);
+    /* 每行取外轮廓与内轮廓之差，只填左右边带；顶部和底部则直接绘制完整边框宽度。 */
     for(row=0U;row<h;row++) {
         outer = ui_round_inset(row,h,radius);
         if(row < thickness || row >= h-thickness) {
@@ -251,6 +257,7 @@ static __inline void ui_round_outline(uint16_t x, uint16_t y, uint16_t w,
     }
 }
 
+/* 首次绘页时建立公共底色、顶栏和标题；顶栏右侧时钟由独立叠加函数补上。 */
 static __inline void ui_shell(const char *title, const char *subtitle, const char *section)
 {
     ui_fill(0U,0U,800U,480U,UI_BG);
@@ -261,6 +268,7 @@ static __inline void ui_shell(const char *title, const char *subtitle, const cha
     ui_text(464U,60U,39U,subtitle,UI_MUTED,UI_BG,0U);
 }
 
+/* 页脚固定左右两个提示区，先恢复整条背景，避免切换操作提示时留下旧文字。 */
 static __inline void ui_footer(const char *left, const char *right)
 {
     ui_fill(0U,448U,800U,32U,UI_SURFACE);
@@ -270,6 +278,7 @@ static __inline void ui_footer(const char *left, const char *right)
 }
 
 /* 以中线为零点的双向条，实时更新时只绘制发生变化的区段。 */
+/* value 使用 ±1000 量程；previous 保存的是上次像素位置，first 非零时重建轨道。 */
 static __inline void ui_bipolar_bar(uint16_t x, uint16_t y, uint16_t w,
     uint16_t h, int16_t value, int16_t *previous, uint8_t first)
 {
@@ -289,6 +298,7 @@ static __inline void ui_bipolar_bar(uint16_t x, uint16_t y, uint16_t w,
             if(pixel < old) ui_fill((uint16_t)(x+middle+pixel),y,(uint16_t)(old-pixel),h,UI_GREEN);
             else if(pixel > old) ui_fill((uint16_t)(x+middle+old),y,(uint16_t)(pixel-old),h,UI_TRACK);
         } else {
+            /* 穿过中线时旧段与新段位于两侧，须清除旧侧后再绘制新侧。 */
             if(old > 0) ui_fill(x+middle,y,(uint16_t)old,h,UI_TRACK);
             else ui_fill((uint16_t)(x+middle+old),y,(uint16_t)-old,h,UI_TRACK);
             if(pixel > 0) ui_fill(x+middle,y,(uint16_t)pixel,h,UI_ACCENT);

@@ -7,12 +7,15 @@
 #include <string.h>
 #include <math.h>
 
+/* 对外保留最近解析出的信息；坐标为十进制度，使用前须检查对应有效期。
+ * new_parse 只表示本轮解析出了报文，不表示报文已提供有效定位。 */
 double deg_lat, deg_lon;
 nmeaINFO info;
 nmeaPARSER parser;
 uint8_t new_parse;
 nmeaTIME beiJingTime;
 
+/* 定位与日期时间独立过期；有效期按 DMA 接收时刻计算，避免积压数据被当作新数据。 */
 static uint8_t parser_ready, position_valid, time_valid, rtc_time_set;
 static uint32_t position_ms, time_ms;
 static nmeaTIME last_rtc_time;
@@ -24,6 +27,7 @@ static uint32_t gps_now(void)
     return (uint32_t)now;
 }
 
+/* 使用无符号差值计算时间间隔，使毫秒计数在正常短周期查询中跨回绕仍可比较。 */
 uint8_t gps_data_is_fresh(void)
 {
     return position_valid && (uint32_t)(gps_now() - position_ms) < GPS_DATA_MAX_AGE_MS;
@@ -34,6 +38,7 @@ uint8_t gps_time_is_fresh(void)
     return time_valid && (uint32_t)(gps_now() - time_ms) < GPS_DATA_MAX_AGE_MS;
 }
 
+/* 校验解析库的日历字段：year 从 1900 起算，mon 为 1..12；当前支持 2000..2099。 */
 static int gps_date_valid(const nmeaTIME *utc)
 {
     static const uint8_t days[] = {31,28,31,30,31,30,31,31,30,31,30,31};
@@ -56,11 +61,13 @@ static int gps_position_valid(double lat, char ns, double lon, char ew)
         fmod(lat, 100.0) < 60.0 && fmod(lon, 100.0) < 60.0;
 }
 
+/* 兼容省略模式字段的旧报文，仅接纳自主、差分、浮点或固定解模式。 */
 static int gps_mode_valid(char mode)
 {
     return mode == 0 || mode == 'A' || mode == 'D' || mode == 'F' || mode == 'R';
 }
 
+/* 只有合法且未过期的 UTC 才能刷新本地时间；RTC 同步失败不阻止 GPS 时间缓存更新。 */
 static void gps_accept_time(const nmeaTIME *utc, uint32_t received_ms)
 {
     nmeaTIME local;
@@ -72,6 +79,7 @@ static void gps_accept_time(const nmeaTIME *utc, uint32_t received_ms)
     beiJingTime = local;
     time_valid = 1;
     time_ms = received_ms;
+    /* 转成北京时间后按秒去重；同步失败时不更新记录，后续有效语句仍可重试。 */
     if(!rtc_time_set || local.year != last_rtc_time.year || local.mon != last_rtc_time.mon ||
        local.day != last_rtc_time.day || local.hour != last_rtc_time.hour ||
        local.min != last_rtc_time.min || local.sec != last_rtc_time.sec)
@@ -85,6 +93,7 @@ static void gps_accept_time(const nmeaTIME *utc, uint32_t received_ms)
     }
 }
 
+/* 有效定位才更新坐标和时间戳；失效时保留数值，但清除信号/定位等级供上层识别。 */
 static void gps_accept_position(int valid, uint32_t received_ms)
 {
     position_valid = (uint8_t)(valid != 0);
@@ -101,6 +110,8 @@ static void gps_accept_position(int valid, uint32_t received_ms)
     }
 }
 
+/* 按语句能力更新状态：RMC 校验定位和日期时间，GGA/GLL 更新定位有效性，
+ * ZDA 可独立校时；GSA 报告无有效定位时立即使旧位置失效。 */
 static void gps_process_packet(int type, void *packet, uint32_t received_ms)
 {
     int valid;
@@ -178,6 +189,7 @@ static void gps_process_packet(int type, void *packet, uint32_t received_ms)
     }
 }
 
+/* 重复初始化先释放旧解析器持有的资源，再重置缓存；初始化失败由 poll 返回 -1 暴露。 */
 void gps_service_init(void)
 {
     if(parser_ready)
@@ -193,6 +205,8 @@ void gps_service_init(void)
     parser_ready = (uint8_t)nmea_parser_init(&parser);
 }
 
+/* 将底层分块字节流交给持续存在的解析器，允许一条 NMEA 语句跨多个 DMA 块。
+ * 每次调用排空当前接收队列，再统一检查位置及时间是否已过期。 */
 int gps_service_poll(void)
 {
     uint8_t block[HALF_GPS_RBUFF_SIZE];
@@ -202,8 +216,10 @@ int gps_service_poll(void)
     if(!parser_ready)
         return -1;
     new_parse = 0;
+    /* DMA 中断负责缓存接收块；前台顺序解析，完整报文出队后由此处释放。 */
     while((length = GPS_DMA_ReadBlock(block, &received_ms)) != 0)
     {
+        /* 丢块或积压超时会打断字节流，清除残帧以免与后续数据拼成错误报文。 */
         if(length < 0 || (uint32_t)(gps_now() - received_ms) >= GPS_DATA_MAX_AGE_MS)
         {
             nmea_parser_buff_clear(&parser);
@@ -211,6 +227,7 @@ int gps_service_poll(void)
             position_valid = time_valid = 0;
             continue;
         }
+        /* 解析器入队失败后丢弃残留状态；下一块重新同步语句边界，避免继续沿用旧有效标志。 */
         if(nmea_parser_push(&parser, (const char *)block, length) < 0)
         {
             nmea_parser_buff_clear(&parser);
@@ -225,6 +242,7 @@ int gps_service_poll(void)
             ++count;
         }
     }
+    /* 即使本轮没有新报文，也要让超时数据失效，避免断开 GPS 后沿用旧状态。 */
     if(!gps_data_is_fresh())
     {
         position_valid = 0;

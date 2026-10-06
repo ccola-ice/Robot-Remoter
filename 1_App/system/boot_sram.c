@@ -4,7 +4,9 @@
 
 /* 仅检查外部 SRAM，逐块备份并恢复原内容，不访问 MCU 固定内存地址。
  * 必须在挂载文件系统及启动其他 SRAM 使用者之前调用。
- * 本自检验证分块读写，不覆盖完整的地址别名或 March 测试。 */
+ * 本自检验证分块读写，不覆盖完整的地址别名或 March 测试。
+ * base 必须按半字对齐，size 须为偶数；每次只备份 256 字节以限制栈占用。
+ * 首个失败块尝试恢复后即结束，返回 0；全部块通过才返回 1。 */
 static uint8_t boot_sram_check_region(volatile uint8_t *base, uint32_t size)
 {
     uint8_t backup[256];
@@ -18,6 +20,7 @@ static uint8_t boot_sram_check_region(volatile uint8_t *base, uint32_t size)
         count = size - offset;
         if(count > sizeof(backup)) count = sizeof(backup);
         failed = 0U;
+        /* 每块先保存原数据，再分别用字节和半字及其反码检查读写通路。 */
         for(i = 0U; i < count; i++) backup[i] = base[offset + i];
         for(i = 0U; i < count; i++)
             base[offset + i] = (uint8_t)(i ^ 0x55U);
@@ -42,6 +45,7 @@ static uint8_t boot_sram_check_region(volatile uint8_t *base, uint32_t size)
             pattern16 = (uint16_t)~((offset / 2U + i) ^ 0xa55aU);
             if(words[i] != pattern16) failed = 1U;
         }
+        /* 即使模式校验失败，也先恢复并核对原内容，再返回失败结果。 */
         for(i = 0U; i < count; i++) base[offset + i] = backup[i];
         for(i = 0U; i < count; i++)
             if(base[offset + i] != backup[i]) failed = 1U;

@@ -25,11 +25,13 @@ const char *boot_state_name(BootState state)
     }
 }
 
+/* BOOT_PENDING 的枚举值为零，整体清零同时完成各项状态和汇总计数的初始化。 */
 void boot_report_reset(BootReport *report)
 {
     memset(report, 0, sizeof(*report));
 }
 
+/* 先检查状态再推进，防止同一检测项被重复执行时重新标为 RUNNING。 */
 uint8_t boot_report_start(BootReport *report, BootItem item)
 {
     if((unsigned)item >= BOOT_ITEM_COUNT ||
@@ -38,6 +40,7 @@ uint8_t boot_report_start(BootReport *report, BootItem item)
     return 1U;
 }
 
+/* 所有终态都经此入口落入报告；拒绝重复提交，保证完成数与分类计数只累加一次。 */
 uint8_t boot_report_record(BootReport *report, BootItem item,
                            BootState state, const char *detail, uint32_t ms)
 {
@@ -66,6 +69,7 @@ uint8_t boot_report_percent(const BootReport *report)
     return (uint8_t)((100UL * report->completed) / BOOT_ITEM_COUNT);
 }
 
+/* 汇总优先报告失败；全部项目结束后，仍有未测试项只能判为部分完成。 */
 BootOutcome boot_report_outcome(const BootReport *report)
 {
     if(report->failed != 0U) return BOOT_FAILED;
@@ -82,11 +86,13 @@ static int boot_hex(uint8_t c)
     return -1;
 }
 
+/* 启动阶段只检查接收链路，直接扫描缓冲区，不依赖运行期 NMEA 解析器的状态。 */
 uint8_t boot_nmea_valid(const uint8_t *data, uint16_t size)
 {
     uint16_t i, j;
     uint8_t checksum;
     int hi, lo;
+    /* 从接收片段中寻找完整语句，同时校验句头、长度、异或校验值与 CRLF 结尾。 */
     for(i = 0U; i + 10U < size; i++) {
         if(data[i] != '$' || data[i + 6U] != ',') continue;
         for(j = 1U; j <= 5U; j++) {

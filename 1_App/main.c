@@ -80,6 +80,7 @@ static unsigned long imu_last_sample_ms;
 static uint8_t imu_dmp_ready;
 float yaw_new;
 
+/* 任务标志由中断置位、主循环按需消费；积压的同类节拍会合并，不逐次补跑。 */
 volatile u8 finish_1hz=0,finish_2hz=0,finish_5hz=0,finish_10hz=0,finish_20hz=0,finish_33hz=0,finish_50hz=0,finish_100hz=0;
 volatile u8 finish_button_10ms=0;
 
@@ -87,7 +88,8 @@ static BootReport boot_report;
 static uint32_t boot_last_cycles, boot_total_ms, boot_cycle_remainder;
 static uint32_t boot_item_started_ms;
 
-/* 应用的 TIM6/GTP 节拍尚未启动时，先使用 DWT 计时。 */
+/* 返回启动阶段累计的毫秒数，在应用节拍尚未启动时使用 DWT 周期计数差值计时。
+ * 保留不足一毫秒的周期余数，避免频繁调用产生累计截断误差。 */
 static uint32_t boot_now_ms(void)
 {
     uint32_t now = DWT->CYCCNT;
@@ -101,6 +103,7 @@ static uint32_t boot_now_ms(void)
     return boot_total_ms;
 }
 
+/* 开始指定自检项：记录起始时间、更新报告，并同步输出串口日志和启动页。 */
 static void boot_start(BootItem item)
 {
     boot_item_started_ms = boot_now_ms();
@@ -110,6 +113,8 @@ static void boot_start(BootItem item)
     gui_boot_update(&boot_report, (uint8_t)item);
 }
 
+/* 记录自检项的结果、说明和耗时，刷新日志与进度；需与 boot_start 配对调用。
+ * 单项耗时从最近一次 boot_start 起算，因此启动检查按顺序串行执行。 */
 static void boot_done(BootItem item, BootState state, const char *detail)
 {
     uint32_t now = boot_now_ms();
@@ -123,12 +128,15 @@ static void boot_done(BootItem item, BootState state, const char *detail)
     gui_boot_update(&boot_report, (uint8_t)item);
 }
 
+/* 将因前置检查失败或需要人工确认而跳过的项目记为未测试，并保留原因。 */
 static void boot_skip(BootItem item, const char *reason)
 {
     boot_start(item);
     boot_done(item, BOOT_NOT_TESTED, reason);
 }
 
+/* 在约 100 ms 内检查指定 DMA 流是否完成新一轮 ADC 采样，并验证 count 个样本。
+ * tc 为完成标志，te/dme/fe 为错误标志；返回 1 表示通过，超时、错误或超量程返回 0。 */
 static uint8_t boot_adc_check(DMA_Stream_TypeDef *stream, uint32_t tc,
                              uint32_t te, uint32_t dme, uint32_t fe,
                              volatile uint16_t *values,
@@ -136,6 +144,7 @@ static uint8_t boot_adc_check(DMA_Stream_TypeDef *stream, uint32_t tc,
 {
     uint16_t wait_ms;
     uint8_t i;
+    /* 清除旧标志后等待一次新的 DMA 完成，避免把缓冲区中的历史值当作采样成功。 */
     DMA_ClearFlag(stream, tc | te | dme | fe);
     for(wait_ms = 0U; wait_ms < 100U; wait_ms++) {
         if(DMA_GetFlagStatus(stream, te) != RESET ||
@@ -150,6 +159,8 @@ static uint8_t boot_adc_check(DMA_Stream_TypeDef *stream, uint32_t tc,
     return 0U;
 }
 
+/* 在约 100 ms 内观察 RTC 亚秒计数是否变化；返回 1 表示时钟在运行，超时返回 0。
+ * 此检查不判断日历时间是否已经校准。 */
 static uint8_t boot_rtc_tick(void)
 {
     uint16_t i;
@@ -167,11 +178,14 @@ static uint8_t boot_rtc_tick(void)
     return 0U;
 }
 
+/* 在约 1.5 秒的观察窗口内，从 GPS 环形接收区寻找校验通过的完整 NMEA 语句。
+ * 返回 1 表示接收通信检查通过，超时返回 0；不要求卫星定位成功。 */
 static uint8_t boot_gps_check(void)
 {
     uint8_t snapshot[GPS_RBUFF_SIZE];
     uint16_t next, i, wait_ms;
     for(wait_ms = 0U; wait_ms < 1500U; wait_ms += 10U) {
+        /* 从 DMA 下一写入位置展开环形缓冲区，便于校验跨缓冲区末尾的完整语句。 */
         next = (GPS_RBUFF_SIZE - DMA_GetCurrDataCounter(GPS_USART_DMA_STREAM))
                % GPS_RBUFF_SIZE;
         for(i = 0U; i < GPS_RBUFF_SIZE; i++)
@@ -182,6 +196,8 @@ static uint8_t boot_gps_check(void)
     return 0U;
 }
 
+/* 在约 200 ms 内确认 TIM2/3/5/6 计数推进，且按键和 10 Hz 任务标志均被中断置位。
+ * 计数与中断活动均满足条件返回 1，否则返回 0。 */
 static uint8_t boot_timers_check(void)
 {
     /* TIM4 用于外部编码器计数，编码器静止不应判为故障。 */
@@ -203,6 +219,8 @@ static uint8_t boot_timers_check(void)
     return 0U;
 }
 
+/* 完成上电初始化，并按依赖顺序执行自检，将各项结果统一写入 boot_report。
+ * 检查失败仍记录后续可检查项，运动控制是否允许启用由 main 根据关键结果决定。 */
 void setup(void)
 {
     uint8_t attempt, ok, code;
@@ -215,10 +233,12 @@ void setup(void)
     RCC_ClocksTypeDef clocks;
     char detail[72];
 
+    /* 先建立延时、中断和调试串口基础，供后续外设初始化、重试和日志输出使用。 */
     SysTick_Init();
     Exti_Init();
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
     Debug_USART_Config();
+    /* 业务定时器尚未启动，启用 DWT 作为自检计时源，并清空本次启动报告。 */
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CYCCNT = 0UL;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
@@ -240,6 +260,7 @@ void setup(void)
     ILI9806G_Init();
     ILI9806G_GramScan(LCD_SCAN_MODE);
     gui_boot_begin();
+    /* 根据寄存器推算时钟频率，并检查 HSE/PLL 就绪状态，确认时钟配置与预期一致。 */
     boot_start(BOOT_CLOCK);
     RCC_GetClocksFreq(&clocks);
     ok = (clocks.SYSCLK_Frequency == SystemCoreClock &&
@@ -250,11 +271,13 @@ void setup(void)
               "RCC HSE/PLL flags + system/bus clock readback");
     boot_skip(BOOT_LCD, "Initialized; visual quality needs operator inspection");
 
+    /* 配置实体按键并注册事件回调，后续由后台服务按 10 ms 节拍推进按键状态机。 */
     user_BUTTON_init();
 
     /* 在 f_mount 和应用使用存储器之前完成存储器测试。 */
     boot_start(BOOT_SRAM);
     ok = boot_sram_check();
+    /* SRAM 检查失败时禁用 LCD 页缓存，并不给图片解码器分配外部工作区。 */
     LCD_PageBuffer_Enable(ok);
     /* 首 750 KiB 保留给 LCD，剩余 274 KiB 用于 PNG/GIF 解码。 */
     file_image_set_workspace(ok ? (void *)(SRAM_BASE_ADDR + 800UL * 480UL * 2UL) : NULL,
@@ -262,6 +285,8 @@ void setup(void)
     boot_done(BOOT_SRAM, ok ? BOOT_PASS : BOOT_FAIL,
               "External 1 MiB, 8/16-bit R/W, each block restored");
 
+    /* Flash 先做只读探测，通过后才测试专用扇区的写入、回读和擦除。
+     * 专用扇区已被占用时拒绝擦除，并将写测试记为失败。 */
     boot_start(BOOT_FLASH);
     code = FLASH_BootProbe(&flash_id);
     sprintf(detail, "JEDEC=%06lX expected=%06lX; read-only probe E%u",
@@ -276,6 +301,7 @@ void setup(void)
                                          "Dedicated sector program/readback/erase failed");
     } else boot_skip(BOOT_FLASH_WRITE, "Blocked: Flash read-only probe failed");
 
+    /* EEPROM 先检查应答和重复读取，再测试保留字节；写测试负责恢复原来的空白值。 */
     boot_start(BOOT_EEPROM);
     code = EEPROM_BootProbe();
     sprintf(detail, "ACK + repeated read of first 256 bytes; E%u", code);
@@ -289,6 +315,7 @@ void setup(void)
                                          "Reserved byte write/readback/restore failed");
     } else boot_skip(BOOT_EEPROM_WRITE, "Blocked: EEPROM read-only probe failed");
 
+    /* RTC 配置成功后继续验证计数变化，避免仅凭初始化返回值判定时钟正常。 */
     boot_start(BOOT_RTC);
     code = RTC_Config();
     ok = (code == 0U) ? boot_rtc_tick() : 0U;
@@ -296,6 +323,7 @@ void setup(void)
             code, ok ? "advancing" : "failed");
     boot_done(BOOT_RTC, ok ? BOOT_PASS : BOOT_FAIL, detail);
 
+    /* 分别启动两组 ADC/DMA，确认新数据到达且处于 12 位范围；输入精度和行程另行检查。 */
     boot_start(BOOT_ADC1);
     Independent_Dual_ADC1_Init();
     ok = boot_adc_check(DUAL_ADC1_DMA_STREAM, DMA_FLAG_TCIF4,
@@ -311,9 +339,11 @@ void setup(void)
     boot_done(BOOT_ADC3, ok ? BOOT_PASS : BOOT_FAIL,
               "Fresh DMA complete + three 12-bit samples");
 
+    /* 提前开启 GPS 串口 DMA 并初始化解析服务，使后续外设初始化期间也能接收数据。 */
     GPS_USART_Config();
     GPS_DMA_Config();
     gps_service_init();
+    /* MPU 中断配置完成后尝试加载 DMP，失败时限次重试，避免无限阻塞启动。 */
     EXTI_MPU_Config();
     boot_start(BOOT_MPU);
     for(attempt = 0U; attempt < MPU_DMP_BOOT_ATTEMPTS; attempt++) {
@@ -325,6 +355,7 @@ void setup(void)
     sprintf(detail, "Communication + DMP firmware readback; E%u", dmp_result);
     boot_done(BOOT_MPU, imu_dmp_ready ? BOOT_PASS : BOOT_FAIL, detail);
     if(imu_dmp_ready) {
+        /* 固件初始化成功后，再单独等待有效姿态样本，区分设备就绪与实际数据可用。 */
         boot_start(BOOT_MPU_SAMPLE);
         ok = 0U;
         for(attempt = 0U; attempt < 20U; attempt++) {
@@ -337,6 +368,7 @@ void setup(void)
                   "Wait up to 500 ms for a decoded DMP FIFO sample");
     } else boot_skip(BOOT_MPU_SAMPLE, "Blocked: MPU6050 initialization failed");
 
+    /* 触摸控制器通信失败时限次重试；通过只说明版本和配置通信正常。 */
     boot_start(BOOT_TOUCH);
     for(attempt = 0U; attempt < TOUCH_BOOT_ATTEMPTS; attempt++) {
         touch_result = GTP_Init_Panel();
@@ -347,6 +379,7 @@ void setup(void)
             (long)touch_result);
     boot_done(BOOT_TOUCH, touch_result == 0 ? BOOT_PASS : BOOT_FAIL, detail);
 
+    /* SD 检查依次经过卡识别、文件系统挂载和文件读写；前一阶段失败则跳过依赖项。 */
     boot_start(BOOT_SD);
     for(attempt = 0U; attempt < 3U; attempt++) {
         sd_result = SD_Init();
@@ -372,11 +405,14 @@ void setup(void)
         boot_skip(BOOT_SD_WRITE, "Blocked: SD card initialization failed");
     }
 
+    /* 先确认 NRF 的 SPI 寄存器访问正常，待参数加载后再应用频道、功率和速率。 */
     boot_start(BOOT_NRF);
     ok = nrf24l01_check() == 0U;
     boot_done(BOOT_NRF, ok ? BOOT_PASS : BOOT_FAIL,
               "NRF RF_CH complementary-pattern write/read/restore");
 
+    /* Flash 可用时加载或迁移持久化参数；读写失败则退回 RAM 默认值并保留失败状态。
+     * Flash 探测失败时直接使用默认值，不再访问持久化存储。 */
     if(boot_report.items[BOOT_FLASH].state == BOOT_PASS) {
         boot_start(BOOT_PARAMS);
         code = write_default_param();
@@ -389,6 +425,7 @@ void setup(void)
         boot_skip(BOOT_PARAMS, "Flash unavailable; RAM defaults, no persistence access");
     }
     LCD_SetBrightness(param.screenBrightness);
+    /* 无线参数下发后回读验证；频道和速率按驱动限幅规则比较，功率只比较对应配置位。 */
     if(boot_report.items[BOOT_NRF].state == BOOT_PASS) {
         boot_start(BOOT_NRF_CONFIG);
         nrf24l01_apply_settings(param.NRF_Mode, param.NRF_Channel,
@@ -402,12 +439,14 @@ void setup(void)
                   "Channel, power, rate and enabled state compared");
     } else boot_skip(BOOT_NRF_CONFIG, "Blocked: NRF register test failed");
 
+    /* 检查此前开启的 GPS 接收链路，有完整有效语句即可通过，无需等待卫星定位。 */
     boot_start(BOOT_GPS);
     ok = boot_gps_check();
     boot_done(BOOT_GPS, ok ? BOOT_PASS : BOOT_FAIL,
               ok ? "Received complete checksum-valid NMEA; fix not tested" :
                    "No checksum-valid NMEA within receive window");
 
+    /* 启动运行期定时器后同时检查计数和中断活动，确认主循环能够取得任务节拍。 */
     boot_start(BOOT_TIMERS);
     BASIC_TIM6_Configuration(8400-1, 99);
     GENERAL_TIM2_InitConfiguration(65536-1,128-1);
@@ -418,16 +457,20 @@ void setup(void)
     boot_done(BOOT_TIMERS, ok ? BOOT_PASS : BOOT_FAIL,
               "TIM2/3/5/6 counters + TIM5/TIM6 interrupt activity");
 
+    /* 需要实际操作、已知输入或对端设备的项目保留为未测试，留待人工诊断。 */
     boot_skip(BOOT_KEYS, "Hardware Tests: exercise keys and switches");
     boot_skip(BOOT_ANALOG, "Travel/calibration/battery accuracy require known inputs");
     boot_skip(BOOT_OUTPUTS, "Configured; LED/buzzer need physical feedback");
     boot_skip(BOOT_UART, "Configured; no external loopback fixture");
     boot_skip(BOOT_RADIO, "No peer/ACK test; SPI presence is not an RF link test");
+    /* 内部存储检查仅覆盖诊断模块自有 RAM 和 ROM 常量，不代表整片存储完整性。 */
     boot_start(BOOT_INTERNAL_MEMORY);
     boot_done(BOOT_INTERNAL_MEMORY, hardware_memory_test() == HW_PASS ? BOOT_PASS : BOOT_FAIL,
               "Owned 1 KiB RAM walking patterns + ROM constants; not whole-chip integrity");
 }
 
+/* 显示并打印启动结果；失败或检查未完成时等待用户通过 OK 键确认，
+ * 其他结果短暂停留后继续进入菜单。 */
 static void boot_show_result(void)
 {
     uint8_t item;
@@ -441,7 +484,7 @@ static void boot_show_result(void)
                boot_state_name(boot_report.items[item].state), boot_item_names[item],
                boot_report.items[item].detail);
 
-    /* 故障结果保持显示，直到检测到一次新的、经过消抖的实体 OK 按下事件。
+    /* 故障结果保持显示，直到完成一次新的、经过消抖的实体 OK 按下并松开。
      * 上电时已按住的按键不能关闭结果页。 */
     if(boot_report_outcome(&boot_report) == BOOT_FAILED ||
        boot_report_outcome(&boot_report) == BOOT_INCOMPLETE) {
@@ -461,7 +504,8 @@ static void boot_show_result(void)
 }
 
 /* 执行任务前，以原子操作取出并清除合并后的待处理事件；
- * 处理过程中到来的新中断仍保留为待处理状态，留给下一轮循环。 */
+ * 处理过程中到来的新中断仍保留为待处理状态，留给下一轮循环。
+ * 返回原待处理值，并恢复调用前的中断屏蔽状态。 */
 static uint8_t take_tick(volatile uint8_t *pending)
 {
     uint32_t mask = __get_PRIMASK();
@@ -473,7 +517,8 @@ static uint8_t take_tick(volatile uint8_t *pending)
     return ready;
 }
 
-/* 文件解码和目录扫描也调用此服务，避免长操作饿死按键、通信和传感器任务。
+/* 主循环的协作调度入口：先服务控制链路，再处理按键、触摸、GPS 和周期采样。
+ * 文件解码和目录扫描也调用此服务，避免长操作饿死按键、通信和传感器任务。
  * 此处不绘制页面、不进入菜单，也不访问文件系统，防止重入。 */
 static void app_background_service(void)
 {
@@ -494,6 +539,7 @@ static void app_background_service(void)
     }
     if(take_tick(&finish_100hz)) {
         get_tick_count(&now);
+        /* DMP 就绪时，单次取帧失败保留上次姿态，连续一秒无样本才撤销有效标志。 */
         if(imu_dmp_ready && mpu_dmp_get_data(&pitch,&roll,&yaw) == 0U) {
             imu_data_valid = 1U;
             imu_last_sample_ms = now;
@@ -504,6 +550,8 @@ static void app_background_service(void)
     if(take_tick(&finish_10hz)) RTC_TimeAndDate_Show();
 }
 
+/* 应用入口：完成启动检查与结果确认，初始化菜单和控制链路的启动准入条件，
+ * 随后循环执行后台服务与菜单处理。 */
 int main(void)
 {
     setup();
@@ -513,6 +561,7 @@ int main(void)
     ILI9806G_Clear(0,0,LCD_X_LENGTH,LCD_Y_LENGTH);
     menu_init();
     menu_set_background_service(app_background_service);
+    /* 菜单可在启动检查失败后继续使用，但运动使能必须通过这些关键项目的检查。 */
     control_link_init(
         boot_report.items[BOOT_CLOCK].state == BOOT_PASS &&
         boot_report.items[BOOT_INTERNAL_MEMORY].state == BOOT_PASS &&

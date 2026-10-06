@@ -18,14 +18,18 @@ extern volatile uint16_t ADC3_Value[NUM_OF_ADC3CHANNEL];
 extern volatile param_Config param;
 
 #define DIAG_LINE_CACHE_COUNT 14U
+/* 每个缓存槽保存一条诊断文本，以 y 定位；页面切换时整体失效，避免跨页误复用。 */
 typedef struct {
     uint16_t y;
     uint8_t valid;
     char text[96];
 } DiagLineCache;
 static DiagLineCache diag_line_cache[DIAG_LINE_CACHE_COUNT];
+/* BeginPage 后延迟到首次按键轮询/释放等待时 EndPage，使标题和初始内容一并显示。 */
 static uint8_t diag_transition_pending;
+/* levels 为消抖后的逻辑电平，counts 累计与该电平不同的连续采样次数。 */
 static uint8_t diag_key_levels[4], diag_key_counts[4];
+/* 左右键分别记录按下起点与上次连发时刻；started 区分首次连发和后续间隔。 */
 typedef struct {
     uint32_t pressed_ms, repeated_ms;
     uint8_t active, started;
@@ -179,6 +183,7 @@ void diag_line(uint16_t y, const char *text)
     uint16_t width = 0U;
     uint8_t index, slot = 0U;
 
+    /* 按纵坐标缓存已显示文本，跳过未变化的行，减少诊断轮询中的 LCD 写入。 */
     for(index = 0U; index < DIAG_LINE_CACHE_COUNT; index++) {
         if(diag_line_cache[index].valid && diag_line_cache[index].y == y) {
             if(strcmp(diag_line_cache[index].text, text) == 0) return;
@@ -211,6 +216,7 @@ void diag_ascii_line(uint16_t y, const char *text)
     diag_ui_ascii(16U, y, DIAG_UI_BLACK, DIAG_UI_WHITE, text);
 }
 
+/* 显示人工确认提示并等候新按键；先等待旧按键释放，OK 返回 1，BACK 返回 0。 */
 static uint8_t confirm(const char *message)
 {
     int key;
@@ -225,6 +231,7 @@ static uint8_t confirm(const char *message)
     }
 }
 
+/* 依次呈现五种纯色和网格，由操作者检查均匀性与几何对齐；任一项未确认即失败。 */
 static HwResult lcd_test(void)
 {
     static const uint16_t colors[] = {RED, GREEN, BLUE, WHITE, BLACK};
@@ -246,6 +253,7 @@ static HwResult lcd_test(void)
     return HW_PASS;
 }
 
+/* 检查四个菜单键与六路 DCH 的高低状态；长按 BACK 约 1 s 可取消，60 s 未完成为失败。 */
 static HwResult keys_test(void)
 {
     uint8_t seen[10] = {0}, previous[4] = {0}, stable[4] = {0};
@@ -255,6 +263,7 @@ static HwResult keys_test(void)
     diag_line(64U, "依次按下/松开菜单键；切换全部 DCH 开关。");
     diag_line(96U, "长按 BACK 1秒取消；限时60秒。");
     diag_release();
+    /* 每个输入分别记录稳定的低、高电平；两种状态均出现才算完成该通道检查。 */
     for(tick = 0; tick < 6000U; tick++) {
         complete = 0U;
         digital_channel_update_10ms();
@@ -287,6 +296,7 @@ static HwResult keys_test(void)
     return HW_FAIL;
 }
 
+/* 九路模拟输入均须稳定到达量程两端；电池通道另测，BACK 可取消，90 s 未完成为失败。 */
 static HwResult analog_test(void)
 {
     uint16_t minimum[9], maximum[9] = {0}, tick, value;
@@ -302,6 +312,7 @@ static HwResult analog_test(void)
             value = i < 6U ? ADC1_Value[i] : ADC3_Value[i - 6U];
             if(value < minimum[i]) minimum[i] = value;
             if(value > maximum[i]) maximum[i] = value;
+            /* 行程端点须连续命中 3 次才记为到达，滤掉单次采样尖峰造成的误通过。 */
             low[i] = value <= 410U ? (low[i] < 3U ? low[i] + 1U : 3U) : 0U;
             high[i] = value >= 3685U ? (high[i] < 3U ? high[i] + 1U : 3U) : 0U;
             if(low[i] >= 3U) seen[i] |= 1U;
@@ -321,6 +332,7 @@ static HwResult analog_test(void)
     return HW_FAIL;
 }
 
+/* 用户输入万用表参考值后平均 32 次 ADC 样本，再应用电压校准系数并按 ±150 mV 判定。 */
 static HwResult battery_test(void)
 {
     uint32_t sum = 0U, measured, reference = 3700U;
@@ -351,6 +363,7 @@ static HwResult battery_test(void)
     return measured + 150U >= reference && measured <= reference + 150U ? HW_PASS : HW_FAIL;
 }
 
+/* 临时接管 PA15，以约 2 kHz 方波发声 250 ms；调用前须停止常规按键音。 */
 static void buzzer_tone(void)
 {
     GPIO_InitTypeDef config;
@@ -369,6 +382,7 @@ static void buzzer_tone(void)
         GPIO_SetBits(GPIOA, GPIO_Pin_15); Delay_us(250U);
         GPIO_ResetBits(GPIOA, GPIO_Pin_15); Delay_us(250U);
     }
+    /* 发声后只恢复 PA15 对应的配置位和输出电平，保留 GPIOA 其他引脚当前状态。 */
     GPIO_WriteBit(GPIOA, GPIO_Pin_15, old ? Bit_SET : Bit_RESET);
     GPIOA->OTYPER = (GPIOA->OTYPER & ~GPIO_Pin_15) | (type & GPIO_Pin_15);
     GPIOA->OSPEEDR = (GPIOA->OSPEEDR & ~(3UL << 30)) | (speed & (3UL << 30));
@@ -376,6 +390,7 @@ static void buzzer_tone(void)
     GPIOA->MODER = (GPIOA->MODER & ~(3UL << 30)) | (mode & (3UL << 30));
 }
 
+/* 人工确认两路 LED 与蜂鸣器输出；确认失败统一退出，并恢复 LED 原有电平。 */
 static HwResult outputs_test(void)
 {
     uint32_t led1 = LED1_GPIO_PORT->ODR & LED1_PIN, led2 = LED2_GPIO_PORT->ODR & LED2_PIN;
@@ -409,6 +424,7 @@ static uint8_t diagnostics_state_color(uint8_t state)
     return DIAG_UI_BLACK;
 }
 
+/* item 为测试绝对索引，first_visible 为窗口起点；状态值按 HwResult+1 转为文字和颜色。 */
 static void diagnostics_menu_draw_row(const char * const *names,
                                       const uint8_t *states, uint8_t item,
                                       uint8_t selected, uint8_t first_visible)
@@ -439,6 +455,7 @@ static void diagnostics_menu_mark_row(uint8_t item, uint8_t first_visible,
                   selected ? DIAG_UI_BLUE : DIAG_UI_BLACK);
 }
 
+/* 列表固定展示六项；滚动时重绘可见窗口，同页导航只修改选择边框。 */
 static void diagnostics_menu_draw_window(const char * const *names,
                                          const uint8_t *states,
                                          uint8_t selected,
@@ -457,6 +474,7 @@ static void diagnostics_menu_draw_window(const char * const *names,
     }
 }
 
+/* 首次进入或测试返回时重建列表页，绘制窗口和操作提示后由 diag_release 提交显示。 */
 static void diagnostics_menu_draw(const char * const *names,
                                   const uint8_t *states, uint8_t selected,
                                   uint8_t first_visible)
@@ -487,6 +505,7 @@ static void diagnostics_menu_draw(const char * const *names,
                  "EEPROM / Flash / SD 卡：开机自动检测");
 }
 
+/* 前台串行执行选中的人工测试；返回列表时保留选择位置及本次上电的测试结果。 */
 void diagnostics_menu(void)
 {
     static const char * const names[TEST_COUNT] = {"LCD 颜色/网格", "按键/DCH开关",
